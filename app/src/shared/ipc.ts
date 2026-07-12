@@ -11,6 +11,7 @@ import type {
   TrackerRow,
   V1ImportSummary
 } from './types'
+import type { ProfileFile } from './profile'
 
 /** invoke/handle channels: request → response (response is wrapped in IpcResult by the registry). */
 export interface IpcInvokeContract {
@@ -77,6 +78,16 @@ export interface IpcInvokeContract {
     req: { filters?: { name: string; extensions: string[] }[] }
     res: { path: string | null }
   }
+  'profile:get': { req: void; res: ProfileFile | null }
+  'profile:save': { req: { profile: ProfileFile }; res: ProfileFile }
+  'profile:draft': {
+    req: { runId: string }
+    res: { draft: ProfileFile | null; error: string | null }
+  }
+  'onboard:start': {
+    req: { source: 'v1-import' | 'text' | 'files'; text?: string; files?: string[] }
+    res: RunMeta
+  }
   'candidates:list': { req: void; res: CandidateJob[] }
   'candidates:accept': { req: { id: string }; res: { candidate: CandidateJob; run: RunMeta } }
   'candidates:reject': { req: { id: string }; res: void }
@@ -137,6 +148,10 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'workspace:create',
   'workspace:importV1',
   'app:pickFile',
+  'profile:get',
+  'profile:save',
+  'profile:draft',
+  'onboard:start',
   'app:showItem',
   'app:openFolder',
   'app:openExternal',

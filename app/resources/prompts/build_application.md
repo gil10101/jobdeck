@@ -1,12 +1,13 @@
-# Build ONE job-application folder for Gil Lu
+# Build ONE job-application folder for {{CANDIDATE_NAME}}
 
-Repo root: `{{REPO_ROOT}}` (work ONLY inside it). Today: {{TODAY_ISO}}.
-You are given the full job-posting text below. Build a complete, tailored application folder matching the quality of the completed example, then write a machine-readable report.
+Workspace root: `{{REPO_ROOT}}` (cwd — work ONLY inside it). Today: {{TODAY_ISO}}.
+Build a complete, tailored application folder from the posting below, then write a machine-readable report. Everything you need to know about the candidate is IN THIS PROMPT — do not look for profile files.
 
-- SLUG (folder name — use EXACTLY this, do not invent your own): `{{SLUG}}`
+- SLUG (folder name — use EXACTLY this): `{{SLUG}}`
 - Apply URL: {{APPLY_URL}}
 - Company hint: {{COMPANY_HINT}} · Role hint: {{ROLE_HINT}}
 - pdflatex: `{{PDFLATEX}}` (run from inside the folder, `-interaction=nonstopmode`, TWICE per document)
+- Output file stem: `{{FILE_BASENAME}}` → `{{FILE_BASENAME}}_Resume.tex`, `{{FILE_BASENAME}}_Cover_Letter.tex`
 
 ## THE JOB POSTING (provided in full — do NOT fetch it from a job board; you MAY WebFetch the apply URL only to confirm details)
 <posting>
@@ -15,43 +16,55 @@ You are given the full job-posting text below. Build a complete, tailored applic
 
 {{IMAGES_SECTION}}
 
-## STEP 1 — Learn the pattern (Read these first)
-- `cv/main_example.tex` — Gil's master résumé (article-based, 1 page, ATS). Use its exact preamble/macros/`glyphtounicode` block.
-- `{{EXAMPLE_FOLDER}}/` — a COMPLETED example. Read `Gil_Lu_Resume.tex`, `Gil_Lu_Cover_Letter.tex`, `application_answers.md`, `job_posting.md`. Replicate this structure and quality.
-- `.claude/skills/job-application-assistant/05-cv-templates.md` — per-role tailoring rules (skills-by-role, projects-by-role).
-- `CLAUDE.md` — Gil's full profile + rules (Candidate Profile, Job Search Configuration).
+{{PROFILE_MD}}
 
-## STEP 2 — Create folder `documents/applications/{{SLUG}}/`
+{{TAILORING_RULES_MD}}
+
+## STEP 1 — Learn the document pattern
+- Read the master résumé: `{{MASTER_RESUME_PATH}}` — copy its preamble/macros EXACTLY (including any `glyphtounicode` ATS block).
+- {{EXAMPLE_FOLDER_LINE}}
+
+## STEP 2 — Create folder `applications/{{SLUG}}/`
 All files go in this folder. Do NOT create files anywhere else.
 
-## STEP 3 — `Gil_Lu_Resume.tex` (tailored for THIS posting)
-- Copy the master's preamble/macros EXACTLY (incl. the `\ifdefined\pdfgentounicode` ATS block, lmodern).
-- Tailor Skills + Projects to the role per `05-cv-templates.md` (Data Analyst → Languages / Data Visualization & Reporting / Analytics & Statistics / Databases & Data Pipelines / Certifications; Data Engineer → lead with pipelines/cloud; adjust honestly by role type).
-- Projects: pick the 2-3 most relevant (Churn / Orchid / Bertram; Orchid wording must match the master exactly: "for students and data analysts", "warehouses such as Snowflake, BigQuery, and PostgreSQL", AI assistant that "reads and writes SQL and Python").
-- Experience: NYC Aging (Feb 2026 -- May 2026) + MetaBronx (+ Teacher Aide at A+ Academy ONLY for education/K-12/school-setting roles). **Reword bullets to mirror THIS posting's exact terms** where truthfully applicable. Keep all numbers (86.9%, 7,000+, 40+).
-- **HARD RULES:** never fabricate a skill/experience Gil lacks; **NO em-dashes** — the characters `—` and `---` must NOT appear anywhere (use commas/periods; date ranges use `--`); exactly 1 page.
+## STEP 3 — `{{FILE_BASENAME}}_Resume.tex` (tailored for THIS posting)
+- Apply the TAILORING RULES above: pick the matching role profile, order skills/projects accordingly, and pick the 2-3 most relevant projects (respect every INCLUSION RULE, VERBATIM REQUIRED phrase, and FRAMING note in the profile).
+- Reword experience/project bullets to mirror THIS posting's exact terms where truthfully applicable. Keep every metric exactly as stated in the profile.
 
 ## STEP 4 — Compile & verify the résumé
-From inside the folder run pdflatex TWICE. Confirm the log says `(1 page`. If 2 pages, trim the least-relevant bullet and recompile until exactly 1 page (and if badly underfull, add a truthful project/cert). Delete `.aux/.log/.out`. Grep the `.tex` to confirm no `---` or `—`.
+From inside the folder run pdflatex TWICE. Confirm the log says `(1 page`. If 2 pages, trim the least-relevant bullet and recompile until exactly 1 page (if badly underfull, add truthful profile content). Delete `.aux/.log/.out`. Grep the `.tex` to confirm no `---` or `—`.
 
-## STEP 5 — `Gil_Lu_Cover_Letter.tex` (ALWAYS — every application gets one)
-Copy the example's cover-letter model (self-contained article, same font as the résumé): **formal register** (no casual sign-offs; close with "I would welcome the opportunity to discuss how I can contribute to [company]"), ~250-280 words, **no em-dashes**, two concrete stories (churn 86.9% win + NYC Aging data-request process fix) plus the Orchid differentiator, mirror a couple of the posting's phrases. Compile with pdflatex TWICE to exactly 1 page (signature must fit). Delete aux files.
+## STEP 5 — `{{FILE_BASENAME}}_Cover_Letter.tex` (ALWAYS — every application gets one)
+Self-contained article document matching the résumé's font.
+{{COVER_LETTER_STYLE_MD}}
+Stories to build on:
+{{COVER_LETTER_STORIES_MD}}
+Compile with pdflatex TWICE to exactly 1 page (signature must fit). Delete aux files.
 
 ## STEP 6 — `application_answers.md`
-Copy the example's structure exactly: H1 `# Application Answers - <Company>, <Role>`, `**Apply at:**` line, `## Copy-paste fields` pipe table, tailored `## "Why this role?"` (3-4 sentences, specific, no em-dashes), 2 likely screening Q&A, trailing `_Status: NOT yet submitted..._` line.
-Gil's saved info: email gillu1212@gmail.com; phone 929-427-4470; Brooklyn, NY 11220; linkedin.com/in/gil-lu; github.com/gil10101; gillu.me; **U.S. citizen — no sponsorship**; **desired salary $60,000**; **available immediately (full-time/part-time/internship)**; M.S. Information Systems Data Analytics (CUNY Baruch, expected Aug 2026); B.S. Computer Science (CUNY Brooklyn College, May 2025).
+Structure: H1 `# Application Answers - <Company>, <Role>`, a `**Apply at:**` line, `## Copy-paste fields` as a 2-column pipe table, a tailored `## "Why this role?"` (3-4 sentences, specific), 2 likely screening Q&A, trailing `_Status: NOT yet submitted..._` line.
+{{ANSWERS_INFO_MD}}
 
 ## STEP 7 — `job_posting.md`
-Summarize the posting: H1 `# <Role> - <Company>`, then a bulleted metadata block (`- **Company:**`, `- **Location:**`, `- **Salary:**`, `- **Source / apply:**`, `- **Captured:** {{TODAY_ISO}}`), then `## Responsibilities`, `## Required qualifications`, and `## Fit note (honest)` — call out genuine gaps explicitly; never stuff keywords.
+Summarize the posting: H1 `# <Role> - <Company>`, bulleted metadata block (`- **Company:**`, `- **Location:**`, `- **Salary:**`, `- **Source / apply:**`, `- **Captured:** {{TODAY_ISO}}`), then `## Responsibilities`, `## Required qualifications`, and `## Fit note (honest)` — name genuine gaps explicitly; never stuff keywords.
 
-## STEP 8 — NYC city-agency roles only
-If the posting is from cityjobs.nyc.gov (or clearly an NYC city agency), also write `message_to_hiring_team.md` (~110-130 words, formal, no em-dashes, references the attached resume and cover letter).
+## STEP 8 — Candidate-specific extra rules
+{{EXTRA_RULES_MD}}
 
-## STEP 9 — `report.json` (REQUIRED — the app reads this to accept the build)
-Write `documents/applications/{{SLUG}}/report.json` as VALID JSON (no comments, no markdown fences) exactly matching this schema:
+## STEP 9 — Reviewer self-pass (adversarial, REQUIRED)
+Re-read the posting and your drafts as a skeptical reviewer:
+1. Build a keyword taxonomy from the posting: hard skills, tools, domain terms, soft signals.
+2. Classify each keyword: `covered` (already in the résumé truthfully) / `edited-in` (candidate truthfully has it — apply an exact old→new edit to surface it, then recompile) / `gap-honest` (candidate lacks it — leave visible, NEVER stuff).
+3. Verify every company-specific claim in the cover letter is supported by the posting or a WebFetch of the apply URL.
+
+## STEP 10 — ATS text-layer gate
+{{PDFTOTEXT_LINE}}
+
+## STEP 11 — `report.json` (REQUIRED — the app accepts the build only if this validates)
+Write `applications/{{SLUG}}/report.json` as VALID JSON (no fences):
 ```
 {
-  "schema": "app.report.v1",
+  "schema": "app.report.v2",
   "slug": "{{SLUG}}",
   "position": "<exact role title>",
   "company": "<company name>",
@@ -66,20 +79,24 @@ Write `documents/applications/{{SLUG}}/report.json` as VALID JSON (no comments, 
   "cityjobsMessage": false,
   "fitNote": "<one line, honest, gaps named>",
   "problems": [],
+  "keywordCoverage": [
+    { "keyword": "<from step 9>", "status": "covered|edited-in|gap-honest", "where": "<résumé section or 'absent'>" }
+  ],
+  "atsCheck": "passed|skipped|<problem description>",
   "files": {
-    "resumePdf": "Gil_Lu_Resume.pdf",
-    "coverLetterPdf": "Gil_Lu_Cover_Letter.pdf",
+    "resumePdf": "{{FILE_BASENAME}}_Resume.pdf",
+    "coverLetterPdf": "{{FILE_BASENAME}}_Cover_Letter.pdf",
     "answers": "application_answers.md",
     "posting": "job_posting.md"
   }
 }
 ```
-Report page counts and the em-dash check TRUTHFULLY (the app re-verifies files on disk). List any problems you hit in `problems`.
+Report page counts and checks TRUTHFULLY (the app re-verifies files on disk).
 
 ## DO NOT
-- Do NOT touch `applications.xlsx` (the app owns the tracker).
-- Do NOT touch anything in `documents/applications/TODO/` (the app renames processed files).
-- Do NOT create files outside `documents/applications/{{SLUG}}/`.
+- Do NOT touch anything in `applications/TODO/` (the app renames processed files).
+- Do NOT create files outside `applications/{{SLUG}}/`.
+- Do NOT invent skills, experience, metrics, or company facts.
 
 ## FINALLY
 Reply with a 6-line summary: folder, résumé pages, cover-letter pages, no_em_dashes, salary, one-line fit note.

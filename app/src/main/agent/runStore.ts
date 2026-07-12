@@ -43,11 +43,21 @@ export class RunStore {
     }
   }
 
+  /** Audit trail: the exact filled prompt the agent received. */
+  savePrompt(runId: string, prompt: string): void {
+    try {
+      fs.writeFileSync(path.join(RUNS_DIR, `${runId}.prompt.md`), prompt, 'utf-8')
+    } catch {
+      /* ignore */
+    }
+  }
+
   /** Fill fields added after first release so old metas still render. */
   private migrate(m: RunMeta): RunMeta {
     m.kind ??= 'build'
     m.summary ??= null
     m.problems ??= null
+    m.resultPath ??= null
     // Legacy scouts baked the problems list into the summary — split it out.
     if (m.summary && m.summary.includes(' · problems: ')) {
       const idx = m.summary.indexOf(' · problems: ')

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { AppSettings } from '@shared/types'
 import { call } from '../api'
 import { useApp } from '../store'
+import ProfilePanel from './settings/ProfilePanel'
 
 function Row({
   label,
@@ -111,6 +112,8 @@ export default function SettingsView(): JSX.Element {
     <div className="h-full overflow-auto">
       <div className="mx-auto max-w-2xl p-6">
         <h1 className="text-sm font-semibold text-gray-100">Settings</h1>
+
+        <ProfilePanel />
 
         <div className="panel mt-4 px-4 py-1">
           <div className="pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">

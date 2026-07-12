@@ -54,6 +54,9 @@ export interface ReportJson {
   fitNote: string
   problems: string[]
   files: Record<string, string>
+  /** app.report.v2 additions (absent on v1 reports). */
+  keywordCoverage?: { keyword: string; status: string; where: string }[] | null
+  atsCheck?: string | null
 }
 
 export interface IntakeItem {
@@ -74,7 +77,7 @@ export interface IntakeItem {
 }
 
 export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
-export type RunKind = 'build' | 'scout' | 'interview'
+export type RunKind = 'build' | 'scout' | 'interview' | 'onboard' | 'master'
 
 export interface RunMeta {
   id: string
@@ -91,6 +94,8 @@ export interface RunMeta {
   durationMs: number | null
   numTurns: number | null
   folderPath: string | null
+  /** Kind-specific output artifact (onboard: the profile draft json path). */
+  resultPath: string | null
   startedAt: string
   endedAt: string | null
 }

@@ -6,17 +6,20 @@ import {
   APPLICATIONS_DIR,
   REPO_ROOT,
   SCOUT_DIR,
+  TMP_DIR,
   buildSlug,
   toRel,
   todayMMDD,
   uniqueSlug
 } from '../paths'
 import { parseReport, validateReport } from '../parsers/report'
+import { validateProfile } from '../profile/profileSchema'
+import { loadProfile } from '../profile/profileStore'
 import type { Store } from '../store/Store'
 import type { TrackerRepo } from '../store/trackerRepo'
 import type { TodoWatcher } from '../fsops/TodoWatcher'
 import { mapMessage, stamp, type PartialRunEvent } from './eventMap'
-import { buildInterviewPrompt, buildPrompt, buildScoutPrompt } from './prompt'
+import { buildInterviewPrompt, buildOnboardPrompt, buildPrompt, buildScoutPrompt } from './prompt'
 import { RunStore } from './runStore'
 
 export interface RunInput {
@@ -33,6 +36,9 @@ export interface RunInput {
   rowFolderRel?: string
   rowPosition?: string
   rowCompany?: string
+  /** Onboard runs: profile sources. */
+  sourceFiles?: string[]
+  sourceText?: string
 }
 
 interface ActiveRun {
@@ -82,6 +88,9 @@ export class AgentRunner {
       slug = `scout_${todayMMDD()}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`
     } else if (kind === 'interview') {
       slug = `interview_${path.basename(input.rowFolderRel ?? 'application')}`
+    } else if (kind === 'onboard') {
+      const now = new Date()
+      slug = `onboard_${todayMMDD()}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`
     } else {
       slug = uniqueSlug(buildSlug(input.companyHint ?? '', input.roleHint ?? '', todayMMDD()))
     }
@@ -98,6 +107,7 @@ export class AgentRunner {
       durationMs: null,
       numTurns: null,
       folderPath: null,
+      resultPath: null,
       startedAt: new Date().toISOString(),
       endedAt: null
     }
@@ -224,30 +234,58 @@ export class AgentRunner {
     return [...out].slice(0, 150)
   }
 
+  /** Build the kind-specific prompt; throws a user-facing error when prerequisites are missing. */
+  private buildRunPrompt(run: ActiveRun): string {
+    const kind = run.meta.kind
+    if (kind === 'onboard') {
+      return buildOnboardPrompt({
+        sourceFiles: run.input.sourceFiles ?? [],
+        sourceText: run.input.sourceText ?? '',
+        outputPath: path.join(TMP_DIR, 'profile.draft.json')
+      })
+    }
+    const profile = loadProfile()
+    if (kind === 'scout') {
+      return buildScoutPrompt(
+        {
+          instructions: run.input.instructions ?? '',
+          excludeList: this.excludeList(),
+          outputPath: path.join(SCOUT_DIR, `${run.meta.id}.candidates.json`)
+        },
+        profile
+      )
+    }
+    if (!profile) {
+      throw new Error('no candidate profile yet — run onboarding first (Settings → Profile)')
+    }
+    if (kind === 'interview') {
+      return buildInterviewPrompt(
+        {
+          folderRel: run.input.rowFolderRel ?? '',
+          position: run.input.rowPosition ?? '',
+          company: run.input.rowCompany ?? ''
+        },
+        profile
+      )
+    }
+    return buildPrompt(
+      {
+        slug: run.meta.slug,
+        postingText: run.input.postingText ?? '',
+        imagePaths: run.input.imagePaths ?? [],
+        applyUrl: run.input.applyUrl ?? null,
+        companyHint: run.input.companyHint ?? '',
+        roleHint: run.input.roleHint ?? ''
+      },
+      profile
+    )
+  }
+
   private async execute(run: ActiveRun): Promise<void> {
     this.setStatus(run, 'running')
     try {
-      const prompt =
-        run.meta.kind === 'scout'
-          ? buildScoutPrompt({
-              instructions: run.input.instructions ?? '',
-              excludeList: this.excludeList(),
-              outputPath: path.join(SCOUT_DIR, `${run.meta.id}.candidates.json`)
-            })
-          : run.meta.kind === 'interview'
-            ? buildInterviewPrompt({
-                folderRel: run.input.rowFolderRel ?? '',
-                position: run.input.rowPosition ?? '',
-                company: run.input.rowCompany ?? ''
-              })
-            : buildPrompt({
-                slug: run.meta.slug,
-                postingText: run.input.postingText ?? '',
-                imagePaths: run.input.imagePaths ?? [],
-                applyUrl: run.input.applyUrl ?? null,
-                companyHint: run.input.companyHint ?? '',
-                roleHint: run.input.roleHint ?? ''
-              })
+      const prompt = this.buildRunPrompt(run)
+      this.runStore.savePrompt(run.meta.id, prompt) // audit: exactly what the agent saw
 
       const { query } = await import('@anthropic-ai/claude-agent-sdk')
       const settings = this.store.state.settings
@@ -257,7 +295,9 @@ export class AgentRunner {
         options: {
           cwd: REPO_ROOT,
           systemPrompt: { type: 'preset', preset: 'claude_code' },
-          settingSources: ['project'],
+          // Explicitly NO settings sources: prompts are fully self-contained in
+          // v2 (no CLAUDE.md dependency) — provable by grepping the saved prompt.
+          settingSources: [],
           permissionMode: 'bypassPermissions',
           maxTurns: settings.maxTurns,
           abortController: run.controller,
@@ -333,6 +373,10 @@ export class AgentRunner {
       this.finalizeScout(run)
       return
     }
+    if (run.meta.kind === 'onboard') {
+      this.finalizeOnboard(run)
+      return
+    }
     if (run.meta.kind === 'interview') {
       const prepPath = path.join(REPO_ROOT, ...(run.input.rowFolderRel ?? '').split('/'), 'interview_prep.md')
       if (!fs.existsSync(prepPath)) {
@@ -381,6 +425,38 @@ export class AgentRunner {
       this.todo.markTodoDone(intake.todoFileName)
     }
     this.setIntakeState(run.meta.intakeId, 'built')
+    this.finish(run, 'succeeded')
+  }
+
+  /** Validate the profile draft the onboard agent wrote — reviewed by a human, never auto-saved. */
+  private finalizeOnboard(run: ActiveRun): void {
+    const draftPath = path.join(TMP_DIR, 'profile.draft.json')
+    if (!fs.existsSync(draftPath)) {
+      this.finish(run, 'failed', 'onboarding agent finished but wrote no profile draft')
+      return
+    }
+    let raw = ''
+    try {
+      raw = fs.readFileSync(draftPath, 'utf-8').trim()
+      const fence = raw.match(/^```(?:json)?\s*([\s\S]*?)```\s*$/)
+      if (fence) raw = fence[1].trim()
+      JSON.parse(raw)
+    } catch (err) {
+      this.finish(run, 'failed', `profile draft is not valid JSON: ${String(err)}`)
+      return
+    }
+    const result = validateProfile(JSON.parse(raw))
+    if (!result.ok) {
+      run.meta.problems = result.problems
+      this.finish(run, 'failed', `profile draft incomplete: ${result.problems.join('; ')}`)
+      return
+    }
+    // Persist the healed draft so the review UI loads a clean object.
+    fs.writeFileSync(draftPath, JSON.stringify(result.profile, null, 2), 'utf-8')
+    run.meta.resultPath = draftPath
+    const gaps = result.profile.gaps.length
+    run.meta.summary = `profile draft ready (${gaps} gap${gaps === 1 ? '' : 's'} to review)`
+    run.meta.problems = result.healed.length ? result.healed : null
     this.finish(run, 'succeeded')
   }
 

@@ -13,7 +13,10 @@ import { INTAKE_IMAGES_DIR, toAbs, toRel } from './paths'
 import { listLibrary, readLibraryFile } from './fsops/library'
 import { recompileDoc } from './latex/recompile'
 import { getBoardsStatus, setJobrightCreds, testJobright } from './boards/boardsBridge'
-import { APP_DATA_DIR, REPO_ROOT } from './paths'
+import { APP_DATA_DIR, ONBOARDING_DIR, REPO_ROOT } from './paths'
+import { validateProfile } from './profile/profileSchema'
+import { loadProfile, saveProfile } from './profile/profileStore'
+import type { ProfileFile } from '@shared/profile'
 import type { AgentRunner } from './agent/AgentRunner'
 import type { Store } from './store/Store'
 import type { TrackerRepo } from './store/trackerRepo'
@@ -196,9 +199,46 @@ export function registerIpc(services: Services): void {
     })
   })
 
-  // ---- library: repo reference docs, no Explorer needed ----
+  // ---- library: workspace reference docs, no Explorer needed ----
   handle('library:list', () => listLibrary())
   handle('library:read', ({ relPath }) => readLibraryFile(relPath))
+
+  // ---- profile (v2 core) ----
+  handle('profile:get', () => loadProfile())
+  handle('profile:save', ({ profile }) => {
+    const result = validateProfile(profile)
+    if (!result.ok) throw new Error(`profile invalid: ${result.problems.join('; ')}`)
+    return saveProfile(result.profile)
+  })
+  handle('profile:draft', ({ runId }) => {
+    const meta = runner.get(runId).meta
+    if (!meta.resultPath || !fs.existsSync(meta.resultPath)) {
+      return { draft: null, error: 'no draft file for this run' }
+    }
+    try {
+      const draft = JSON.parse(fs.readFileSync(meta.resultPath, 'utf-8')) as ProfileFile
+      return { draft, error: null }
+    } catch (err) {
+      return { draft: null, error: String(err) }
+    }
+  })
+  handle('onboard:start', ({ source, text, files }) => {
+    let sourceFiles: string[] = []
+    if (source === 'v1-import') {
+      const stage = path.join(ONBOARDING_DIR, 'v1-import')
+      if (!fs.existsSync(stage)) {
+        throw new Error('no v1-import sources staged — use "Import from v1" first')
+      }
+      sourceFiles = fs
+        .readdirSync(stage)
+        .filter((f) => !f.startsWith('.'))
+        .map((f) => path.join(stage, f))
+    } else if (source === 'files') {
+      sourceFiles = (files ?? []).filter((f) => fs.existsSync(f))
+      if (!sourceFiles.length && !text?.trim()) throw new Error('no readable source files')
+    }
+    return runner.start({ kind: 'onboard', sourceFiles, sourceText: text ?? '' })
+  })
 
   // ---- recompile (edit .tex → rebuild PDF, no agent) ----
   handle('detail:recompile', async ({ rowId, doc }) => {
