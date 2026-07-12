@@ -6,7 +6,7 @@ import {
   useReactTable,
   type SortingState
 } from '@tanstack/react-table'
-import type { StatusKey } from '@shared/types'
+import type { StatusKey, TrackerRow } from '@shared/types'
 import { STATUS_COLOR_STYLES, STATUS_LABELS, statusColor } from '@shared/status'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { call } from '../api'
@@ -31,10 +31,11 @@ export default function TrackerView(): JSX.Element {
   const [sorting, setSorting] = useState<SortingState>([])
   const [confirmImport, setConfirmImport] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<TrackerRow | null>(null)
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    return rows.filter((r) => {
+    const matched = rows.filter((r) => {
       if (statusFilter !== 'all') {
         if (statusFilter === 'rejected') {
           if (r.statusKey !== 'rejected' && r.statusKey !== 'withdrawn') return false
@@ -47,7 +48,21 @@ export default function TrackerView(): JSX.Element {
         r.location.toLowerCase().includes(q)
       )
     })
+    // Default order: newest batch first (grouped by the day rows were added).
+    return [...matched].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
   }, [rows, search, statusFilter])
+
+  /** Row ids that start a new intake batch (calendar day) — get a 2px divider. */
+  const batchStarts = useMemo(() => {
+    const starts = new Set<string>()
+    let prevDay: string | null = null
+    for (const r of filtered) {
+      const day = (r.createdAt ?? '').slice(0, 10)
+      if (prevDay !== null && day !== prevDay) starts.add(r.id)
+      prevDay = day
+    }
+    return starts
+  }, [filtered])
 
   const columns = useMemo(() => buildColumns(), [])
   const table = useReactTable({
@@ -56,8 +71,24 @@ export default function TrackerView(): JSX.Element {
     state: { sorting },
     onSortingChange: setSorting,
     getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel()
+    getSortedRowModel: getSortedRowModel(),
+    meta: { requestDelete: (row: TrackerRow) => setDeleteTarget(row) }
   })
+
+  const doDelete = async (): Promise<void> => {
+    if (!deleteTarget) return
+    setBusy(true)
+    try {
+      await call('tracker:delete', { id: deleteTarget.id, deleteFolder: true })
+      toast(`Deleted ${deleteTarget.position} @ ${deleteTarget.company} (folder removed)`, 'success')
+      await refreshRows()
+    } catch (err) {
+      toast(String(err), 'error')
+    } finally {
+      setBusy(false)
+      setDeleteTarget(null)
+    }
+  }
 
   const doImport = async (mode: 'replace' | 'merge'): Promise<void> => {
     setBusy(true)
@@ -178,7 +209,14 @@ export default function TrackerView(): JSX.Element {
           </thead>
           <tbody>
             {table.getRowModel().rows.map((row) => (
-              <tr key={row.id} className="border-b border-edge/50 hover:bg-panel2">
+              <tr
+                key={row.id}
+                className={`border-b border-edge/50 hover:bg-panel2 ${
+                  sorting.length === 0 && batchStarts.has(row.original.id)
+                    ? 'border-t-2 border-t-edge'
+                    : ''
+                }`}
+              >
                 {row.getVisibleCells().map((cell) => (
                   <td key={cell.id} className="px-3 py-2 align-top">
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -198,6 +236,16 @@ export default function TrackerView(): JSX.Element {
           </tbody>
         </table>
       </div>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title={`Delete "${deleteTarget?.position ?? ''}" @ ${deleteTarget?.company ?? ''}?`}
+        body="Removes the tracker row AND deletes the application folder (résumé, cover letter, answers) from disk. If it came from a scout candidate, that candidate is marked rejected so it is never suggested again. This cannot be undone."
+        confirmLabel={busy ? 'Deleting…' : 'Delete application'}
+        danger
+        onConfirm={() => void doDelete()}
+        onCancel={() => setDeleteTarget(null)}
+      />
 
       <ConfirmDialog
         open={confirmImport}

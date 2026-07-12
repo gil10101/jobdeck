@@ -68,11 +68,12 @@ function singleFiles(relPaths: string[]): LibraryFile[] {
 }
 
 /** Workspace directories the library (and readLibraryFile) may expose. */
-export const LIBRARY_DIRS = ['master', 'templates', 'onboarding']
+export const LIBRARY_DIRS = ['master', 'templates', 'uploads', 'onboarding']
 
 export function listLibrary(): LibraryCategory[] {
   return [
     { title: 'Master résumé', files: listDir('master') },
+    { title: 'My uploads', files: listDir('uploads') },
     { title: 'Templates', files: listDir('templates') },
     { title: 'Onboarding sources', files: listDir('onboarding') }
   ].filter((c) => c.files.length > 0)

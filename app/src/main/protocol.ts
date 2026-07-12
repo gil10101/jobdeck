@@ -28,6 +28,7 @@ export function installLocalFileHandler(): void {
     path.resolve(REPO_ROOT, 'applications'),
     path.resolve(REPO_ROOT, 'master'),
     path.resolve(REPO_ROOT, 'templates'),
+    path.resolve(REPO_ROOT, 'uploads'),
     path.resolve(REPO_ROOT, 'intake-images')
   ]
 

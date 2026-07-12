@@ -124,10 +124,12 @@ function Section({
 function PostingPanel({
   c,
   actions,
+  width,
   onClose
 }: {
   c: CandidateJob | null
   actions: Actions
+  width: number
   onClose: () => void
 }): JSX.Element {
   const toast = useApp((s) => s.toast)
@@ -152,12 +154,11 @@ function PostingPanel({
 
   return (
     <div
-      className={`shrink-0 overflow-hidden border-l border-edge bg-panel transition-[width] duration-200 ${
-        c ? 'w-[460px]' : 'w-0 border-l-0'
-      }`}
+      className={`shrink-0 overflow-hidden bg-panel ${c ? '' : 'border-l-0'}`}
+      style={{ width: c ? width : 0, transition: 'width 150ms' }}
     >
       {c && sections && (
-        <div className="flex h-full w-[460px] flex-col">
+        <div className="flex h-full flex-col" style={{ width }}>
           <div className="flex items-start gap-3 border-b border-edge px-4 py-3">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
@@ -288,6 +289,8 @@ function CandidateCard({
   )
 }
 
+const PANEL_WIDTH_KEY = 'scout.panelWidth'
+
 export default function ScoutView(): JSX.Element {
   const candidates = useApp((s) => s.candidates)
   const runs = useApp((s) => s.runs)
@@ -295,8 +298,33 @@ export default function ScoutView(): JSX.Element {
   const navigate = useApp((s) => s.navigate)
   const [instructions, setInstructions] = useState('')
   const [filter, setFilter] = useState<'new' | 'accepted' | 'rejected'>('new')
+  const [sourceFilter, setSourceFilter] = useState('all')
+  const [minFit, setMinFit] = useState(0)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [postingFor, setPostingFor] = useState<string | null>(null)
+  const [panelWidth, setPanelWidth] = useState(() => {
+    const saved = Number(localStorage.getItem(PANEL_WIDTH_KEY))
+    return saved >= 360 && saved <= 900 ? saved : 460
+  })
+
+  // Adjustable divider between the candidate list and the details panel.
+  const startDrag = (e: React.MouseEvent): void => {
+    e.preventDefault()
+    const onMove = (ev: MouseEvent): void => {
+      const w = Math.min(900, Math.max(360, window.innerWidth - ev.clientX))
+      setPanelWidth(w)
+    }
+    const onUp = (): void => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      setPanelWidth((w) => {
+        localStorage.setItem(PANEL_WIDTH_KEY, String(w))
+        return w
+      })
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
 
   const liveScout = runs.find(
     (r) => r.kind === 'scout' && (r.status === 'running' || r.status === 'queued')
@@ -335,9 +363,31 @@ export default function ScoutView(): JSX.Element {
     }
   }
 
-  const shown = candidates
-    .filter((c) => c.state === filter)
-    .sort((a, b) => (b.fitScore ?? -1) - (a.fitScore ?? -1))
+  const sources = [...new Set(candidates.map((c) => c.source))].sort()
+  const shown = candidates.filter(
+    (c) =>
+      c.state === filter &&
+      (sourceFilter === 'all' || c.source === sourceFilter) &&
+      (c.fitScore ?? 0) >= minFit
+  )
+  // Batches: group by the scout run that found them, newest batch first;
+  // fit-score order within each batch.
+  const batchOrder: string[] = []
+  const batches = new Map<string, CandidateJob[]>()
+  for (const c of [...shown].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))) {
+    if (!batches.has(c.scoutRunId)) {
+      batches.set(c.scoutRunId, [])
+      batchOrder.push(c.scoutRunId)
+    }
+    batches.get(c.scoutRunId)!.push(c)
+  }
+  for (const list of batches.values()) {
+    list.sort((a, b) => (b.fitScore ?? -1) - (a.fitScore ?? -1))
+  }
+  const batchLabel = (list: CandidateJob[]): string => {
+    const d = new Date(list[0]?.createdAt ?? 0)
+    return d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+  }
   const counts = {
     new: candidates.filter((c) => c.state === 'new').length,
     accepted: candidates.filter((c) => c.state === 'accepted').length,
@@ -366,7 +416,33 @@ export default function ScoutView(): JSX.Element {
             ⌕ Scout now
           </button>
         )}
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex items-center gap-1.5">
+          <select
+            className="input px-1.5 py-1 text-[11px]"
+            value={sourceFilter}
+            onChange={(e) => setSourceFilter(e.target.value)}
+            title="Filter by source board"
+          >
+            <option value="all">all sources</option>
+            {sources.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+          <select
+            className="input px-1.5 py-1 text-[11px]"
+            value={minFit}
+            onChange={(e) => setMinFit(Number(e.target.value))}
+            title="Minimum fit score"
+          >
+            <option value={0}>any fit</option>
+            <option value={60}>fit ≥ 60</option>
+            <option value={70}>fit ≥ 70</option>
+            <option value={80}>fit ≥ 80</option>
+            <option value={90}>fit ≥ 90</option>
+          </select>
+          <span className="mx-0.5 h-4 w-px bg-edge" />
           {(['new', 'accepted', 'rejected'] as const).map((f) => (
             <button
               key={f}
@@ -406,23 +482,51 @@ export default function ScoutView(): JSX.Element {
               )}
             </div>
           ) : (
-            <div className="mx-auto flex max-w-3xl flex-col gap-2.5">
-              {shown.map((c) => (
-                <CandidateCard
-                  key={c.id}
-                  c={c}
-                  actions={actions}
-                  selected={c.id === postingFor}
-                  onShowPosting={(cand) =>
-                    setPostingFor((cur) => (cur === cand.id ? null : cand.id))
-                  }
-                />
-              ))}
+            <div className="mx-auto flex max-w-3xl flex-col">
+              {batchOrder.map((runId, bi) => {
+                const list = batches.get(runId)!
+                return (
+                  <div
+                    key={runId}
+                    className={bi > 0 ? 'mt-4 border-t-2 border-edge pt-3' : ''}
+                  >
+                    <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-muted">
+                      <span>Scout batch · {batchLabel(list)}</span>
+                      <span className="font-normal text-gray-600">{list.length} candidate{list.length === 1 ? '' : 's'}</span>
+                    </div>
+                    <div className="flex flex-col gap-2.5">
+                      {list.map((c) => (
+                        <CandidateCard
+                          key={c.id}
+                          c={c}
+                          actions={actions}
+                          selected={c.id === postingFor}
+                          onShowPosting={(cand) =>
+                            setPostingFor((cur) => (cur === cand.id ? null : cand.id))
+                          }
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
 
-        <PostingPanel c={drawerCandidate} actions={actions} onClose={() => setPostingFor(null)} />
+        {drawerCandidate && (
+          <div
+            className="w-1 shrink-0 cursor-col-resize bg-edge transition-colors hover:bg-cyan-500"
+            onMouseDown={startDrag}
+            title="Drag to resize"
+          />
+        )}
+        <PostingPanel
+          c={drawerCandidate}
+          actions={actions}
+          width={panelWidth}
+          onClose={() => setPostingFor(null)}
+        />
       </div>
     </div>
   )

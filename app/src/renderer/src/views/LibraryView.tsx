@@ -163,8 +163,24 @@ export default function LibraryView(): JSX.Element {
   return (
     <div className="flex h-full">
       <div className="flex w-72 shrink-0 flex-col border-r border-edge bg-panel">
-        <div className="flex items-center justify-between border-b border-edge px-3 py-2.5">
-          <h1 className="text-sm font-semibold text-gray-100">Library</h1>
+        <div className="flex items-center gap-1.5 border-b border-edge px-3 py-2.5">
+          <h1 className="mr-auto text-sm font-semibold text-gray-100">Library</h1>
+          <button
+            className="btn btn-primary px-2 py-0.5 text-[10px]"
+            title="Add anything: old CVs, résumés, cover letters, certificates, notes — agents use all of it"
+            onClick={() =>
+              void call('library:upload', undefined)
+                .then(({ added }) => {
+                  if (added) {
+                    toast(`${added} file${added === 1 ? '' : 's'} added`, 'success')
+                    load()
+                  }
+                })
+                .catch((err) => toast(String(err), 'error'))
+            }
+          >
+            ⇪ Add files
+          </button>
           <button className="btn px-2 py-0.5 text-[10px]" onClick={load} title="Refresh file list">
             ⟳
           </button>

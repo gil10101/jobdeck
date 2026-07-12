@@ -65,6 +65,10 @@ export function registerCoreIpc(deps: {
     }
   )
 
+  handle('onboarding:complete', () => {
+    saveConfig({ onboardedAt: new Date().toISOString() })
+  })
+
   handle('app:pickFile', async (req: { filters?: { name: string; extensions: string[] }[] }) => {
     const win = deps.getWindow()
     const result = await dialog.showOpenDialog(win ?? new BrowserWindow({ show: false }), {

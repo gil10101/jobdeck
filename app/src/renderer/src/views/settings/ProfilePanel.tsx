@@ -44,7 +44,7 @@ export default function ProfilePanel(): JSX.Element {
     return off
   }, [extracting?.id])
 
-  const startExtract = async (source: 'v1-import' | 'files' | 'text'): Promise<void> => {
+  const startExtract = async (source: 'v1-import' | 'files' | 'text' | 'uploads'): Promise<void> => {
     setBusy(true)
     try {
       let files: string[] | undefined
@@ -128,11 +128,19 @@ export default function ProfilePanel(): JSX.Element {
 
       {!extracting && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <button className="btn btn-primary" disabled={busy} onClick={() => startExtract('v1-import')}>
-            Extract from v1 import
+          <button
+            className="btn btn-primary"
+            disabled={busy}
+            title="Re-reads EVERYTHING in your Library uploads (plus any imported v1 files) and re-drafts the profile"
+            onClick={() => startExtract('uploads')}
+          >
+            Extract from my library
+          </button>
+          <button className="btn" disabled={busy} onClick={() => startExtract('v1-import')}>
+            From v1 import
           </button>
           <button className="btn" disabled={busy} onClick={() => startExtract('files')}>
-            Extract from résumé file…
+            From a file…
           </button>
           <button
             className="btn"

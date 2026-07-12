@@ -130,6 +130,16 @@ export function buildColumns(): ColumnDef<TrackerRow, any>[] {
                 )
               }}
             />
+            <ActionButton
+              label="✕"
+              title="Delete this application (removes its folder too)"
+              onClick={() => {
+                const meta = info.table.options.meta as
+                  | { requestDelete?: (row: TrackerRow) => void }
+                  | undefined
+                meta?.requestDelete?.(row)
+              }}
+            />
           </div>
         )
       }

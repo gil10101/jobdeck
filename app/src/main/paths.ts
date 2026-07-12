@@ -30,6 +30,7 @@ export let TODO_DIR = NOT_READY
 export let MASTER_DIR = NOT_READY
 export let TEMPLATES_DIR = NOT_READY
 export let ONBOARDING_DIR = NOT_READY
+export let UPLOADS_DIR = NOT_READY
 export let TRACKER_FILE = NOT_READY
 export let PROFILE_FILE = NOT_READY
 
@@ -49,6 +50,7 @@ export function initWorkspace(root: string): void {
   MASTER_DIR = path.join(abs, 'master')
   TEMPLATES_DIR = path.join(abs, 'templates')
   ONBOARDING_DIR = path.join(abs, 'onboarding')
+  UPLOADS_DIR = path.join(abs, 'uploads')
   RUNS_DIR = path.join(abs, 'runs')
   EXPORTS_DIR = path.join(abs, 'exports')
   TMP_DIR = path.join(abs, 'tmp')
@@ -67,6 +69,7 @@ export function ensureAppDataDirs(): void {
     MASTER_DIR,
     TEMPLATES_DIR,
     ONBOARDING_DIR,
+    UPLOADS_DIR,
     RUNS_DIR,
     EXPORTS_DIR,
     TMP_DIR,

@@ -17,7 +17,7 @@ import type { ProfileFile } from './profile'
 export interface IpcInvokeContract {
   'tracker:getAll': { req: void; res: TrackerRow[] }
   'tracker:upsert': { req: Partial<TrackerRow> & { id?: string }; res: TrackerRow }
-  'tracker:delete': { req: { id: string }; res: void }
+  'tracker:delete': { req: { id: string; deleteFolder?: boolean }; res: void }
   'tracker:markApplied': { req: { id: string; dateApplied?: string }; res: TrackerRow }
   'tracker:importXlsx': {
     req: { mode: 'replace' | 'merge'; filePath: string }
@@ -85,9 +85,15 @@ export interface IpcInvokeContract {
     res: { draft: ProfileFile | null; error: string | null }
   }
   'onboard:start': {
-    req: { source: 'v1-import' | 'text' | 'files'; text?: string; files?: string[] }
+    req: {
+      source: 'v1-import' | 'text' | 'files' | 'uploads'
+      text?: string
+      files?: string[]
+    }
     res: RunMeta
   }
+  'library:upload': { req: void; res: { added: number } }
+  'onboarding:complete': { req: void; res: void }
   'candidates:list': { req: void; res: CandidateJob[] }
   'candidates:accept': { req: { id: string }; res: { candidate: CandidateJob; run: RunMeta } }
   'candidates:reject': { req: { id: string }; res: void }
@@ -152,6 +158,8 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'profile:save',
   'profile:draft',
   'onboard:start',
+  'library:upload',
+  'onboarding:complete',
   'app:showItem',
   'app:openFolder',
   'app:openExternal',
