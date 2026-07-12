@@ -85,3 +85,6 @@ upskill/*.md
 app/out/
 app/dist/
 app-data/
+
+# Brainstorm mockups (superpowers visual companion) - never ship
+.superpowers/
