@@ -3,47 +3,87 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 /**
- * Repo root resolution: the app lives at <repo>/app, so the repo root is the
- * parent of app.getAppPath(). Overridable via MISSION_REPO_ROOT env for tests.
- * Validated by the presence of CLAUDE.md + documents/applications.
+ * V2: the app operates on a user-chosen WORKSPACE directory (not a git repo).
+ * Paths are ESM live bindings initialized by initWorkspace() at boot (or after
+ * the first-run picker). Anything touching them before init throws loudly.
+ *
+ * Workspace layout:
+ *   workspace/
+ *     profile.json  tracker.json
+ *     applications/ (+TODO/)   master/   templates/   library/
+ *     intake-images/  exports/  runs/  scout/  tmp/  onboarding/
  */
-function resolveRepoRoot(): string {
-  const candidates = [
-    process.env.MISSION_REPO_ROOT,
-    path.resolve(app.getAppPath(), '..'),
-    path.resolve(process.cwd(), '..'),
-    process.cwd()
-  ].filter(Boolean) as string[]
 
-  for (const c of candidates) {
-    try {
-      if (
-        fs.existsSync(path.join(c, 'CLAUDE.md')) &&
-        fs.existsSync(path.join(c, 'documents', 'applications'))
-      ) {
-        return c
-      }
-    } catch {
-      // keep looking
-    }
-  }
-  // Last resort: parent of app path (may be wrong, but surfaces loudly in UI).
-  return path.resolve(app.getAppPath(), '..')
+const NOT_READY = '__WORKSPACE_NOT_INITIALIZED__'
+
+// Live bindings — consumers imported these names in v1; values now flip at init.
+// REPO_ROOT is kept as the legacy alias of the workspace root (renamed in M2 sweeps).
+export let REPO_ROOT = NOT_READY
+export let APP_DATA_DIR = NOT_READY // legacy alias: internal data now lives inside the workspace
+export let RUNS_DIR = NOT_READY
+export let EXPORTS_DIR = NOT_READY
+export let TMP_DIR = NOT_READY
+export let INTAKE_IMAGES_DIR = NOT_READY
+export let SCOUT_DIR = NOT_READY
+export let APPLICATIONS_DIR = NOT_READY
+export let TODO_DIR = NOT_READY
+export let MASTER_DIR = NOT_READY
+export let TEMPLATES_DIR = NOT_READY
+export let ONBOARDING_DIR = NOT_READY
+export let TRACKER_FILE = NOT_READY
+export let PROFILE_FILE = NOT_READY
+
+export const APP_DIR = app.getAppPath()
+
+export function workspaceReady(): boolean {
+  return REPO_ROOT !== NOT_READY
 }
 
-export const REPO_ROOT = resolveRepoRoot()
-export const APP_DIR = app.getAppPath()
-export const APP_DATA_DIR = path.join(REPO_ROOT, 'app-data')
-export const RUNS_DIR = path.join(APP_DATA_DIR, 'runs')
-export const EXPORTS_DIR = path.join(APP_DATA_DIR, 'exports')
-export const TMP_DIR = path.join(APP_DATA_DIR, 'tmp')
-export const INTAKE_IMAGES_DIR = path.join(APP_DATA_DIR, 'intake-images')
-export const SCOUT_DIR = path.join(APP_DATA_DIR, 'scout')
-export const BUN_EXE = 'C:\\Users\\gillu\\.bun\\bin\\bun.exe'
-export const APPLICATIONS_DIR = path.join(REPO_ROOT, 'documents', 'applications')
-export const TODO_DIR = path.join(APPLICATIONS_DIR, 'TODO')
-export const TRACKER_FILE = path.join(APP_DATA_DIR, 'tracker.json')
-export const XLSX_FILE = path.join(REPO_ROOT, 'applications.xlsx')
+/** Point every path binding at the chosen workspace and create the layout. */
+export function initWorkspace(root: string): void {
+  const abs = path.resolve(root)
+  REPO_ROOT = abs
+  APP_DATA_DIR = abs
+  APPLICATIONS_DIR = path.join(abs, 'applications')
+  TODO_DIR = path.join(APPLICATIONS_DIR, 'TODO')
+  MASTER_DIR = path.join(abs, 'master')
+  TEMPLATES_DIR = path.join(abs, 'templates')
+  ONBOARDING_DIR = path.join(abs, 'onboarding')
+  RUNS_DIR = path.join(abs, 'runs')
+  EXPORTS_DIR = path.join(abs, 'exports')
+  TMP_DIR = path.join(abs, 'tmp')
+  INTAKE_IMAGES_DIR = path.join(abs, 'intake-images')
+  SCOUT_DIR = path.join(abs, 'scout')
+  TRACKER_FILE = path.join(abs, 'tracker.json')
+  PROFILE_FILE = path.join(abs, 'profile.json')
+  ensureAppDataDirs()
+}
+
+export function ensureAppDataDirs(): void {
+  assertReady()
+  for (const d of [
+    APPLICATIONS_DIR,
+    TODO_DIR,
+    MASTER_DIR,
+    TEMPLATES_DIR,
+    ONBOARDING_DIR,
+    RUNS_DIR,
+    EXPORTS_DIR,
+    TMP_DIR,
+    INTAKE_IMAGES_DIR,
+    SCOUT_DIR
+  ]) {
+    fs.mkdirSync(d, { recursive: true })
+  }
+}
+
+function assertReady(): void {
+  if (!workspaceReady()) {
+    throw new Error('workspace not initialized — complete first-run setup')
+  }
+}
+
+/** pdflatex resolution: config override → PATH → TinyTeX → MiKTeX (M2 wires config). */
 export const PDFLATEX = path.join(
   process.env.APPDATA ?? '',
   'TinyTeX',
@@ -52,19 +92,18 @@ export const PDFLATEX = path.join(
   'pdflatex.exe'
 )
 
-export function ensureAppDataDirs(): void {
-  for (const d of [APP_DATA_DIR, RUNS_DIR, EXPORTS_DIR, TMP_DIR, INTAKE_IMAGES_DIR, SCOUT_DIR]) {
-    fs.mkdirSync(d, { recursive: true })
-  }
-}
+/** Legacy v1 bun path — used only by the deprecated boardsBridge until M3 removes it. */
+export const BUN_EXE = 'C:\\Users\\gillu\\.bun\\bin\\bun.exe'
 
-/** Repo-relative path with forward slashes. */
+/** Workspace-relative path with forward slashes. */
 export function toRel(absPath: string): string {
+  assertReady()
   return path.relative(REPO_ROOT, absPath).split(path.sep).join('/')
 }
 
-/** Absolute path from a repo-relative one (either slash direction). */
+/** Absolute path from a workspace-relative one (either slash direction). */
 export function toAbs(relPath: string): string {
+  assertReady()
   return path.join(REPO_ROOT, ...relPath.split(/[\\/]/))
 }
 

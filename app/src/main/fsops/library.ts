@@ -67,33 +67,23 @@ function singleFiles(relPaths: string[]): LibraryFile[] {
   return out
 }
 
-/** Directories whose files the library (and the local-file protocol) may expose. */
-export const LIBRARY_DIRS = ['cv', 'resume_examples', 'cover_letters', 'templates', 'myinfo']
+/** Workspace directories the library (and readLibraryFile) may expose. */
+export const LIBRARY_DIRS = ['master', 'templates', 'onboarding']
 
 export function listLibrary(): LibraryCategory[] {
-  const guides = [
-    'CLAUDE.md',
-    ...listDir('.claude/skills/job-application-assistant').map((f) => f.relPath)
-  ]
   return [
-    { title: 'Master résumé (cv/)', files: listDir('cv') },
-    { title: 'Résumé examples', files: listDir('resume_examples') },
-    { title: 'Cover letters', files: listDir('cover_letters', { excludeDirs: ['OpenFonts'] }) },
+    { title: 'Master résumé', files: listDir('master') },
     { title: 'Templates', files: listDir('templates') },
-    { title: 'My info', files: listDir('myinfo') },
-    { title: 'Guides & rules', files: singleFiles(guides) }
+    { title: 'Onboarding sources', files: listDir('onboarding') }
   ].filter((c) => c.files.length > 0)
 }
 
 const READ_CAP_BYTES = 400 * 1024
 
-/** Read a text file for preview — jailed to the library dirs + guides. */
+/** Read a text file for preview — jailed to the library dirs. */
 export function readLibraryFile(relPath: string): { content: string; truncated: boolean } {
   const norm = relPath.split('\\').join('/')
-  const allowed =
-    norm === 'CLAUDE.md' ||
-    norm.startsWith('.claude/skills/') ||
-    LIBRARY_DIRS.some((d) => norm === d || norm.startsWith(d + '/'))
+  const allowed = LIBRARY_DIRS.some((d) => norm === d || norm.startsWith(d + '/'))
   if (!allowed || norm.includes('..')) throw new Error(`not a library path: ${relPath}`)
   const abs = toAbs(norm)
   const stat = fs.statSync(abs)

@@ -18,8 +18,15 @@ export interface Toast {
   text: string
 }
 
+export interface AppConfigInfo {
+  workspacePath: string | null
+  onboardedAt: string | null
+}
+
 interface AppState {
   route: Route
+  /** null = not fetched yet; workspacePath null = first-run required. */
+  config: AppConfigInfo | null
   rows: TrackerRow[]
   intake: IntakeItem[]
   candidates: CandidateJob[]
@@ -27,6 +34,7 @@ interface AppState {
   settings: AppSettings | null
   toasts: Toast[]
   navigate: (route: Route) => void
+  refreshConfig: () => Promise<void>
   refreshRows: () => Promise<void>
   refreshIntake: () => Promise<void>
   refreshCandidates: () => Promise<void>
@@ -43,6 +51,7 @@ let toastSeq = 1
 
 export const useApp = create<AppState>((set, get) => ({
   route: { view: 'tracker' },
+  config: null,
   rows: [],
   intake: [],
   candidates: [],
@@ -51,6 +60,14 @@ export const useApp = create<AppState>((set, get) => ({
   toasts: [],
 
   navigate: (route) => set({ route }),
+
+  refreshConfig: async () => {
+    try {
+      set({ config: await call('config:get', undefined) })
+    } catch {
+      /* main not ready yet */
+    }
+  },
 
   refreshRows: async () => {
     try {
@@ -101,6 +118,8 @@ export const useApp = create<AppState>((set, get) => ({
     }
   },
   hydrate: async () => {
+    await get().refreshConfig()
+    if (!get().config?.workspacePath) return // first-run: nothing else exists yet
     await Promise.all([
       get().refreshRows(),
       get().refreshIntake(),

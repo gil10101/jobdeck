@@ -62,11 +62,12 @@ export default function TrackerView(): JSX.Element {
   const doImport = async (mode: 'replace' | 'merge'): Promise<void> => {
     setBusy(true)
     try {
-      const res = await call('tracker:importXlsx', { mode })
-      toast(
-        `Imported ${res.imported} rows (${res.skipped} duplicates skipped) from applications.xlsx`,
-        'success'
-      )
+      const { path } = await call('app:pickFile', {
+        filters: [{ name: 'Excel workbook', extensions: ['xlsx'] }]
+      })
+      if (!path) return
+      const res = await call('tracker:importXlsx', { mode, filePath: path })
+      toast(`Imported ${res.imported} rows (${res.skipped} duplicates skipped)`, 'success')
       await refreshRows()
     } catch (err) {
       toast(`Import failed: ${String(err)}`, 'error')

@@ -8,7 +8,8 @@ import type {
   RunEvent,
   RunMeta,
   ScanResult,
-  TrackerRow
+  TrackerRow,
+  V1ImportSummary
 } from './types'
 
 /** invoke/handle channels: request → response (response is wrapped in IpcResult by the registry). */
@@ -18,7 +19,7 @@ export interface IpcInvokeContract {
   'tracker:delete': { req: { id: string }; res: void }
   'tracker:markApplied': { req: { id: string; dateApplied?: string }; res: TrackerRow }
   'tracker:importXlsx': {
-    req: { mode: 'replace' | 'merge' }
+    req: { mode: 'replace' | 'merge'; filePath: string }
     res: { imported: number; skipped: number; warnings: string[] }
   }
   'tracker:exportXlsx': { req: void; res: { path: string } }
@@ -64,6 +65,18 @@ export interface IpcInvokeContract {
   'boards:setCreds': { req: { email: string; password: string }; res: void }
   'boards:test': { req: void; res: { ok: boolean; message: string } }
   'app:info': { req: void; res: { repoRoot: string; appDataDir: string } }
+  'config:get': { req: void; res: { workspacePath: string | null; onboardedAt: string | null } }
+  'env:check': {
+    req: void
+    res: { pdflatex: { ok: boolean; path: string }; platform: string; appVersion: string }
+  }
+  'workspace:choose': { req: { title?: string }; res: { path: string | null } }
+  'workspace:create': { req: { dir: string }; res: { workspacePath: string } }
+  'workspace:importV1': { req: { repoRoot: string; dir: string }; res: V1ImportSummary }
+  'app:pickFile': {
+    req: { filters?: { name: string; extensions: string[] }[] }
+    res: { path: string | null }
+  }
   'candidates:list': { req: void; res: CandidateJob[] }
   'candidates:accept': { req: { id: string }; res: { candidate: CandidateJob; run: RunMeta } }
   'candidates:reject': { req: { id: string }; res: void }
@@ -118,6 +131,12 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'boards:setCreds',
   'boards:test',
   'app:info',
+  'config:get',
+  'env:check',
+  'workspace:choose',
+  'workspace:create',
+  'workspace:importV1',
+  'app:pickFile',
   'app:showItem',
   'app:openFolder',
   'app:openExternal',

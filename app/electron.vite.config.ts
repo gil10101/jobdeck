@@ -25,6 +25,7 @@ export default defineConfig({
     }
   },
   renderer: {
+    server: { port: 5174, strictPort: true }, // v1 dev uses 5173 — run both at once
     plugins: [react()],
     resolve: {
       alias: {

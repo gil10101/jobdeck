@@ -55,8 +55,8 @@ export function registerIpc(services: Services): void {
     tracker.deleteRow(id)
   })
   handle('tracker:markApplied', ({ id, dateApplied }) => tracker.markApplied(id, dateApplied))
-  handle('tracker:importXlsx', async ({ mode }) => {
-    const summary = await importFromXlsx(store, tracker, mode)
+  handle('tracker:importXlsx', async ({ mode, filePath }) => {
+    const summary = await importFromXlsx(store, tracker, mode, filePath)
     // Bind folder paths right away so links/reveal work.
     tracker.applyScan(scanApplications())
     return summary

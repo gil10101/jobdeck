@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { TrackerRow } from '@shared/types'
 import { CANONICAL_STATUS_TEXT, normalizeStatus } from '@shared/status'
-import { TMP_DIR, XLSX_FILE, stripDonePrefix } from '../paths'
+import { TMP_DIR, stripDonePrefix } from '../paths'
 import { cellToDateString, cellToLink, cellToPathText, cellToString } from './cellValue'
 import type { TrackerRepo } from '../store/trackerRepo'
 import type { Store } from '../store/Store'
@@ -43,28 +43,29 @@ function deriveSlug(resumePath: string | null, coverPath: string | null): string
 }
 
 /**
- * Import rows from applications.xlsx. Reads a COPY of the file so an open
- * Excel instance can never block us.
+ * Import rows from a user-picked applications xlsx. Reads a COPY of the file
+ * so an open Excel instance can never block us.
  */
 export async function importFromXlsx(
   store: Store,
   repo: TrackerRepo,
-  mode: 'replace' | 'merge'
+  mode: 'replace' | 'merge',
+  filePath: string
 ): Promise<ImportSummary> {
   const warnings: string[] = []
-  if (!fs.existsSync(XLSX_FILE)) {
-    throw new Error(`applications.xlsx not found at ${XLSX_FILE}`)
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`xlsx file not found: ${filePath}`)
   }
 
   // Copy-to-temp read (Excel holds a write lock, not a read lock — copy works).
   const tmpCopy = path.join(TMP_DIR, `import-${Date.now()}.xlsx`)
   fs.mkdirSync(TMP_DIR, { recursive: true })
   try {
-    fs.copyFileSync(XLSX_FILE, tmpCopy)
+    fs.copyFileSync(filePath, tmpCopy)
   } catch (err) {
     const e = err as NodeJS.ErrnoException
     if (e.code === 'EBUSY' || e.code === 'EPERM') {
-      throw new Error('applications.xlsx is locked hard by another program. Close Excel and retry.')
+      throw new Error('the xlsx is locked hard by another program. Close Excel and retry.')
     }
     throw err
   }

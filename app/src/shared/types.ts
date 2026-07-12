@@ -222,6 +222,16 @@ export interface TrackerStoreFile {
   settings: AppSettings
 }
 
+export interface V1ImportSummary {
+  applicationsCopied: number
+  trackerImported: boolean
+  trackerRows: number
+  masterResumeCopied: boolean
+  intakeImagesCopied: number
+  onboardingSourcesStaged: string[]
+  warnings: string[]
+}
+
 export interface LibraryFile {
   name: string
   relPath: string

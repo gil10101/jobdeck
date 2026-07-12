@@ -2,6 +2,7 @@ import Sidebar from './components/Sidebar'
 import ToastHost from './components/Toast'
 import ApplyView from './views/ApplyView'
 import DetailView from './views/DetailView'
+import FirstRunView from './views/FirstRunView'
 import IntakeView from './views/IntakeView'
 import LibraryView from './views/LibraryView'
 import RunsView from './views/RunsView'
@@ -12,6 +13,17 @@ import { useApp } from './store'
 
 export default function App(): JSX.Element {
   const route = useApp((s) => s.route)
+  const config = useApp((s) => s.config)
+
+  // First-run gate: no workspace chosen yet → setup takes the whole window.
+  if (config && !config.workspacePath) {
+    return (
+      <div className="h-full">
+        <FirstRunView />
+        <ToastHost />
+      </div>
+    )
+  }
 
   return (
     <div className="flex h-full">
