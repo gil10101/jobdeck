@@ -1,0 +1,57 @@
+// M0 probe: dump raw SDKMessages + verify CLAUDE.md/settings actually load.
+// Usage: npm run probe:agent   (from app/)
+import { query } from '@anthropic-ai/claude-agent-sdk'
+import { writeFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const REPO_ROOT = path.resolve(__dirname, '..', '..')
+
+const PROMPT =
+  'Without using any tools, reply with exactly one line: the candidate email address listed in the CLAUDE.md project instructions. Nothing else.'
+
+const messages = []
+let finalText = ''
+
+console.log('[probe] repo root:', REPO_ROOT)
+console.log('[probe] starting query()…')
+
+try {
+  const q = query({
+    prompt: PROMPT,
+    options: {
+      cwd: REPO_ROOT,
+      systemPrompt: { type: 'preset', preset: 'claude_code' },
+      settingSources: ['project'],
+      permissionMode: 'bypassPermissions',
+      maxTurns: 4,
+      env: { ...process.env }
+    }
+  })
+
+  for await (const msg of q) {
+    messages.push(msg)
+    const compact = JSON.stringify(msg)
+    console.log('---', msg.type, compact.length > 400 ? compact.slice(0, 400) + '…' : compact)
+    if (msg.type === 'assistant') {
+      const content = msg.message?.content ?? msg.content ?? []
+      for (const block of Array.isArray(content) ? content : []) {
+        if (block.type === 'text') finalText += block.text
+      }
+    }
+  }
+} catch (err) {
+  console.error('[probe] FAILED:', err)
+  process.exitCode = 1
+}
+
+const dumpPath = path.join(__dirname, 'probe-dump.json')
+writeFileSync(dumpPath, JSON.stringify(messages, null, 2), 'utf-8')
+console.log('\n[probe] full dump →', dumpPath)
+console.log('[probe] assistant text:', JSON.stringify(finalText.trim()))
+console.log(
+  finalText.includes('gillu1212@gmail.com')
+    ? '[probe] ✓ CLAUDE.md LOADED (candidate email found)'
+    : '[probe] ✗ CLAUDE.md NOT loaded — check systemPrompt preset + settingSources'
+)

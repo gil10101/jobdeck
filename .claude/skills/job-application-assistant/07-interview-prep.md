@@ -12,28 +12,37 @@ Keep answers to 1-2 minutes. Be specific. End with what you learned or would do 
 
 <!-- These are populated by /setup from your actual experience. Below are templates showing the format. -->
 
-### 1. [PROJECT_NAME] ([SKILL_DEMONSTRATED])
-**S:** [CONTEXT - what was happening, what was the problem]
-**T:** [YOUR RESPONSIBILITY - what you specifically needed to do]
-**A:** [WHAT YOU DID - specific actions, tools, methods]
-**R:** [OUTCOME - measurable results, adoption, impact]
-**Use for:** "[QUESTION_TYPE_1]", "[QUESTION_TYPE_2]"
+<!-- Populated from Gil's real experience. Sharpen the numbers/details as you use them. -->
 
-### 2. [PROJECT_NAME] ([SKILL_DEMONSTRATED])
-**S:** [CONTEXT]
-**T:** [YOUR RESPONSIBILITY]
-**A:** [WHAT YOU DID]
-**R:** [OUTCOME]
-**Use for:** "[QUESTION_TYPE_1]", "[QUESTION_TYPE_2]"
+### 1. NYC Aging — Data Quality & Dashboards (SQL, Tableau, stakeholder analytics)
+**S:** As a Data Analytics Intern at NYC Aging, program data across services for older New Yorkers had quality and consistency gaps that made performance reporting unreliable.
+**T:** Ensure data quality/integrity and produce reporting stakeholders could actually use to evaluate program performance.
+**A:** Wrote SQL to analyze and validate the datasets, cleaned and reconciled inconsistencies, and built Tableau reports/dashboards for program performance evaluation. Separately designed a centralized interface to track data requests.
+**R:** Delivered trustworthy performance dashboards and a request-tracking interface that improved accessibility and operational efficiency across the data-request pipeline.
+**Use for:** "Tell me about a data quality problem", "Describe stakeholder-facing analytics work", "A time you improved a process"
 
-### 3. [PROJECT_NAME] ([SKILL_DEMONSTRATED])
-**S:** [CONTEXT]
-**T:** [YOUR RESPONSIBILITY]
-**A:** [WHAT YOU DID]
-**R:** [OUTCOME]
-**Use for:** "[QUESTION_TYPE_1]", "[QUESTION_TYPE_2]"
+### 2. Customer Churn Prediction (Python, ML, XGBoost, A/B testing)
+**S:** Wanted to predict and reduce telecom customer churn from a 7,000+ record dataset.
+**T:** Build an end-to-end pipeline — from EDA to models to actionable retention strategy.
+**A:** Performed EDA, feature engineering, survival modeling, and segmentation in Python (pandas, scikit-learn, PyTorch); trained 7 models including ensembles, XGBoost, and neural networks; built A/B testing frameworks and 40+ visualizations to translate results into strategy.
+**R:** Reached 86.9% accuracy and produced concrete, testable retention recommendations tied to the identified churn drivers.
+**Use for:** "Walk me through an ML project", "How do you evaluate/compare models", "How do you turn analysis into action"
 
-<!-- Add more STAR examples as needed. Aim for 4-6 covering different competencies. -->
+### 3. Bertram — AI Email Platform (full-stack, OAuth, LLM integration)
+**S:** Email lives across Gmail and Outlook with too much manual triage.
+**T:** Build a unified, AI-assisted email client end-to-end.
+**A:** Built a Next.js/TypeScript frontend with a FastAPI + PostgreSQL backend, unified Gmail/Outlook sync with Google OAuth 2.0, and integrated an LLM API for summarization, reply drafting, priority classification, and inbox organization, plus meeting scheduling and threaded views. Used agentic coding tooling (Claude Code) during development.
+**R:** Shipped a working full-stack product (bertrammail.com) demonstrating end-to-end ownership across auth, data, API, frontend, and LLM features.
+**Use for:** "Tell me about an end-to-end project you owned", "Describe working with APIs/auth", "How have you used AI tooling"
+
+### 4. License Plate Recognition (computer vision, pipeline, CUDA)
+**S:** Needed to extract license-plate data from vehicle imagery reliably.
+**T:** Build a CV platform combining detection and OCR with a measurable performance story.
+**A:** Built a Flask platform pairing YOLOv5 object detection with OCR, an end-to-end pipeline with preprocessing and CUDA acceleration, and a metrics suite integrated with Power BI/Tableau.
+**R:** Delivered a working recognition system with a metrics dashboard for performance analysis.
+**Use for:** "Tell me about a technical/CV project", "How do you measure performance", "A time you optimized something"
+
+<!-- Add more as needed. STAR #1 is the strongest for analytics/BI roles; #2 for DS/ML; #3 for SWE/full-stack; #4 for CV/optimization. -->
 
 ## Common Tough Questions
 

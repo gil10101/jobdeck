@@ -63,6 +63,10 @@ documents/applications/**
 
 # Personal job search tracking
 job_search_tracker.csv
+applications.xlsx
+
+# Raw personal input folder (resume drop) — never commit
+myinfo/
 
 # Upskill reports (personal output)
 upskill/*.md
@@ -72,3 +76,12 @@ upskill/*.md
 .agents/**/node_modules/
 .agents/**/*.log
 .agents/usage/
+
+# Portal credentials + cached sessions (personal secrets — never commit)
+.agents/skills/*/credentials.json
+.agents/skills/*/.session.json
+
+# Mission-control app (app/) build output + personal data store
+app/out/
+app/dist/
+app-data/

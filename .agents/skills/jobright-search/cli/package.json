@@ -1,0 +1,19 @@
+{
+  "name": "jobright-cli",
+  "version": "1.0.0",
+  "description": "CLI for Jobright.ai's personalized, AI-fit-scored job recommendations via the private swan-api. Authenticated with your own account (email/password), cookie session cached locally. Personal use only. Zero runtime dependencies.",
+  "type": "module",
+  "main": "src/cli.ts",
+  "bin": {
+    "jobright-search": "src/cli.ts"
+  },
+  "scripts": {
+    "start": "bun run src/cli.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/bun": "latest"
+  }
+}

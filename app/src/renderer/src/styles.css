@@ -1,0 +1,254 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   DARK theme (default) — Gil's Neovim palette
+   #1A1A1A bg · #D8DEE9 fg · blue #85C1FC · green #A3BE8C
+   ============================================================ */
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg: 26 26 26; /* #1A1A1A background */
+  --panel: 31 31 31; /* #1F1F1F darkBlack */
+  --panel2: 42 42 42; /* #2A2A2A black */
+  --edge: 46 46 46; /* #2E2E2E selectionBackground */
+  --accent: 133 193 252; /* #85C1FC blue */
+  --muted: 110 118 132;
+
+  /* gray = text scale (light-on-dark) */
+  --g100: 233 237 244;
+  --g200: 216 222 233; /* #D8DEE9 foreground */
+  --g300: 184 192 206;
+  --g400: 147 156 172;
+  --g500: 110 118 132;
+  --g600: 80 80 80; /* #505050 brightBlack */
+
+  /* cyan → palette blue #85C1FC */
+  --c200: 185 217 254;
+  --c300: 133 193 252;
+  --c400: 135 195 255; /* #87C3FF cursor */
+  --c500: 95 169 240;
+  --c700: 51 98 143;
+  --c800: 39 73 107;
+  --c900: 30 58 85;
+  --c950: 30 37 43; /* #1E252B darkBlue */
+
+  /* green #A3BE8C / darkGreen #272E22 */
+  --gr200: 196 214 180;
+  --gr300: 163 190 140;
+  --gr400: 163 190 140;
+  --gr500: 127 163 99;
+  --gr800: 58 70 48;
+  --gr900: 49 61 40;
+  --gr950: 39 46 34;
+
+  /* red #BF616A / darkRed #361B1E */
+  --r200: 227 184 188;
+  --r300: 212 144 152;
+  --r400: 191 97 106;
+  --r500: 176 78 88;
+  --r600: 158 67 77;
+  --r900: 74 35 39;
+  --r950: 54 27 30;
+
+  /* amber #EBC88D · #EFB080 / darkYellow #30291C */
+  --a100: 247 233 208;
+  --a200: 235 200 141;
+  --a300: 229 190 126;
+  --a400: 239 176 128;
+  --a900: 69 58 38;
+  --a950: 48 41 28;
+
+  /* yellow */
+  --y300: 235 200 141; /* #EBC88D */
+  --y800: 74 62 36;
+  --y950: 48 41 28;
+
+  /* fit-note callout — purple, from the Neovim palette (#AA9BF5) */
+  --note-bg: #221e30;
+  --note-border: #453b6b;
+  --note-fg: #c9bffa;
+  --note-label: #aa9bf5;
+
+  /* status chips (bg / fg / dot) */
+  --st-red-bg: #361b1e;
+  --st-red-fg: #d49098;
+  --st-red-dot: #bf616a;
+  --st-yellow-bg: #30291c;
+  --st-yellow-fg: #ebc88d;
+  --st-yellow-dot: #efb080;
+  --st-green-bg: #272e22;
+  --st-green-fg: #a3be8c;
+  --st-green-dot: #a3be8c;
+  --st-blue-bg: #1e252b;
+  --st-blue-fg: #85c1fc;
+  --st-blue-dot: #87c3ff;
+
+  --scroll-thumb: 62 62 62;
+}
+
+/* ============================================================
+   LIGHT theme — Cursor Light
+   #ffffff bg · #333 fg · accent #0066cc
+   ============================================================ */
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --bg: 255 255 255;
+  --panel: 245 245 245; /* #f5f5f5 */
+  --panel2: 236 236 236;
+  --edge: 224 224 224; /* #e0e0e0 */
+  --accent: 0 102 204; /* #0066cc */
+  --muted: 153 153 153; /* #999999 */
+
+  /* gray = text scale (dark-on-light) */
+  --g100: 17 17 17;
+  --g200: 42 42 42; /* #2a2a2a */
+  --g300: 66 66 66; /* #424242 */
+  --g400: 102 102 102;
+  --g500: 128 128 128;
+  --g600: 148 148 148;
+
+  /* cyan → accent #0066cc */
+  --c200: 0 79 163;
+  --c300: 0 102 204;
+  --c400: 26 117 210;
+  --c500: 51 133 214;
+  --c700: 153 194 235;
+  --c800: 179 209 240;
+  --c900: 204 224 245;
+  --c950: 234 243 251;
+
+  /* green #00aa00 */
+  --gr200: 5 109 5;
+  --gr300: 6 125 6;
+  --gr400: 8 148 8;
+  --gr500: 0 170 0;
+  --gr800: 169 220 174;
+  --gr900: 195 232 199;
+  --gr950: 233 247 234;
+
+  /* red #cc0000 */
+  --r200: 143 0 0;
+  --r300: 163 0 0;
+  --r400: 204 0 0;
+  --r500: 230 0 0;
+  --r600: 184 0 0;
+  --r900: 242 188 188;
+  --r950: 253 236 236;
+
+  /* amber */
+  --a100: 92 74 0;
+  --a200: 110 88 0;
+  --a300: 128 102 0;
+  --a400: 156 124 0;
+  --a900: 236 217 160;
+  --a950: 253 246 227;
+
+  /* yellow */
+  --y300: 122 98 0;
+  --y800: 238 218 158;
+  --y950: 253 246 221;
+
+  /* fit-note callout — violet on soft lavender (Cursor Light token #7c3aed) */
+  --note-bg: #f6f2fd;
+  --note-border: #ddd0f7;
+  --note-fg: #5b21b6;
+  --note-label: #7c3aed;
+
+  /* status chips */
+  --st-red-bg: #fdecec;
+  --st-red-fg: #a30000;
+  --st-red-dot: #cc0000;
+  --st-yellow-bg: #fdf3d0;
+  --st-yellow-fg: #6e5800;
+  --st-yellow-dot: #cc9900;
+  --st-green-bg: #e9f7ea;
+  --st-green-fg: #067d06;
+  --st-green-dot: #00aa00;
+  --st-blue-bg: #eaf3fb;
+  --st-blue-fg: #004fa3;
+  --st-blue-dot: #0066cc;
+
+  --scroll-thumb: 200 200 200;
+}
+
+/* Kill Tailwind preflight's gray-200 default border (bright in dark mode). */
+*,
+::before,
+::after {
+  border-color: rgb(var(--edge));
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: rgb(var(--bg));
+  color: rgb(var(--g200));
+  font-family:
+    'Segoe UI',
+    system-ui,
+    -apple-system,
+    sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--scroll-thumb)) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgb(var(--scroll-thumb));
+  border-radius: 5px;
+  border: 2px solid rgb(var(--bg));
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center gap-1.5 rounded-md border border-edge bg-panel2 px-3 py-1.5 text-xs font-medium text-gray-200 transition-colors hover:border-gray-500 hover:bg-panel active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none;
+  }
+  .btn-primary {
+    @apply border-cyan-700 bg-cyan-950 text-cyan-200 hover:bg-cyan-900 hover:border-cyan-500;
+  }
+  .btn-danger {
+    @apply border-red-900 bg-red-950 text-red-300 hover:bg-red-900 hover:border-red-600;
+  }
+  .btn-green {
+    @apply border-green-800 bg-green-950 text-green-300 hover:bg-green-900 hover:border-green-500;
+  }
+  .input {
+    @apply rounded-md border border-edge bg-bg px-2.5 py-1.5 text-xs text-gray-100 outline-none placeholder:text-gray-600 focus:border-cyan-500;
+  }
+  .panel {
+    @apply rounded-lg border border-edge bg-panel;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-edge bg-panel2 px-2 py-0.5 text-[11px] text-gray-300;
+  }
+}
+
+/* Fit-note callout (theme-aware purple; values per [data-theme] above) */
+.fit-note {
+  border: 1px solid var(--note-border);
+  background: var(--note-bg);
+  color: var(--note-fg);
+  border-radius: 6px;
+}
+.fit-note-label {
+  color: var(--note-label);
+}

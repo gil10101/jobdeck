@@ -16,9 +16,9 @@ How well do the required/preferred skills align with the candidate's capabilitie
 | 40-59 | Partial match, significant upskilling needed |
 | 0-39 | Fundamental mismatch |
 
-**Strong match areas:** [YOUR_PRIMARY_SKILLS]
-**Moderate match areas:** [YOUR_SECONDARY_SKILLS]
-**Weak match areas:** [SKILLS_YOU_LACK]
+**Strong match areas:** Python (pandas/scikit-learn/PyTorch), SQL & T-SQL, ETL/ELT & dbt, AWS data stack (Glue, Athena, EMR, Kinesis, Firehose, Lambda, S3), PySpark, BigQuery, Tableau/Power BI, A/B testing & statistical modeling, data cleaning/validation
+**Moderate match areas:** JavaScript/TypeScript (React/Next.js), FastAPI/Flask, Docker, GitHub Actions CI/CD, Alteryx, R, applied ML/data science, LLM app integration
+**Weak match areas:** Production DBA operations (backups/replication/HA), Snowflake (limited), Kubernetes/Terraform (not on record), senior-level data-science research depth, security-clearance roles
 
 ### 2. Experience Match (0-100)
 Does work history align with what they're looking for?
@@ -30,9 +30,9 @@ Does work history align with what they're looking for?
 | 40-59 | Adjacent experience, would need to make the case |
 | 0-39 | Unrelated experience |
 
-**Strong:** [YOUR_DIRECT_EXPERIENCE_DOMAINS]
-**Moderate:** [YOUR_ADJACENT_EXPERIENCE]
-**Entry-level:** [ROLES_WITH_LIMITED_EXPERIENCE]
+**Strong:** Data analytics (SQL + Tableau dashboards, data quality/validation, program reporting — NYC Aging); end-to-end data/ML projects (churn pipeline, computer vision, full-stack AI app)
+**Moderate:** Data engineering (cloud/AWS + dbt + Spark from projects/coursework, less production tenure); full-stack software engineering (MetaBronx + Bertram)
+**Entry-level / internship-scope:** Data scientist roles (applied ML project experience, targeting internships incl. Winter 2026); DBA/data-platform (strong SQL, limited production-admin experience)
 
 ### 3. Behavioral/Culture Fit (0-100)
 Does the role and company culture match the behavioral profile?
@@ -63,19 +63,25 @@ Does this role advance career goals and contain tasks that energize?
 | 0-39 | Dead end or backwards step |
 
 **Career goals:**
-- [YOUR_CAREER_GOAL_1]
-- [YOUR_CAREER_GOAL_2]
-- [YOUR_CAREER_GOAL_3]
+- Land a data analyst / BI / analytics-engineering role that turns data into decisions (near-term, new-grad or FT)
+- Grow into data engineering — owning pipelines and cloud data platforms (AWS + dbt + Spark)
+- Deepen applied data science, primarily through internships (incl. Winter 2026) while finishing the M.S. (Aug 2026)
 
-**Motivation filter:** Evaluate not just whether you *can* do the tasks, but whether the tasks will *energize* you. Consider:
-- Tasks that energize: [YOUR_ENERGIZING_TASKS]
-- Tasks that drain: [YOUR_DRAINING_TASKS]
-- Non-task factors: leadership style, department culture, company values, degree of autonomy
+**Role-priority reminder (from setup):**
+1. Data Analyst / BI / Analytics Engineer (strongest fit)
+2. Data Engineer / Junior Data Engineer
+3. Database Administrator (junior) / data-platform — honest gap on production-DBA ops
+4. Data Scientist — internships only (incl. Winter 2026)
+
+**Motivation filter:** Evaluate not just whether Gil *can* do the tasks, but whether they will *energize* him. Consider:
+- Tasks that energize: building data pipelines/infra (ETL/ELT, warehousing, cloud data at scale); analytics → decisions (dashboards, metrics, stakeholder-facing analysis); applied ML/modeling
+- Tasks that drain: heavy on-call/ops firefighting; pure manual/spreadsheet-only reporting with no engineering; sales/consulting-style client travel
+- Non-task factors: mentorship and code review, autonomy/ownership, cross-functional collaboration, degree of learning support
 
 **Life situation alignment:** Consider personal constraints:
-- **Security**: [YOUR_FINANCIAL_SITUATION_CONTEXT]
-- **Flexibility**: [YOUR_SCHEDULE_CONSTRAINTS]
-- **Professional development**: [YOUR_GROWTH_PRIORITIES]
+- **Security**: Early-career, finishing M.S. (Aug 2026); values roles with growth and stability; U.S. citizen/PR (no sponsorship needed)
+- **Flexibility**: Based in Brooklyn; NYC metro (hybrid/onsite) or fully-remote US; open to internships alongside studies
+- **Professional development**: Prioritizes mentorship, code review, and a path from analytics toward data engineering
 
 ### 6. Salary Benchmark (Optional)
 

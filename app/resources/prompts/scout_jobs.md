@@ -1,0 +1,78 @@
+# Scout job postings for Gil Lu
+
+Repo root: `{{REPO_ROOT}}` (cwd). Today: {{TODAY_ISO}}.
+Your job: search the job boards, filter HARD against Gil's criteria, judge fit honestly, and write a machine-readable candidates file. You do NOT build documents and you do NOT apply — a human reviews your candidates afterward.
+
+## STEP 1 — Load the criteria
+Read the **Job Search Configuration** section of `CLAUDE.md`. The hard filters (recap, but CLAUDE.md is authoritative):
+- Roles: Data Analyst / BI / Analytics Engineer first; Data Engineer second; junior DBA third; Data Scientist internships only.
+- **Full-time: posted salary max ≤ $90k** (skip 90k+). **Internships & part-time data roles: always eligible** (no ceiling).
+- **Company size 51+** (no 1-50 startups).
+- **Team-based** roles preferred (reports to a manager, other analysts around) — deprioritize sole-analyst postings.
+- Location: NYC ≤25 mi (all boroughs), fully-remote US, Long Island (Nassau), Newark NJ.
+- **Posted within the last 14 days.**
+- NO women's/female clothing & lingerie brands (e.g. Adore Me). No security-clearance roles. No heavy on-call. No sales/consulting travel.
+
+## STEP 2 — Search the boards (bun CLIs, zero-auth except jobright)
+Run these with the Bash tool from the repo root (bun at `{{BUN}}`). All support `--format json`.
+
+1. **jobright (primary — personalized fit scores):**
+   `"{{BUN}}" run ".agents/skills/jobright-search/cli/src/cli.ts" recommend --min-size 51 --maxage 14 -n 40 --format json`
+2. **LinkedIn (public, no auth):**
+   `"{{BUN}}" run ".agents/skills/linkedin-search/cli/src/cli.ts" search -q "data analyst" --location "New York" --jobage 14 -n 25 --format json`
+   Vary `-q` across: "data analyst", "business intelligence analyst", "analytics engineer", "junior data engineer", "data analyst intern". For promising results fetch the full JD: `... detail <id> --format plain`
+3. **freehire (optional, remote-heavy):**
+   `"{{BUN}}" run ".agents/skills/freehire-search/cli/src/cli.ts" search -q "data analyst" --jobage 14 -n 25 --format json`
+4. You MAY also use WebSearch for cityjobs.nyc.gov / Indeed postings if the CLIs come up thin — but verify any city posting is OPEN and its civil-service minimum fits a quantitative M.S. (Staff Analyst yes; City Research Scientist needs a science/public-health master's — usually NO).
+
+If a CLI errors (auth/session), note it in `problems` and continue with the others.
+
+## STEP 3 — Filter, dedupe, judge
+- Apply the hard filters above ruthlessly. When salary is unlisted, keep the job but say so in fitNote.
+- SKIP anything already tracked or previously rejected — this list is off-limits:
+{{EXCLUDE_LIST}}
+- For each keeper, judge **fitScore 0-100** against Gil's actual profile (skills, new-grad level, team preference) and write a one-line **honest fitNote** naming any genuine gap (never inflate).
+- For strong keepers (fitScore ≥ 70), get the fullest posting text you can (LinkedIn `detail`, or the jobright summary if that's all there is).
+- Target: the best 5-15 candidates, quality over quantity.
+
+## STEP 4 — Write the output file (REQUIRED)
+Write `{{OUTPUT_PATH}}` as VALID JSON (no fences, no comments):
+```
+{
+  "schema": "app.candidates.v1",
+  "candidates": [
+    {
+      "position": "<exact title>",
+      "company": "<company>",
+      "salary": "<posted range or 'not listed'>",
+      "location": "<city / Remote US>",
+      "workModel": "<onsite|hybrid|remote|unknown>",
+      "datePosted": "<YYYY-MM-DD or null>",
+      "applyUrl": "<best apply URL — company site preferred over aggregator>",
+      "source": "<jobright|linkedin|freehire|cityjobs|web>",
+      "fitScore": 85,
+      "fitNote": "<one line, honest, gaps named>",
+      "postingText": "<the fullest posting text you gathered — NEVER empty>",
+      "skills": ["SQL", "Tableau", "Python"],
+      "minimumQualifications": ["<each required qualification as its own short string>"],
+      "preferredQualifications": ["<each preferred/nice-to-have as its own string>"],
+      "education": ["<degree requirements, e.g. Bachelor's in CS/Stats or equivalent>"],
+      "responsibilities": ["<each key responsibility, short>"],
+      "benefits": ["<benefits/perks if listed>"]
+    }
+  ],
+  "problems": []
+}
+```
+Extract the structured arrays faithfully from the posting text (empty array `[]` when the posting genuinely does not state that section — never invent items).
+
+## Extra instructions from Gil (may narrow or widen the search)
+{{INSTRUCTIONS}}
+
+## DO NOT
+- Do NOT touch `applications.xlsx`, `documents/applications/` (incl. TODO/), or any tracker data.
+- Do NOT apply to anything or build any documents.
+- Do NOT invent postings, salaries, or URLs — only report what a board actually returned.
+
+## FINALLY
+Reply with one line per candidate: `<fitScore> · <position> @ <company> · <salary>` plus any problems hit.

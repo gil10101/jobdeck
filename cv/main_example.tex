@@ -1,169 +1,145 @@
-%% Example CV - [YOUR_NAME]
-%% Comprehensive overview of all competencies, experience, and achievements.
-%% Use as a master reference when tailoring role-specific CVs.
-%%
-%% SETUP: Run /setup to populate this with your actual information.
-%% Compile with: lualatex main_example.tex
-%% (pdflatex often fails on modern MiKTeX with fontawesome5 font-expansion errors.)
+%% Master résumé - Gil Lu
+%% ATS-friendly single-column article template (all black, 1 page exactly).
+%% Tailor role-specific copies as cv/main_<company>.tex from this master.
+%% Compile with: pdflatex main_example.tex  (twice, for hyperref)
 
-\documentclass[11pt,a4paper,sans]{moderncv}
-\moderncvstyle{banking}
-\moderncvcolor{blue}
+\documentclass[10pt, letterpaper]{article}
 
-% Force both first and last name AND section headings to render in moderncv
-% blue (color1). Default banking on lualatex+MiKTeX leaves these black, which
-% looks inconsistent with the rest of the blue accent scheme.
-\renewcommand*{\firstnamestyle}[1]{{\fontsize{34}{36}\bfseries\upshape\color{color1}#1}}
-\renewcommand*{\lastnamestyle}[1]{{\fontsize{34}{36}\bfseries\upshape\color{color1}#1}}
-\renewcommand*{\sectionstyle}[1]{{\sectionfont\color{color1}#1}}
-
+% Minimal packages for ATS compliance
+\usepackage[
+    top=0.4in,
+    bottom=0.4in,
+    left=0.6in,
+    right=0.6in
+]{geometry}
 \usepackage[utf8]{inputenc}
-\usepackage{hyperref}
-\hypersetup{
-    colorlinks=true,
-    linkcolor=blue,
-    filecolor=magenta,
-    urlcolor=blue,
-    pdftitle={[YOUR_NAME] - CV},
-    pdfpagemode=FullScreen,
-}
-\usepackage[scale=0.80]{geometry}
-\usepackage{import}
+\usepackage[T1]{fontenc}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fontawesome5}
+\usepackage{lmodern}
 
-% personal data
-\name{[First]}{[Last]}
-\address{[Your Address, City, Country]}{}{}
-\phone[mobile]{[+XX XXXXXXXXXX]}
-\email{[your.email@example.com]}
-\extrainfo{\href{[https://linkedin.com/in/your-profile]}{LinkedIn}, \href{[https://github.com/your-username]}{GitHub}}
+% Emit a ToUnicode map so ligatures (fi, fl, ffi) extract as real characters in
+% the PDF text layer — otherwise an ATS reads "eciency"/"Snowake" instead of
+% "efficiency"/"Snowflake". Guarded so the file still compiles under xelatex/lualatex.
+\ifdefined\pdfgentounicode
+  \input{glyphtounicode}
+  \pdfgentounicode=1
+\fi
+
+% ATS-friendly settings
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0pt}
+\raggedright
+
+% Uniform section header with a rule
+\newcommand{\resumesection}[1]{
+    \vspace{6pt}
+    {\large\textbf{#1}}\\
+    \vspace{3pt}
+    \hrule
+    \vspace{6pt}
+}
+
+% Uniform job/education entry (ends its own paragraph so consecutive entries
+% never collide, regardless of what follows)
+\newcommand{\resumeentry}[4]{
+    \par\textbf{#1} \hfill #2 \\
+    \vspace{1pt}
+    #3 \hfill #4\par
+}
+
+% Uniform project entry
+\newcommand{\projectentry}[2]{
+    \textbf{#1} \newline #2
+    \vspace{2pt}
+}
+
+% ATS-friendly uniform bullet points
+\newenvironment{resumelist}{
+    \begin{itemize}[leftmargin=15pt, topsep=0pt, itemsep=2pt, parsep=0pt]
+}{
+    \end{itemize}
+    \vspace{4pt}
+}
 
 \begin{document}
 
-\makecvtitle
+% Header
+\begin{center}
+{\Huge\textbf{Gil Lu}}\\ \vspace{4pt}{\large Brooklyn, NY 11220} \\
+\vspace{4pt}
+\faEnvelope\ \href{mailto:gillu1212@gmail.com}{gillu1212@gmail.com} \hspace{.4cm}
+\faPhone\ \href{tel:+19294274470}{929-427-4470} \hspace{.4cm}
+\faLinkedin\ \href{https://www.linkedin.com/in/gil-lu}{linkedin.com/in/gil-lu} \hspace{.4cm}
+\faGithub\ \href{https://github.com/gil10101}{github.com/gil10101} \hspace{.4cm}
+\faGlobe\ \href{https://www.gillu.me}{gillu.me}
+\end{center}
 
-% ============================================================
-%     PROFILE STATEMENT
-% ============================================================
+\resumesection{Education}
 
-\vspace{6pt}
-\small{[Write a 3-5 line profile statement tailored to the role you're applying for. Focus on what makes you uniquely qualified. Example: "Data scientist with a PhD in [field] and X years of industry experience. Combines deep domain expertise in [domain] with strong applied machine learning and Python development skills. Experienced in developing end-to-end ML pipelines, from data ingestion to stakeholder-facing dashboards."]}
-
-% ============================================================
-%     CORE COMPETENCIES
-% ============================================================
-
-\section{Core Competencies}
-\vspace{1pt}
-\begin{itemize}
-
-\item \textbf{[Skill Category 1]}: [Specific skills, frameworks, tools. Be concrete.]
-
-\item \textbf{[Skill Category 2]}: [Specific skills, frameworks, tools.]
-
-\item \textbf{[Skill Category 3]}: [Specific skills, frameworks, tools.]
-
-\item \textbf{[Skill Category 4]}: [Domain expertise, methods, approaches.]
-
-\item \textbf{[Skill Category 5]}: [Tools, platforms, software.]
-
-\end{itemize}
-
-% ============================================================
-%     PROFESSIONAL EXPERIENCE
-% ============================================================
-
-\section{Professional Experience}
+\resumeentry{CUNY Baruch College}{\textbf{Aug 2026}}
+{\textit{M.S. Information Systems, Data Analytics}}{3.80/4.0}
 \vspace{3pt}
-\begin{itemize}
+\resumeentry{CUNY Brooklyn College}{\textbf{May 2025}}
+{\textit{B.S. Computer Science, Data Science Minor}}{3.55/4.0}
 
-% --- Most Recent Role ---
-\item{\cventry{[YYYY--Present]}{[Job Title]}{[Company]}{[City, Country]}{}{\vspace{1pt}
-\begin{itemize}
-    \item [Achievement or responsibility 1 - be specific, use numbers where possible]
-    \item [Achievement or responsibility 2]
-    \item [Achievement or responsibility 3]
-    \item [Achievement or responsibility 4]
-\end{itemize}}}
+\resumesection{Skills}
 
+\textbf{Languages:} Python, SQL, T-SQL, R, JavaScript, TypeScript, Java
+
+\vspace{2pt}
+\textbf{Data Engineering \& Cloud:} ETL/ELT, dbt, Apache Spark/PySpark, Hadoop (AWS EMR), AWS (S3, Glue, Athena, Kinesis, Firehose, Lambda, EC2, Aurora, OpenSearch), BigQuery
+
+\vspace{2pt}
+\textbf{ML \& Statistics:} pandas, NumPy, scikit-learn, PyTorch, TensorFlow, XGBoost, statsmodels, SciPy; regression, time-series, A/B testing
+
+\vspace{2pt}
+\textbf{BI \& Visualization:} Tableau, Tableau Prep, Power BI, Alteryx, Excel, Matplotlib, Seaborn, Plotly
+
+\vspace{2pt}
+\textbf{Databases:} PostgreSQL, MySQL, SQL Server (SSMS), MongoDB, Neo4j, Firestore, Supabase, Snowflake
+
+\vspace{2pt}
+\textbf{Developer Tools:} Git, GitHub Actions (CI/CD), Docker, Flask, FastAPI, Node.js, React, Next.js, OpenCV, CUDA
+
+\vspace{2pt}
+\textbf{Certifications:} IBM Data Analyst Professional Certificate
+
+\resumesection{Experience}
+
+\resumeentry{Data Analytics Intern}{\textbf{Feb 2026 -- May 2026}}
+{\textit{NYC Aging, Social Service Agency}}{\textit{New York, NY}}
+\begin{itemize}[leftmargin=15pt, topsep=2pt, itemsep=1pt, parsep=0pt]
+\item Analyzed and validated NYC Aging datasets using SQL and Tableau to ensure data quality and integrity across program services for older New Yorkers; produced reports and dashboards for program performance evaluation
+\item Designed a centralized interface for request tracking, improving accessibility and operational efficiency across the data request management pipeline
+\end{itemize}
 \vspace{3pt}
-
-% --- Previous Role ---
-\item{\cventry{[YYYY--YYYY]}{[Job Title]}{[Company]}{[City, Country]}{}{\vspace{1pt}
-\begin{itemize}
-    \item [Achievement or responsibility 1]
-    \item [Achievement or responsibility 2]
-    \item [Achievement or responsibility 3]
-\end{itemize}}}
-
-\vspace{3pt}
-
-% --- Earlier Role ---
-\item{\cventry{[YYYY--YYYY]}{[Job Title]}{[Company]}{[City, Country]}{}{\vspace{1pt}
-\begin{itemize}
-    \item [Achievement or responsibility 1]
-    \item [Achievement or responsibility 2]
-\end{itemize}}}
-
+\resumeentry{Software Engineer Intern}{\textbf{Jul 2021 -- Aug 2021}}
+{\textit{MetaBronx, Startup Accelerator}}{\textit{Brooklyn, NY (Remote)}}
+\begin{itemize}[leftmargin=15pt, topsep=2pt, itemsep=1pt, parsep=0pt]
+\item Collaborated with a multidisciplinary team to support full-stack development, research Python-based workflows, optimize backend processes, contribute to front-end improvements, and assist efforts to secure sponsorships for organizational programs
 \end{itemize}
 
-% ============================================================
-%     EDUCATION
-% ============================================================
+\resumesection{Projects}
 
-\section{Education}
-\vspace{1pt}
-\begin{itemize}
+\projectentry{Orchid -- Collaborative Data Notebook IDE}{\textit{orchidide.com}}
+\begin{resumelist}
+\item Built a collaborative cloud data-notebook IDE for students and data analysts, with Python and SQL notebooks that query warehouses such as Snowflake, BigQuery, and PostgreSQL
+\item Developed an AI-enabled assistant that reads and writes SQL and Python directly in the notebook, with real-time multi-user collaboration
+\end{resumelist}
 
-\item{\cventry{[YYYY--YYYY]}{[Degree] in [Field]}{[Institution]}{[City, Country]}{}{\vspace{1pt}
-Thesis: ``[Thesis Title].'' [Brief description of research focus.]
-}}
+\projectentry{Customer Churn Analysis and Prediction -- Telecommunications Analytics}{\textit{github.com/gil10101/Customer-Churn-Analysis-and-Prediction}}
+\begin{resumelist}
+\item Developed end-to-end churn prediction pipeline analyzing 7,000+ records using Python (pandas, scikit-learn, PyTorch), performing EDA, feature engineering, and statistical analysis including survival modeling and customer segmentation to identify retention drivers
+\item Implemented 7 machine learning models (Ensemble, XGBoost, Neural Networks) achieving 86.9\% accuracy; created 40+ visualizations and implemented A/B testing frameworks to deliver actionable strategies reducing customer churn risk
+\end{resumelist}
 
-\vspace{3pt}
-
-\item{\cventry{[YYYY--YYYY]}{[Degree] in [Field]}{[Institution]}{[City, Country]}{}{\vspace{1pt}
-[Brief description or key topics.]
-}}
-
-\end{itemize}
-
-% ============================================================
-%     LANGUAGES
-% ============================================================
-
-\section{Languages}
-\vspace{1pt}
-\begin{itemize}
-\item [Language 1] (native), [Language 2] (fluent), [Language 3] (intermediate).
-\end{itemize}
-
-% ============================================================
-%     PUBLICATIONS (optional)
-% ============================================================
-
-\section{Publications}
-\vspace{1pt}
-\begin{itemize}
-\item [Author(s)] ([Year]). [Title]. [Journal/Conference]. \href{[DOI_URL]}{DOI link}
-\end{itemize}
-
-% ============================================================
-%     HONORS AND AWARDS (optional)
-% ============================================================
-
-\section{Honors and Awards}
-\vspace{1pt}
-\begin{itemize}
-\item{\textbf{[Award Name]} -- [Event/Organization] ([Year]).}
-\end{itemize}
-
-% ============================================================
-%     REFERENCES
-% ============================================================
-
-\section{References}
-\vspace{1pt}
-\begin{itemize}
-\item{Available upon request.}
-\end{itemize}
+\projectentry{Bertram -- AI Email/Inbox Management Platform}{\textit{github.com/gil10101/Bertram -- bertrammail.com}}
+\begin{resumelist}
+\item Developed a full-stack email client with unified Gmail and Outlook inbox sync, Google OAuth 2.0, and a Next.js/TypeScript frontend backed with a FastAPI REST API and PostgreSQL
+\item Integrated LLM API to deliver smart email capabilities including automated summarization, reply drafting, priority classification, and inbox organization; developed meeting scheduling and threaded conversation views
+\end{resumelist}
 
 \end{document}

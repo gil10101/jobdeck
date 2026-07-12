@@ -1,50 +1,48 @@
 # Behavioral Profile
 
-<!-- SETUP: This file is populated by running /setup -->
-<!-- You can use results from PI, DISC, Myers-Briggs, StrengthsFinder, or a self-assessment -->
+*[Self-assessment only — no formal instrument (PI/DISC/Myers-Briggs/StrengthsFinder) on file. Synthesized from Gil's setup answers. Review before relying on this in high-stakes contexts.]*
 
 ## Overview
-[YOUR_NAME]'s behavioral assessment identifies them as a **[PROFILE_TYPE]** pattern. [1-2 SENTENCE_SUMMARY].
+Gil presents as a **structured builder**: happiest turning ambiguous data problems into working pipelines and clear decisions, effective both under mentorship and with the autonomy to own a problem end-to-end. Comfortable operating across technical and non-technical stakeholders.
 
 ## Core Behavioral Drives
 
 | Drive | Level | Meaning |
 |-------|-------|---------|
-| [DRIVE_1] | [LEVEL] | [DESCRIPTION] |
-| [DRIVE_2] | [LEVEL] | [DESCRIPTION] |
-| [DRIVE_3] | [LEVEL] | [DESCRIPTION] |
-| [DRIVE_4] | [LEVEL] | [DESCRIPTION] |
+| Ownership / initiative | High | Wants to own problems end-to-end; delivered several projects solo (churn, LPR, Bertram) |
+| Structure / learning orientation | High | Values mentorship, code review, and clear onboarding; still early-career and deliberately growing |
+| Collaboration | Moderate–High | Works across product/ops/stakeholders (NYC Aging data-request pipeline) |
+| Focus / depth | High | Most productive in long uninterrupted blocks on hard technical work |
 
 ## Strongest Behaviors
-- **[BEHAVIOR_1]:** [DESCRIPTION]
-- **[BEHAVIOR_2]:** [DESCRIPTION]
-- **[BEHAVIOR_3]:** [DESCRIPTION]
+- **End-to-end delivery:** Takes projects from raw data to shipped output (pipeline, model, dashboard, or app).
+- **Analytical translation:** Turns messy datasets into metrics and decisions non-technical stakeholders can use.
+- **Breadth with follow-through:** Ranges across analytics, data engineering, ML, and full-stack, and finishes what he starts.
 
 ## How You Work Best
-- [ENVIRONMENT_PREFERENCE_1]
-- [ENVIRONMENT_PREFERENCE_2]
-- [ENVIRONMENT_PREFERENCE_3]
+- Junior-friendly teams with real engineering work, mentorship, and code review
+- Autonomy and trust to own a problem end-to-end
+- Cross-functional collaboration with clear stakeholders
+- Blocks of deep focused work rather than constant context-switching
 
 ## Growth Areas (frame positively in applications)
-- **[AREA_1]:** [HOW_TO_FRAME_IT_POSITIVELY]
-- **[AREA_2]:** [HOW_TO_FRAME_IT_POSITIVELY]
+- **Production DBA operations:** Strong on SQL, T-SQL, and query optimization; lighter on production administration (backups, replication, HA). Frame as "strong SQL/data foundations, eager to grow into platform/DBA ops."
+- **Data-science modeling depth:** Solid applied-ML project record; deeper DS is a deliberate growth area (pursuing via internships). Frame as "hands-on ML project experience, actively deepening."
 
 ## Mapping to Job Posting Language
 
 When a job posting mentions these keywords, it's a **strong behavioral fit**:
-- [KEYWORD_OR_PHRASE_THAT_MATCHES_YOUR_STYLE]
-- [ANOTHER_KEYWORD]
+- "own the pipeline / end-to-end", "build from scratch", "mentorship / growth", "cross-functional", "data-driven decisions", "dashboards for stakeholders", "learning environment"
 
 When a job posting mentions these, flag as **potential friction** (not deal-breaker):
-- [KEYWORD_OR_PHRASE_THAT_MIGHT_CLASH]
-- [ANOTHER_KEYWORD]
+- "24/7 on-call", "production support rotation", "fast-paced client travel", "quota / sales-driven", "heavy legacy maintenance only"
 
 ## Management Style Preferences
-- [WHAT_MANAGEMENT_STYLE_WORKS_FOR_YOU]
-- [WHAT_DOESN'T_WORK]
+- Works well with: clear expectations, regular feedback/code review, and room to own outcomes
+- Works less well with: pure firefighting/pager-driven management or micromanaged, purely manual reporting work
 
 ## Using This in Applications
-- **Cover letters:** [HOW_TO_WEAVE_IN_BEHAVIORAL_STRENGTHS]
-- **CV:** [WHAT_TO_EMPHASIZE]
-- **Interviews:** [WHAT_STAR_EXAMPLES_TO_USE]
-- **Don't overstate:** [WHAT_NOT_TO_CLAIM]
+- **Cover letters:** Lead with end-to-end ownership and turning data into decisions; name a concrete project.
+- **CV:** Emphasize measurable outcomes and breadth (analytics → engineering → ML).
+- **Interviews:** Use the STAR examples in `07-interview-prep.md` (NYC Aging, churn model, Bertram).
+- **Don't overstate:** No formal behavioral assessment; do not claim production-DBA or senior-DS depth.
