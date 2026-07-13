@@ -38,6 +38,30 @@ export function validateProfile(
     })
     .filter((r) => r.title.trim())
 
+  // Same gap for arrays NESTED inside entry objects (skeleton arrays are empty,
+  // so mergeShape can't heal per-element): an extractor that omits e.g. an
+  // experience entry's `technologies` or an education entry's `coursework`
+  // leaves them undefined, and every consumer (renderProfileMd, the editor)
+  // reads `.length` on them. Default them all to [].
+  const arr = <T>(v: T[] | undefined | null): T[] => (Array.isArray(v) ? v : [])
+  merged.identity.languages = arr(merged.identity.languages)
+  merged.education = arr(merged.education).map((e) => ({ ...e, coursework: arr(e.coursework) }))
+  merged.experience = arr(merged.experience).map((e) => ({
+    ...e,
+    bullets: arr(e.bullets),
+    technologies: arr(e.technologies)
+  }))
+  merged.projects = arr(merged.projects).map((pr) => ({
+    ...pr,
+    bullets: arr(pr.bullets),
+    technologies: arr(pr.technologies),
+    mustKeepPhrases: arr(pr.mustKeepPhrases)
+  }))
+  merged.skills = arr(merged.skills).map((s) => ({ ...s, items: arr(s.items) }))
+  merged.certifications = arr(merged.certifications)
+  merged.publications = arr(merged.publications)
+  merged.awards = arr(merged.awards)
+
   // Hard requirements — the few fields nothing works without.
   const id = merged.identity
   if (!id.fullName.trim()) problems.push('identity.fullName is required')
