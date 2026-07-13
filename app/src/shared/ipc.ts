@@ -92,7 +92,7 @@ export interface IpcInvokeContract {
     }
     res: RunMeta
   }
-  'library:upload': { req: void; res: { added: number } }
+  'library:upload': { req: void; res: { added: number; names: string[] } }
   'onboarding:complete': { req: void; res: void }
   'candidates:list': { req: void; res: CandidateJob[] }
   'candidates:accept': { req: { id: string }; res: { candidate: CandidateJob; run: RunMeta } }

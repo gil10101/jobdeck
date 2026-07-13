@@ -15,7 +15,7 @@ export default function OnboardingWizard(): JSX.Element {
   const toast = useApp((s) => s.toast)
   const [step, setStep] = useState<Step>(config?.workspacePath ? 'sources' : 'workspace')
   const [busy, setBusy] = useState(false)
-  const [uploadCount, setUploadCount] = useState(0)
+  const [uploadNames, setUploadNames] = useState<string[]>([])
   const [pasteText, setPasteText] = useState('')
   const [importedV1, setImportedV1] = useState(false)
   const [run, setRun] = useState<RunMeta | null>(null)
@@ -97,9 +97,9 @@ export default function OnboardingWizard(): JSX.Element {
   // ---- step: sources ----
   const upload = async (): Promise<void> => {
     try {
-      const { added } = await call('library:upload', undefined)
+      const { added, names } = await call('library:upload', undefined)
       if (added) {
-        setUploadCount((n) => n + added)
+        setUploadNames((prev) => [...prev, ...names])
         toast(`${added} file${added === 1 ? '' : 's'} added to your library`, 'success')
       }
     } catch (err) {
@@ -205,7 +205,7 @@ export default function OnboardingWizard(): JSX.Element {
             </p>
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <button className="btn btn-primary" onClick={upload}>
-                ⇪ Add files… {uploadCount > 0 && `(${uploadCount} added)`}
+                ⇪ Add files…
               </button>
               {importedV1 && (
                 <span className="chip border-green-800 text-green-300">
@@ -213,6 +213,15 @@ export default function OnboardingWizard(): JSX.Element {
                 </span>
               )}
             </div>
+            {uploadNames.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                {uploadNames.map((n, i) => (
+                  <span key={`${n}-${i}`} className="chip text-[10px] text-gray-300">
+                    {n}
+                  </span>
+                ))}
+              </div>
+            )}
             <textarea
               className="input mt-3 min-h-[120px] w-full resize-y font-mono text-[11px]"
               placeholder="Optional: paste anything extra — profile links (LinkedIn/GitHub/portfolio), skills lists, salary expectations, locations, deal-breakers…"
@@ -222,7 +231,7 @@ export default function OnboardingWizard(): JSX.Element {
             <div className="mt-4 flex items-center gap-2">
               <button
                 className="btn btn-primary"
-                disabled={busy || (uploadCount === 0 && !pasteText.trim() && !importedV1)}
+                disabled={busy || (uploadNames.length === 0 && !pasteText.trim() && !importedV1)}
                 onClick={extract}
               >
                 Extract my profile →

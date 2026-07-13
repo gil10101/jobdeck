@@ -295,9 +295,10 @@ export function registerIpc(services: Services): void {
         { name: 'All files', extensions: ['*'] }
       ]
     })
-    if (result.canceled) return { added: 0 }
+    if (result.canceled) return { added: 0, names: [] }
     fs.mkdirSync(UPLOADS_DIR, { recursive: true })
     let added = 0
+    const names: string[] = []
     for (const src of result.filePaths) {
       try {
         let name = path.basename(src)
@@ -308,12 +309,13 @@ export function registerIpc(services: Services): void {
           dst = path.join(UPLOADS_DIR, `${path.basename(name, ext)}_${i++}${ext}`)
         }
         fs.copyFileSync(src, dst)
+        names.push(path.basename(dst))
         added++
       } catch (err) {
         console.error('[library] upload copy failed:', err)
       }
     }
-    return { added }
+    return { added, names }
   })
 
   // ---- recompile (edit .tex → rebuild PDF, no agent) ----
