@@ -245,7 +245,13 @@ export function registerIpc(services: Services): void {
       return { draft: null, error: String(err) }
     }
   })
-  handle('onboard:start', ({ source, text, files }) => {
+  handle('onboard:start', ({ source, text, files, draft, answers }) => {
+    if (source === 'refine') {
+      const qa = (answers ?? []).filter((a) => a.answer.trim().length > 0)
+      if (!draft) throw new Error('refine needs the current draft')
+      if (!qa.length) throw new Error('no answers to apply')
+      return runner.start({ kind: 'onboard', refineDraft: draft, refineAnswers: qa })
+    }
     let sourceFiles: string[] = []
     if (source === 'v1-import') {
       const stage = path.join(ONBOARDING_DIR, 'v1-import')

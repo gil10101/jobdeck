@@ -20,6 +20,7 @@ const TEMPLATE_PATH = path.join(APP_DIR, 'resources', 'prompts', 'build_applicat
 const SCOUT_TEMPLATE_PATH = path.join(APP_DIR, 'resources', 'prompts', 'scout_jobs.md')
 const INTERVIEW_TEMPLATE_PATH = path.join(APP_DIR, 'resources', 'prompts', 'interview_prep.md')
 const ONBOARD_TEMPLATE_PATH = path.join(APP_DIR, 'resources', 'prompts', 'onboard_profile.md')
+const REFINE_TEMPLATE_PATH = path.join(APP_DIR, 'resources', 'prompts', 'refine_profile.md')
 
 function fill(template: string, replacements: Record<string, string>): string {
   let out = template
@@ -179,5 +180,26 @@ export function buildOnboardPrompt(s: OnboardSlots): string {
     OUTPUT_PATH: s.outputPath,
     SOURCE_SECTION: parts.join('\n'),
     PROFILE_JSON_SCHEMA: JSON.stringify(emptyProfile(), null, 2)
+  })
+}
+
+export interface RefineSlots {
+  draft: ProfileFile
+  answers: { question: string; answer: string }[]
+  outputPath: string
+}
+
+/** Merge gap answers into an existing draft — much shorter run than a full extraction. */
+export function buildRefinePrompt(s: RefineSlots): string {
+  const template = fs.readFileSync(REFINE_TEMPLATE_PATH, 'utf-8')
+  const answersMd = s.answers
+    .map((a) => `- Q: ${a.question}\n  A: ${a.answer}`)
+    .join('\n')
+  return fill(template, {
+    REPO_ROOT: REPO_ROOT,
+    TODAY_ISO: todayISO(),
+    OUTPUT_PATH: s.outputPath,
+    DRAFT_JSON: JSON.stringify(s.draft, null, 2),
+    ANSWERS_SECTION: answersMd || '(none)'
   })
 }

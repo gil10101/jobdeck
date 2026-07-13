@@ -86,9 +86,12 @@ export interface IpcInvokeContract {
   }
   'onboard:start': {
     req: {
-      source: 'v1-import' | 'text' | 'files' | 'uploads'
+      source: 'v1-import' | 'text' | 'files' | 'uploads' | 'refine'
       text?: string
       files?: string[]
+      /** refine: current draft + gap answers to merge into it. */
+      draft?: ProfileFile
+      answers?: { question: string; answer: string }[]
     }
     res: RunMeta
   }

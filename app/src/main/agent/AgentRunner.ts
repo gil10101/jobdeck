@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { CandidateJob, IntakeItem, RunEvent, RunKind, RunMeta, RunStatus } from '@shared/types'
+import type { ProfileFile } from '@shared/profile'
 import {
   APPLICATIONS_DIR,
   REPO_ROOT,
@@ -19,7 +20,7 @@ import type { Store } from '../store/Store'
 import type { TrackerRepo } from '../store/trackerRepo'
 import type { TodoWatcher } from '../fsops/TodoWatcher'
 import { mapMessage, stamp, type PartialRunEvent } from './eventMap'
-import { buildInterviewPrompt, buildOnboardPrompt, buildPrompt, buildScoutPrompt } from './prompt'
+import { buildInterviewPrompt, buildOnboardPrompt, buildPrompt, buildRefinePrompt, buildScoutPrompt } from './prompt'
 import { RunStore } from './runStore'
 
 export interface RunInput {
@@ -39,6 +40,9 @@ export interface RunInput {
   /** Onboard runs: profile sources. */
   sourceFiles?: string[]
   sourceText?: string
+  /** Onboard refine runs: merge gap answers into this draft instead of extracting. */
+  refineDraft?: ProfileFile
+  refineAnswers?: { question: string; answer: string }[]
 }
 
 interface ActiveRun {
@@ -238,10 +242,18 @@ export class AgentRunner {
   private buildRunPrompt(run: ActiveRun): string {
     const kind = run.meta.kind
     if (kind === 'onboard') {
+      const outputPath = path.join(TMP_DIR, 'profile.draft.json')
+      if (run.input.refineDraft) {
+        return buildRefinePrompt({
+          draft: run.input.refineDraft,
+          answers: run.input.refineAnswers ?? [],
+          outputPath
+        })
+      }
       return buildOnboardPrompt({
         sourceFiles: run.input.sourceFiles ?? [],
         sourceText: run.input.sourceText ?? '',
-        outputPath: path.join(TMP_DIR, 'profile.draft.json')
+        outputPath
       })
     }
     const profile = loadProfile()
