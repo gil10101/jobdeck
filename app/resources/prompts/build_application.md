@@ -64,7 +64,7 @@ Re-read the posting and your drafts as a skeptical reviewer:
 Write `applications/{{SLUG}}/report.json` as VALID JSON (no fences):
 ```
 {
-  "schema": "app.report.v2",
+  "schema": "app.report.v1",
   "slug": "{{SLUG}}",
   "position": "<exact role title>",
   "company": "<company name>",
