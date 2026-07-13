@@ -25,10 +25,10 @@ job_scraper/*.md
 *_BehavioralReport.pdf
 linkedin_Profile.pdf
 
-# Personal profile / v1 legacy assistant — this is per-user data that belongs in
+# Personal profile / legacy assistant — this is per-user data that belongs in
 # the app's workspace (profile.json), not the repo. Kept locally, never committed.
+# (cv/main_example.tex IS tracked — it's a placeholder template, no personal data.)
 /CLAUDE.md
-/cv/main_example.tex
 /.claude/skills/job-application-assistant/
 /.claude/skills/job-scraper/search-queries.md
 # Debug artifacts
