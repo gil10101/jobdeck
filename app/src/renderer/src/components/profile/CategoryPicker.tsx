@@ -108,19 +108,19 @@ export default function CategoryPicker(props: {
       )}
 
       {/* browse: categories | roles */}
-      <div className="mt-2 flex gap-2 rounded-md border border-gray-800">
-        <div className="w-[190px] shrink-0 overflow-auto border-r border-gray-800 py-1">
+      <div className="mt-2 flex gap-2 rounded-md border border-edge">
+        <div className="w-[190px] shrink-0 overflow-auto border-r border-edge py-1">
           {props.taxonomy.map((c, i) => (
             <button
               key={c.category}
               type="button"
               className={`flex w-full items-center justify-between px-2 py-1 text-left text-[11px] ${
-                i === active ? 'bg-cyan-950/60 text-cyan-200' : 'text-gray-300 hover:bg-gray-900'
+                i === active ? 'bg-cyan-950/60 text-cyan-200' : 'text-gray-300 hover:bg-panel2'
               }`}
               onClick={() => setActive(i)}
             >
               {c.category}
-              <span className="text-[9px] text-gray-600">
+              <span className="text-[9px] text-gray-500">
                 {c.roles.filter((r) => chosen.has(r.toLowerCase())).length || ''}
               </span>
             </button>
@@ -135,12 +135,11 @@ export default function CategoryPicker(props: {
                 type="button"
                 className={`chip ${
                   on
-                    ? 'border-cyan-700 bg-cyan-900/60 text-cyan-100'
-                    : 'text-gray-300 hover:border-gray-600'
+                    ? 'border-cyan-700 bg-cyan-900/60 text-cyan-200'
+                    : 'text-gray-300 hover:border-gray-500'
                 }`}
                 onClick={() => toggle(role)}
               >
-                {on ? '✓ ' : ''}
                 {role}
               </button>
             )

@@ -55,7 +55,7 @@ export function Section(props: {
 }): JSX.Element {
   const [open, setOpen] = useState(props.defaultOpen ?? false)
   return (
-    <div className="mt-2 rounded-md border border-gray-800">
+    <div className="mt-2 rounded-md border border-edge">
       <button
         type="button"
         className="flex w-full items-center gap-2 px-3 py-2 text-left"
@@ -67,7 +67,7 @@ export function Section(props: {
           <span className="ml-auto text-[10px] text-gray-500">{props.summary}</span>
         )}
       </button>
-      {open && <div className="border-t border-gray-800 px-3 py-2 pb-3">{props.children}</div>}
+      {open && <div className="border-t border-edge px-3 py-2 pb-3">{props.children}</div>}
     </div>
   )
 }
@@ -274,7 +274,7 @@ export function EntryList<T>(props: {
   return (
     <div>
       {items.map((item, i) => (
-        <div key={i} className="mt-2 rounded-md border border-gray-800 p-2">
+        <div key={i} className="mt-2 rounded-md border border-edge p-2">
           <div className="flex items-center">
             <span className="text-[11px] font-medium text-gray-300">
               {props.title(item, i) || `#${i + 1}`}
