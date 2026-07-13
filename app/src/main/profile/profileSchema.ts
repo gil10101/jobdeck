@@ -23,6 +23,21 @@ export function validateProfile(
   const merged = mergeShape(base, input, '', healed) as unknown as ProfileFile
   merged.schema = PROFILE_SCHEMA_ID
 
+  // mergeShape passes array elements through verbatim, so an extractor that
+  // wrote target roles as bare strings (["Data Analyst", ...]) rather than
+  // { title, priority } objects would reach the UI/scout unhealed. Normalize
+  // the element shape and renumber priority from order (1-based).
+  merged.searchConfig.targetRoles = (merged.searchConfig.targetRoles as unknown[])
+    .map((r, i): { title: string; priority: number } => {
+      if (typeof r === 'string') return { title: r, priority: i + 1 }
+      const o = (r ?? {}) as { title?: unknown; priority?: unknown }
+      return {
+        title: typeof o.title === 'string' ? o.title : '',
+        priority: typeof o.priority === 'number' ? o.priority : i + 1
+      }
+    })
+    .filter((r) => r.title.trim())
+
   // Hard requirements — the few fields nothing works without.
   const id = merged.identity
   if (!id.fullName.trim()) problems.push('identity.fullName is required')

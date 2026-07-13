@@ -19,7 +19,18 @@ export default function CategoryPicker(props: {
 }): JSX.Element {
   const [active, setActive] = useState(0)
   const [custom, setCustom] = useState('')
-  const selected = props.selected ?? []
+  // Tolerate malformed input (e.g. an extractor that wrote bare strings instead
+  // of { title, priority }); render never assumes the object shape.
+  const selected: PickedRole[] = ((props.selected ?? []) as unknown[])
+    .map((r, i): PickedRole =>
+      typeof r === 'string'
+        ? { title: r, priority: i + 1 }
+        : {
+            title: typeof (r as PickedRole)?.title === 'string' ? (r as PickedRole).title : '',
+            priority: typeof (r as PickedRole)?.priority === 'number' ? (r as PickedRole).priority : i + 1
+          }
+    )
+    .filter((r) => r.title.trim())
   const chosen = new Set(selected.map((r) => r.title.toLowerCase()))
 
   const renumber = (list: { title: string }[]): PickedRole[] =>
