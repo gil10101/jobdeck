@@ -3,18 +3,21 @@ import type { ProfileFile } from '@shared/profile'
 import type { RunMeta } from '@shared/types'
 import { call, onPush } from '../../api'
 import { useApp } from '../../store'
+import ProfileEditor from '../../components/profile/ProfileEditor'
+import GapAnswers from '../../components/profile/GapAnswers'
 
 /**
- * M2 minimal profile management: extract via onboarding agent, review the
- * draft as editable JSON, validate + save. The full sectioned form arrives
- * with the M4 wizard.
+ * Profile management: extract via onboarding agent, review the draft in the
+ * structured ProfileEditor, answer gaps via a refine agent run, validate +
+ * save.
  */
 export default function ProfilePanel(): JSX.Element {
   const toast = useApp((s) => s.toast)
   const navigate = useApp((s) => s.navigate)
   const [profile, setProfile] = useState<ProfileFile | null>(null)
   const [extracting, setExtracting] = useState<RunMeta | null>(null)
-  const [draftText, setDraftText] = useState<string | null>(null)
+  const [draft, setDraft] = useState<ProfileFile | null>(null)
+  const [gapAnswers, setGapAnswers] = useState<Record<string, string>>({})
   const [pasteText, setPasteText] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -30,10 +33,11 @@ export default function ProfilePanel(): JSX.Element {
       if (meta.id !== extracting.id) return
       if (meta.status === 'succeeded') {
         setExtracting(null)
-        void call('profile:draft', { runId: meta.id }).then(({ draft, error }) => {
-          if (draft) {
-            setDraftText(JSON.stringify(draft, null, 2))
-            toast(`Draft ready — review the gaps, edit, then Save (${meta.summary ?? ''})`, 'success')
+        void call('profile:draft', { runId: meta.id }).then(({ draft: d, error }) => {
+          if (d) {
+            setDraft(d)
+            setGapAnswers({})
+            toast(`Draft ready — review, answer gaps, then Save (${meta.summary ?? ''})`, 'success')
           } else if (error) toast(error, 'error')
         })
       } else if (meta.status === 'failed' || meta.status === 'cancelled') {
@@ -71,14 +75,33 @@ export default function ProfilePanel(): JSX.Element {
   }
 
   const saveDraft = async (): Promise<void> => {
-    if (!draftText) return
+    if (!draft) return
     setBusy(true)
     try {
-      const parsed = JSON.parse(draftText) as ProfileFile
-      const saved = await call('profile:save', { profile: parsed })
+      const saved = await call('profile:save', { profile: draft })
       setProfile(saved)
-      setDraftText(null)
+      setDraft(null)
       toast(`Profile saved — ${saved.identity.fullName} (${saved.documents.fileBasename}_*)`, 'success')
+    } catch (err) {
+      setBusy(false)
+      toast(String(err), 'error')
+      return
+    }
+    setBusy(false)
+  }
+
+  const applyAnswers = async (): Promise<void> => {
+    if (!draft) return
+    const answers = Object.entries(gapAnswers)
+      .map(([question, answer]) => ({ question, answer: answer.trim() }))
+      .filter((a) => a.answer)
+    if (!answers.length) return
+    setBusy(true)
+    try {
+      const meta = await call('onboard:start', { source: 'refine', draft, answers })
+      setExtracting(meta)
+      toast('Merging your answers…', 'success')
+      void useApp.getState().refreshRuns()
     } catch (err) {
       toast(String(err), 'error')
     } finally {
@@ -104,7 +127,7 @@ export default function ProfilePanel(): JSX.Element {
             </span>
             <button
               className="btn ml-auto px-2 py-0.5 text-[10px]"
-              onClick={() => setDraftText(JSON.stringify(profile, null, 2))}
+              onClick={() => setDraft(profile)}
             >
               Edit
             </button>
@@ -116,7 +139,7 @@ export default function ProfilePanel(): JSX.Element {
         )}
       </div>
 
-      {profile?.gaps.length ? (
+      {profile?.gaps.length && draft === null ? (
         <ul className="mt-2 rounded-md border border-yellow-800/60 bg-yellow-950/40 px-4 py-2">
           {profile.gaps.map((g, i) => (
             <li key={i} className="list-disc py-0.5 text-[11px] text-yellow-300">
@@ -172,25 +195,27 @@ export default function ProfilePanel(): JSX.Element {
         </div>
       )}
 
-      {draftText !== null && (
+      {draft !== null && (
         <div className="mt-3">
           <div className="mb-1 flex items-center gap-2">
             <span className="text-[11px] font-semibold text-gray-200">
-              Draft (edit the JSON, fix gaps, then save)
+              Draft — answer gaps, edit, then save
             </span>
             <button className="btn btn-green ml-auto px-2 py-0.5 text-[10px]" disabled={busy} onClick={saveDraft}>
               Validate & save
             </button>
-            <button className="btn px-2 py-0.5 text-[10px]" onClick={() => setDraftText(null)}>
+            <button className="btn px-2 py-0.5 text-[10px]" onClick={() => setDraft(null)}>
               Discard
             </button>
           </div>
-          <textarea
-            className="input min-h-[320px] w-full resize-y font-mono text-[10px] leading-relaxed"
-            value={draftText}
-            onChange={(e) => setDraftText(e.target.value)}
-            spellCheck={false}
+          <GapAnswers
+            gaps={draft.gaps}
+            answers={gapAnswers}
+            onChange={setGapAnswers}
+            onApply={() => void applyAnswers()}
+            busy={busy || extracting !== null}
           />
+          <ProfileEditor value={draft} onChange={setDraft} />
         </div>
       )}
     </div>
