@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import type { CandidateJob } from '@shared/types'
 import { call } from '../api'
-import { useApp } from '../store'
+import { useApp, companyKey } from '../store'
 import { candidateSections } from '../lib/postingSections'
+import RatingBadge from '../components/RatingBadge'
 
 function scoreColor(score: number | null): string {
   if (score === null) return 'var(--muted)'
@@ -257,6 +258,7 @@ function CandidateCard({
   selected: boolean
   onShowPosting: (c: CandidateJob) => void
 }): JSX.Element {
+  const info = useApp((s) => s.companies[companyKey(c.company)])
   return (
     <div
       className={`panel cursor-pointer p-3 transition-colors ${
@@ -269,6 +271,7 @@ function CandidateCard({
         <span className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-100">
           {c.position} <span className="text-gray-500">@</span> {c.company}
         </span>
+        {info && <RatingBadge rating={info.rating} url={info.url} />}
         <span className="shrink-0 text-[10px] text-gray-600">{selected ? '◂ open' : 'details ▸'}</span>
       </div>
       <div className="mt-2">

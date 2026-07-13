@@ -2,7 +2,8 @@ import { useState } from 'react'
 import type { IntakeItem } from '@shared/types'
 import { localFileUrl } from '@shared/ipc'
 import { call } from '../api'
-import { useApp } from '../store'
+import { useApp, companyKey } from '../store'
+import RatingBadge from '../components/RatingBadge'
 
 interface PastedImage {
   dataUrl: string
@@ -46,6 +47,7 @@ function IntakeCard({ item }: { item: IntakeItem }): JSX.Element {
   const [role, setRole] = useState(item.roleHint)
   const toast = useApp((s) => s.toast)
   const navigate = useApp((s) => s.navigate)
+  const info = useApp((s) => s.companies[companyKey(item.companyHint)])
 
   const build = async (): Promise<void> => {
     try {
@@ -76,6 +78,7 @@ function IntakeCard({ item }: { item: IntakeItem }): JSX.Element {
             <span className="truncate text-sm font-semibold text-gray-100">{item.title}</span>
             <span className={`chip ${STATE_STYLE[item.state]}`}>{item.state}</span>
             {item.kind === 'todo-file' && <span className="chip">TODO file</span>}
+            {info && <RatingBadge rating={info.rating} url={info.url} />}
           </div>
           {item.applyUrl && (
             <div className="mt-1 truncate text-[11px] text-cyan-500">{item.applyUrl}</div>

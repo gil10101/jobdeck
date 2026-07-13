@@ -27,6 +27,10 @@ onPush('push:todoNew', (item) => {
   s.toast(`New TODO posting: ${item.title}`)
 })
 
+onPush('push:companiesChanged', (companies) => {
+  useApp.setState({ companies })
+})
+
 void useApp.getState().hydrate()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

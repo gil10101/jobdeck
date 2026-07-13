@@ -1,11 +1,17 @@
 import { createColumnHelper, type ColumnDef } from '@tanstack/react-table'
 import type { TrackerRow } from '@shared/types'
 import StatusBadge from '../../components/StatusBadge'
+import RatingBadge from '../../components/RatingBadge'
 import { FolderIcon } from '../../components/icons'
 import { call } from '../../api'
-import { useApp } from '../../store'
+import { useApp, companyKey } from '../../store'
 
 const col = createColumnHelper<TrackerRow>()
+
+function GlassdoorCell({ row }: { row: TrackerRow }): JSX.Element {
+  const info = useApp((s) => s.companies[companyKey(row.company)])
+  return <RatingBadge rating={info?.rating ?? null} url={info?.url} />
+}
 
 function ActionButton({
   label,
@@ -46,6 +52,12 @@ export function buildColumns(): ColumnDef<TrackerRow, any>[] {
       header: 'Company',
       size: 180,
       cell: (info) => <span className="text-gray-200">{info.getValue()}</span>
+    }),
+    col.display({
+      id: 'glassdoor',
+      header: 'Glassdoor',
+      size: 70,
+      cell: (info) => <GlassdoorCell row={info.row.original} />
     }),
     col.accessor('salary', {
       header: 'Salary',

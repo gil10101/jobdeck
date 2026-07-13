@@ -57,6 +57,7 @@ export default function SettingsView(): JSX.Element {
   const [testing, setTesting] = useState(false)
   const [modelDraft, setModelDraft] = useState('')
   const [maxTurnsDraft, setMaxTurnsDraft] = useState('')
+  const [backfillBusy, setBackfillBusy] = useState(false)
 
   useEffect(() => {
     void call('app:info', undefined).then(setInfo).catch(() => undefined)
@@ -105,6 +106,19 @@ export default function SettingsView(): JSX.Element {
       toast(String(err), 'error')
     } finally {
       setTesting(false)
+    }
+  }
+
+  const runBackfill = async (): Promise<void> => {
+    setBackfillBusy(true)
+    try {
+      const res = await call('companies:backfill', undefined)
+      toast(`Looked up ${res.fetched} companies`, 'success')
+      await useApp.getState().refreshCompanies()
+    } catch (err) {
+      toast(String(err), 'error')
+    } finally {
+      setBackfillBusy(false)
     }
   }
 
@@ -255,6 +269,18 @@ export default function SettingsView(): JSX.Element {
           </Row>
           <Row label="LinkedIn / freehire" hint="Public APIs — no credentials needed.">
             <span className="chip border-green-800 text-green-300">ready</span>
+          </Row>
+          <Row
+            label="Glassdoor ratings"
+            hint="Look up and cache a Glassdoor rating for every company across your tracker, intake, and scout candidates."
+          >
+            <button
+              className="btn px-2 py-1 text-[10px]"
+              disabled={backfillBusy}
+              onClick={runBackfill}
+            >
+              {backfillBusy ? 'Fetching…' : 'Fetch ratings for all companies'}
+            </button>
           </Row>
         </div>
 

@@ -1,6 +1,18 @@
 import { create } from 'zustand'
-import type { AppSettings, CandidateJob, IntakeItem, RunMeta, TrackerRow } from '@shared/types'
+import type {
+  AppSettings,
+  CandidateJob,
+  CompanyInfo,
+  IntakeItem,
+  RunMeta,
+  TrackerRow
+} from '@shared/types'
 import { call } from './api'
+
+/** Normalize a company name into the key used by the main-process companies map. */
+export function companyKey(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, ' ')
+}
 
 export type Route =
   | { view: 'tracker' }
@@ -32,6 +44,7 @@ interface AppState {
   candidates: CandidateJob[]
   runs: RunMeta[]
   settings: AppSettings | null
+  companies: Record<string, CompanyInfo>
   toasts: Toast[]
   navigate: (route: Route) => void
   refreshConfig: () => Promise<void>
@@ -40,6 +53,7 @@ interface AppState {
   refreshCandidates: () => Promise<void>
   refreshRuns: () => Promise<void>
   refreshSettings: () => Promise<void>
+  refreshCompanies: () => Promise<void>
   toggleTheme: () => Promise<void>
   hydrate: () => Promise<void>
   upsertRunMeta: (meta: RunMeta) => void
@@ -57,6 +71,7 @@ export const useApp = create<AppState>((set, get) => ({
   candidates: [],
   runs: [],
   settings: null,
+  companies: {},
   toasts: [],
 
   navigate: (route) => set({ route }),
@@ -106,6 +121,13 @@ export const useApp = create<AppState>((set, get) => ({
       /* ignore */
     }
   },
+  refreshCompanies: async () => {
+    try {
+      set({ companies: await call('companies:get', undefined) })
+    } catch {
+      /* ignore */
+    }
+  },
   toggleTheme: async () => {
     const current = get().settings?.theme ?? 'dark'
     const theme = current === 'dark' ? 'light' : 'dark'
@@ -125,7 +147,8 @@ export const useApp = create<AppState>((set, get) => ({
       get().refreshIntake(),
       get().refreshCandidates(),
       get().refreshRuns(),
-      get().refreshSettings()
+      get().refreshSettings(),
+      get().refreshCompanies()
     ])
   },
 
