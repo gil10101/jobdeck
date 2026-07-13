@@ -298,9 +298,9 @@ export default function ProfileEditor(props: {
                     <CheckField
                       key={tag}
                       label={tag.replace('_', ' ')}
-                      checked={s.use.includes(tag)}
+                      checked={(s.use ?? []).includes(tag)}
                       onChange={(on) =>
-                        set({ use: on ? [...s.use, tag] : s.use.filter((u) => u !== tag) })
+                        set({ use: on ? [...(s.use ?? []), tag] : (s.use ?? []).filter((u) => u !== tag) })
                       }
                     />
                   ))}
@@ -408,7 +408,7 @@ export default function ProfileEditor(props: {
             items={p.searchConfig.locationTiers}
             onChange={(locationTiers) => search({ locationTiers })}
             makeEmpty={() => ({ tier: 'ideal' as const, description: '' })}
-            title={(t) => `${t.tier}: ${t.description.slice(0, 50)}`}
+            title={(t) => `${t.tier}: ${t.description?.slice(0, 50) ?? ''}`}
             addLabel="location tier"
             render={(t, set) => (
               <div className="mt-1 grid grid-cols-[110px_1fr] gap-2">
