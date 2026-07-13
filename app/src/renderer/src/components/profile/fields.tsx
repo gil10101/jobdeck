@@ -46,6 +46,36 @@ export function SelectField(props: {
   )
 }
 
+/** Multi-select as fill-toggle chips (replaces a row of raw checkboxes). */
+export function ToggleChips<T extends string>(props: {
+  options: { value: T; label: string }[]
+  selected: readonly T[]
+  onChange: (v: T[]) => void
+}): JSX.Element {
+  const selected = props.selected ?? []
+  return (
+    <div className="mt-1 flex flex-wrap gap-1.5">
+      {props.options.map((o) => {
+        const on = selected.includes(o.value)
+        return (
+          <button
+            key={o.value}
+            type="button"
+            className={`chip ${
+              on ? 'border-cyan-700 bg-cyan-900/60 text-cyan-200' : 'text-gray-300 hover:border-gray-500'
+            }`}
+            onClick={() =>
+              props.onChange(on ? selected.filter((x) => x !== o.value) : [...selected, o.value])
+            }
+          >
+            {o.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 /** Collapsible editor section. */
 export function Section(props: {
   title: string

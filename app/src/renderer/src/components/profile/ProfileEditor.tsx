@@ -20,14 +20,16 @@ import {
   SelectField,
   StringList,
   TextAreaField,
-  TextField
+  TextField,
+  ToggleChips
 } from './fields'
 import CategoryPicker from './CategoryPicker'
 import {
   EMPLOYMENT_TYPES,
   PROFICIENCY_OPTIONS,
   ROLE_TAXONOMY,
-  WORK_AUTH_OPTIONS
+  WORK_AUTH_OPTIONS,
+  WORK_MODELS
 } from './roleTaxonomy'
 
 const n = (v: string): string | null => (v.trim() ? v : null)
@@ -392,39 +394,17 @@ export default function ProfileEditor(props: {
           />
         </div>
         <div className="mt-2 text-[10px] uppercase tracking-wide text-gray-500">Work models</div>
-        <div className="mt-1 flex items-center gap-4">
-          {(['onsite', 'hybrid', 'remote'] as const).map((m) => (
-            <CheckField
-              key={m}
-              label={m}
-              checked={p.searchConfig.workModels.includes(m)}
-              onChange={(on) =>
-                search({
-                  workModels: on
-                    ? [...p.searchConfig.workModels, m]
-                    : p.searchConfig.workModels.filter((x) => x !== m)
-                })
-              }
-            />
-          ))}
-        </div>
+        <ToggleChips
+          options={WORK_MODELS}
+          selected={p.searchConfig.workModels}
+          onChange={(workModels) => search({ workModels })}
+        />
         <div className="mt-2 text-[10px] uppercase tracking-wide text-gray-500">Employment types</div>
-        <div className="mt-1 flex flex-wrap items-center gap-4">
-          {EMPLOYMENT_TYPES.map((t) => (
-            <CheckField
-              key={t.value}
-              label={t.label}
-              checked={(p.searchConfig.employmentTypes ?? []).includes(t.value)}
-              onChange={(on) =>
-                search({
-                  employmentTypes: on
-                    ? [...(p.searchConfig.employmentTypes ?? []), t.value]
-                    : (p.searchConfig.employmentTypes ?? []).filter((x) => x !== t.value)
-                })
-              }
-            />
-          ))}
-        </div>
+        <ToggleChips
+          options={EMPLOYMENT_TYPES}
+          selected={p.searchConfig.employmentTypes ?? []}
+          onChange={(employmentTypes) => search({ employmentTypes })}
+        />
         <div className="mt-2">
           <EntryList
             items={p.searchConfig.locationTiers}

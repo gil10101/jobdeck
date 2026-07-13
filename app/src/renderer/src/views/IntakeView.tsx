@@ -101,30 +101,30 @@ function IntakeCard({ item }: { item: IntakeItem }): JSX.Element {
       </div>
       <div className="mt-3 flex items-center gap-2">
         <input
-          className="input w-44"
+          className="input flex-1"
           placeholder="Company"
           value={company}
           onChange={(e) => setCompany(e.target.value)}
         />
         <input
-          className="input w-56"
+          className="input flex-1"
           placeholder="Role title"
           value={role}
           onChange={(e) => setRole(e.target.value)}
         />
         {item.state === 'new' || item.state === 'failed' ? (
-          <button className="btn btn-primary" onClick={build}>
-            ▶ Build application
+          <button className="btn btn-primary shrink-0" onClick={build}>
+            ▶ Build
           </button>
         ) : item.runId ? (
           <button
-            className="btn"
+            className="btn shrink-0"
             onClick={() => useApp.getState().navigate({ view: 'runs', runId: item.runId! })}
           >
             View run
           </button>
         ) : null}
-        <button className="btn ml-auto" onClick={dismiss}>
+        <button className="btn shrink-0 text-gray-500" onClick={dismiss}>
           Dismiss
         </button>
       </div>

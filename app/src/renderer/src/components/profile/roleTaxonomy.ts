@@ -108,6 +108,12 @@ export const PROFICIENCY_OPTIONS: Option[] = [
   { value: 'Basic', label: 'Basic' }
 ]
 
+export const WORK_MODELS: { value: 'onsite' | 'hybrid' | 'remote'; label: string }[] = [
+  { value: 'onsite', label: 'Onsite' },
+  { value: 'hybrid', label: 'Hybrid' },
+  { value: 'remote', label: 'Remote' }
+]
+
 export const EMPLOYMENT_TYPES: { value: 'full-time' | 'part-time' | 'contract' | 'internship'; label: string }[] = [
   { value: 'full-time', label: 'Full-time' },
   { value: 'part-time', label: 'Part-time' },
