@@ -1,6 +1,6 @@
 // The candidate profile — v2's single source of truth, stored at
 // <workspace>/profile.json. Pure types + defaults; shared by main and renderer.
-// Everything the v1 prompts hardcoded about a specific person lives here.
+// Everything the v1 prompts used to hardcode now lives here as per-user data.
 
 export const PROFILE_SCHEMA_ID = 'profile.v1'
 
@@ -22,8 +22,9 @@ export interface ProfileFile {
   tailoring: TailoringConfig
   searchConfig: SearchConfig
   documents: DocumentPrefs
-  /** Free-form per-user agent rules (e.g. "NYC cityjobs postings also get a
-   *  message_to_hiring_team.md of ~110-130 words"). Rendered into every build prompt. */
+  /** Free-form per-user agent rules the profile owner defines during setup
+   *  (e.g. a rule that a certain job portal needs an extra note of a set length).
+   *  Rendered into every build prompt. */
   customRules: string[]
   /** Onboarding: questions the extractor could not answer — surfaced in the wizard. */
   gaps: string[]
