@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { promisify } from 'node:util'
-import { BUN_EXE, REPO_ROOT } from '../paths'
+import { REPO_ROOT, resolveBun } from '../paths'
 
 const execFileAsync = promisify(execFile)
 
@@ -37,11 +37,11 @@ export function setJobrightCreds(email: string, password: string): void {
 
 /** Live login test: fetch 1 recommendation through the CLI. */
 export async function testJobright(): Promise<{ ok: boolean; message: string }> {
-  if (!fs.existsSync(BUN_EXE)) return { ok: false, message: `bun not found at ${BUN_EXE}` }
   if (!fs.existsSync(JOBRIGHT_CLI)) return { ok: false, message: 'jobright CLI not found' }
+  const bun = resolveBun()
   try {
     const { stdout } = await execFileAsync(
-      BUN_EXE,
+      bun,
       ['run', JOBRIGHT_CLI, 'recommend', '-n', '1', '--format', 'json'],
       { cwd: REPO_ROOT, timeout: 45_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true }
     )
@@ -52,7 +52,10 @@ export async function testJobright(): Promise<{ ok: boolean; message: string }> 
       message: `Connected — jobright returned ${n} recommendation${n === 1 ? '' : 's'}`
     }
   } catch (err) {
-    const e = err as { stderr?: string; message?: string }
+    const e = err as { code?: string; stderr?: string; message?: string }
+    if (e.code === 'ENOENT') {
+      return { ok: false, message: 'bun not found — install bun (https://bun.sh) or add it to PATH' }
+    }
     return { ok: false, message: (e.stderr || e.message || String(err)).slice(0, 400) }
   }
 }

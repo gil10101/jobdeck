@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { ProfileFile } from '@shared/profile'
 import { emptyProfile } from '@shared/profile'
-import { APP_DIR, BUN_EXE, MASTER_DIR, REPO_ROOT, resolveLatex, toAbs, todayISO, todayMMDD } from '../paths'
+import { APP_DIR, MASTER_DIR, REPO_ROOT, resolveBun, resolveLatex, toAbs, todayISO, todayMMDD } from '../paths'
 import { loadConfig } from '../appConfig'
 import { pickExampleFolder } from '../fsops/FolderScanner'
 import {
@@ -162,7 +162,7 @@ export function buildScoutPrompt(s: ScoutSlots, profile: ProfileFile | null): st
   const replacements: Record<string, string> = {
     REPO_ROOT: REPO_ROOT,
     TODAY_ISO: todayISO(),
-    BUN: BUN_EXE,
+    BUN: resolveBun(),
     EXCLUDE_LIST: exclude,
     OUTPUT_PATH: s.outputPath,
     SEARCH_CRITERIA_MD: criteria,

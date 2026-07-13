@@ -1,5 +1,6 @@
 import { app } from 'electron'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { loadConfig } from './appConfig'
 
@@ -130,8 +131,23 @@ export function resolveLatex(): LatexEngine | null {
   return null
 }
 
-/** Legacy v1 bun path — used only by the deprecated boardsBridge until M3 removes it. */
-export const BUN_EXE = 'C:\\Users\\gillu\\.bun\\bin\\bun.exe'
+/** Resolve the `bun` runtime (runs the job-board search CLIs): the standard
+ *  per-user install, then common system locations, else the bare command so
+ *  execFile falls back to PATH. Never hardcodes a specific machine/user. */
+export function resolveBun(): string {
+  const home = os.homedir()
+  const exe = process.platform === 'win32' ? 'bun.exe' : 'bun'
+  const candidates = [
+    path.join(home, '.bun', 'bin', exe),
+    '/opt/homebrew/bin/bun',
+    '/usr/local/bin/bun',
+    '/usr/bin/bun'
+  ]
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c
+  }
+  return 'bun'
+}
 
 /** Workspace-relative path with forward slashes. */
 export function toRel(absPath: string): string {
