@@ -33,6 +33,7 @@ export let ONBOARDING_DIR = NOT_READY
 export let UPLOADS_DIR = NOT_READY
 export let TRACKER_FILE = NOT_READY
 export let PROFILE_FILE = NOT_READY
+export let COMPANIES_FILE = NOT_READY
 
 export const APP_DIR = app.getAppPath()
 
@@ -58,6 +59,7 @@ export function initWorkspace(root: string): void {
   SCOUT_DIR = path.join(abs, 'scout')
   TRACKER_FILE = path.join(abs, 'tracker.json')
   PROFILE_FILE = path.join(abs, 'profile.json')
+  COMPANIES_FILE = path.join(abs, 'companies.json')
   ensureAppDataDirs()
 }
 

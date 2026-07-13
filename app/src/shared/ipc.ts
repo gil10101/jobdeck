@@ -3,6 +3,7 @@ import type {
   ApplicationDetail,
   AppSettings,
   CandidateJob,
+  CompanyInfo,
   IntakeItem,
   LibraryCategory,
   RunEvent,
@@ -108,6 +109,9 @@ export interface IpcInvokeContract {
   'apply:insertText': { req: { text: string }; res: void }
   'settings:get': { req: void; res: AppSettings }
   'settings:set': { req: Partial<AppSettings>; res: AppSettings }
+  'companies:get': { req: void; res: Record<string, CompanyInfo> }
+  'companies:ensure': { req: { company: string }; res: CompanyInfo | null }
+  'companies:backfill': { req: void; res: { fetched: number } }
 }
 
 export type IpcChannel = keyof IpcInvokeContract
@@ -118,6 +122,7 @@ export interface IpcPushContract {
   'push:runChanged': RunMeta
   'push:todoNew': IntakeItem
   'push:storeChanged': { domains: ('rows' | 'intake' | 'settings' | 'candidates')[] }
+  'push:companiesChanged': Record<string, CompanyInfo>
 }
 
 export type IpcPushChannel = keyof IpcPushContract
@@ -170,14 +175,18 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'app:absPath',
   'apply:insertText',
   'settings:get',
-  'settings:set'
+  'settings:set',
+  'companies:get',
+  'companies:ensure',
+  'companies:backfill'
 ]
 
 export const PUSH_CHANNELS: IpcPushChannel[] = [
   'push:runEvent',
   'push:runChanged',
   'push:todoNew',
-  'push:storeChanged'
+  'push:storeChanged',
+  'push:companiesChanged'
 ]
 
 /** Build a local-file:// URL for a repo-relative path (PDF preview etc.). */

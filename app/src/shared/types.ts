@@ -9,6 +9,20 @@ export type StatusKey =
   | 'rejected'
   | 'withdrawn'
 
+/** Company-scoped Glassdoor info, cached once per company and joined by name. */
+export interface CompanyInfo {
+  /** As first seen (display form). */
+  name: string
+  /** Glassdoor overall rating 1.0-5.0, or null when not found. */
+  rating: number | null
+  /** Glassdoor company/overview URL, or null. */
+  url: string | null
+  reviewCount: number | null
+  /** ISO timestamp of the lookup. */
+  fetchedAt: string
+  source: 'lookup' | 'pasted' | 'manual'
+}
+
 export interface TrackerRow {
   id: string
   /** Canonical folder slug WITHOUT the "[DONE] " prefix; null when no folder is bound. */
