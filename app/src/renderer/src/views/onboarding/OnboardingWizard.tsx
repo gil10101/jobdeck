@@ -3,6 +3,8 @@ import type { ProfileFile } from '@shared/profile'
 import type { RunMeta } from '@shared/types'
 import { call, onPush } from '../../api'
 import { useApp } from '../../store'
+import ProfileEditor from '../../components/profile/ProfileEditor'
+import GapAnswers from '../../components/profile/GapAnswers'
 
 type Step = 'workspace' | 'sources' | 'extract' | 'review' | 'done'
 
@@ -20,35 +22,38 @@ export default function OnboardingWizard(): JSX.Element {
   const [importedV1, setImportedV1] = useState(false)
   const [run, setRun] = useState<RunMeta | null>(null)
   const [runStatusLine, setRunStatusLine] = useState('starting…')
-  const [draftText, setDraftText] = useState('')
-  const [gaps, setGaps] = useState<string[]>([])
+  const [draft, setDraft] = useState<ProfileFile | null>(null)
+  const [gapAnswers, setGapAnswers] = useState<Record<string, string>>({})
+  const [runPurpose, setRunPurpose] = useState<'extract' | 'refine'>('extract')
 
-  // ---- extract-run watcher ----
+  // ---- extract/refine run watcher ----
   useEffect(() => {
     if (!run) return
     const off = onPush('push:runChanged', (meta) => {
       if (meta.id !== run.id) return
       setRunStatusLine(meta.status)
       if (meta.status === 'succeeded') {
-        void call('profile:draft', { runId: meta.id }).then(({ draft, error }) => {
-          if (draft) {
-            setDraftText(JSON.stringify(draft, null, 2))
-            setGaps(draft.gaps ?? [])
+        void call('profile:draft', { runId: meta.id }).then(({ draft: d, error }) => {
+          if (d) {
+            setDraft(d)
+            setGapAnswers({})
             setStep('review')
+            if (runPurpose === 'refine') toast('Answers merged into the draft', 'success')
           } else {
             toast(error ?? 'no draft produced', 'error')
-            setStep('sources')
+            if (runPurpose === 'extract') setStep('sources')
           }
           setRun(null)
         })
       } else if (meta.status === 'failed' || meta.status === 'cancelled') {
-        toast(`Extraction ${meta.status}: ${meta.errorText ?? ''}`, 'error')
+        toast(`${runPurpose === 'refine' ? 'Refine' : 'Extraction'} ${meta.status}: ${meta.errorText ?? ''}`, 'error')
         setRun(null)
-        setStep('sources')
+        if (runPurpose === 'extract') setStep('sources')
+        else setStep('review')
       }
     })
     return off
-  }, [run?.id])
+  }, [run?.id, runPurpose])
 
   // ---- step: workspace ----
   const createWorkspace = async (): Promise<void> => {
@@ -114,6 +119,7 @@ export default function OnboardingWizard(): JSX.Element {
         source: 'uploads',
         text: pasteText.trim() || undefined
       })
+      setRunPurpose('extract')
       setRun(meta)
       setRunStatusLine('running')
       setStep('extract')
@@ -126,11 +132,32 @@ export default function OnboardingWizard(): JSX.Element {
   }
 
   // ---- step: review ----
-  const saveProfile = async (): Promise<void> => {
+  const applyAnswers = async (): Promise<void> => {
+    if (!draft) return
+    const answers = Object.entries(gapAnswers)
+      .map(([question, answer]) => ({ question, answer: answer.trim() }))
+      .filter((a) => a.answer)
+    if (!answers.length) return
     setBusy(true)
     try {
-      const parsed = JSON.parse(draftText) as ProfileFile
-      const saved = await call('profile:save', { profile: parsed })
+      const meta = await call('onboard:start', { source: 'refine', draft, answers })
+      setRunPurpose('refine')
+      setRun(meta)
+      setRunStatusLine('running')
+      setStep('extract')
+      void useApp.getState().refreshRuns()
+    } catch (err) {
+      toast(String(err), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const saveProfile = async (): Promise<void> => {
+    if (!draft) return
+    setBusy(true)
+    try {
+      const saved = await call('profile:save', { profile: draft })
       toast(`Profile saved: ${saved.identity.fullName}`, 'success')
       setStep('done')
     } catch (err) {
@@ -152,14 +179,9 @@ export default function OnboardingWizard(): JSX.Element {
 
   return (
     <div className="flex h-full items-center justify-center overflow-auto py-8">
-      <div className="panel w-[600px] p-8">
-        <div className="text-center">
-          <div className="text-lg font-bold tracking-wide text-cyan-300">JOBDECK</div>
-          <div className="mt-1 text-xs text-muted">agent-powered job application pipeline</div>
-        </div>
-
+      <div className={`panel p-8 ${step === 'review' ? 'w-[780px]' : 'w-[600px]'}`}>
         {/* progress */}
-        <div className="mt-6 flex items-center justify-center gap-1">
+        <div className="mt-1 flex items-center justify-center gap-1">
           {labels.map((l, i) => (
             <div key={l} className="flex items-center gap-1">
               <span
@@ -247,7 +269,7 @@ export default function OnboardingWizard(): JSX.Element {
           <div className="mt-6 text-center">
             <div className="flex items-center justify-center gap-2 text-sm text-cyan-300">
               <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-cyan-400" />
-              Agent is reading your material… ({runStatusLine})
+              {runPurpose === 'refine' ? 'Merging your answers…' : 'Agent is reading your material…'} ({runStatusLine})
             </div>
             <p className="mt-3 text-[11px] text-gray-500">
               This usually takes a minute or two. You can watch the full timeline in Runs later.
@@ -263,26 +285,21 @@ export default function OnboardingWizard(): JSX.Element {
           </div>
         )}
 
-        {step === 'review' && (
+        {step === 'review' && draft && (
           <div className="mt-6">
             <p className="text-xs text-gray-400">
-              Review the draft. Fix anything wrong, fill the gaps below, then save.
+              Review the draft. Answer the open questions (blank = skip), fix anything wrong, then save.
             </p>
-            {gaps.length > 0 && (
-              <ul className="mt-2 max-h-28 overflow-auto rounded-md border border-yellow-800/60 bg-yellow-950/40 px-4 py-2">
-                {gaps.map((g, i) => (
-                  <li key={i} className="list-disc py-0.5 text-[11px] text-yellow-300">
-                    {g}
-                  </li>
-                ))}
-              </ul>
-            )}
-            <textarea
-              className="input mt-3 min-h-[300px] w-full resize-y font-mono text-[10px] leading-relaxed"
-              value={draftText}
-              onChange={(e) => setDraftText(e.target.value)}
-              spellCheck={false}
+            <GapAnswers
+              gaps={draft.gaps}
+              answers={gapAnswers}
+              onChange={setGapAnswers}
+              onApply={() => void applyAnswers()}
+              busy={busy}
             />
+            <div className="mt-3 max-h-[46vh] overflow-auto pr-1">
+              <ProfileEditor value={draft} onChange={setDraft} />
+            </div>
             <div className="mt-3 flex items-center gap-2">
               <button className="btn btn-green" disabled={busy} onClick={saveProfile}>
                 ✓ Save profile
@@ -303,7 +320,7 @@ export default function OnboardingWizard(): JSX.Element {
               anytime in Settings.
             </p>
             <button className="btn btn-primary mt-5 px-6 py-2.5" onClick={finish}>
-              Start using JobDeck →
+              Start →
             </button>
           </div>
         )}
