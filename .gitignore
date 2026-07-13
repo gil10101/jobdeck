@@ -97,3 +97,6 @@ app-data/
 
 # Brainstorm mockups (superpowers visual companion) - never ship
 .superpowers/
+# Internal planning artifacts (machine paths, not product)
+docs/superpowers/
+.superpowers/
