@@ -172,9 +172,9 @@ export class TrackerRepo {
           company: f.companyGuess ?? stripDonePrefix(f.slug).replace(/_/g, ' '),
           salary: f.salaryGuess ?? '',
           applyUrl: f.applyUrlGuess ?? '',
-          resumePath: f.files.resumePdf ? `${f.folderRel}/Gil_Lu_Resume.pdf` : null,
-          coverLetterPath: f.files.coverPdf ? `${f.folderRel}/Gil_Lu_Cover_Letter.pdf` : null,
-          coverLetter: f.files.coverPdf,
+          resumePath: f.files.resumePdf ? `${f.folderRel}/${f.files.resumePdf}` : null,
+          coverLetterPath: f.files.coverPdf ? `${f.folderRel}/${f.files.coverPdf}` : null,
+          coverLetter: !!f.files.coverPdf,
           statusKey: f.doneOnDisk ? 'applied' : 'not_applied',
           statusText: f.doneOnDisk ? 'applied' : CANONICAL_STATUS_TEXT.not_applied,
           source: 'scan'
@@ -196,11 +196,11 @@ export class TrackerRepo {
         touched = true
       }
       if (!row.resumePath && f.files.resumePdf) {
-        patch.resumePath = `${f.folderRel}/Gil_Lu_Resume.pdf`
+        patch.resumePath = `${f.folderRel}/${f.files.resumePdf}`
         touched = true
       }
       if (!row.coverLetterPath && f.files.coverPdf) {
-        patch.coverLetterPath = `${f.folderRel}/Gil_Lu_Cover_Letter.pdf`
+        patch.coverLetterPath = `${f.folderRel}/${f.files.coverPdf}`
         patch.coverLetter = true
         touched = true
       }

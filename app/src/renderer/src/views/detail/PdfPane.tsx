@@ -15,10 +15,10 @@ export default function PdfPane({ detail }: { detail: ApplicationDetail }): JSX.
   const toast = useApp((s) => s.toast)
   const [nonce, setNonce] = useState(0)
   const [compiling, setCompiling] = useState(false)
-  const resume = detail.files.find((f) => f.name === 'Gil_Lu_Resume.pdf' && f.exists)
-  const cover = detail.files.find((f) => f.name === 'Gil_Lu_Cover_Letter.pdf' && f.exists)
-  const hasTex = (name: string): boolean =>
-    detail.files.some((f) => f.name === name && f.exists)
+  const resume = detail.files.find((f) => f.name.endsWith('_Resume.pdf') && f.exists)
+  const cover = detail.files.find((f) => f.name.endsWith('_Cover_Letter.pdf') && f.exists)
+  const hasTex = (suffix: string): boolean =>
+    detail.files.some((f) => f.name.endsWith(suffix) && f.exists)
 
   const tabs: Tab[] = [
     { key: 'resume', label: 'Résumé', relPath: resume?.relPath ?? null },
@@ -41,8 +41,8 @@ export default function PdfPane({ detail }: { detail: ApplicationDetail }): JSX.
   const tab = tabs.find((t) => t.key === active) ?? tabs[0]
 
   const canRecompile =
-    (active === 'resume' && hasTex('Gil_Lu_Resume.tex')) ||
-    (active === 'cover' && hasTex('Gil_Lu_Cover_Letter.tex'))
+    (active === 'resume' && hasTex('_Resume.tex')) ||
+    (active === 'cover' && hasTex('_Cover_Letter.tex'))
 
   const recompile = async (): Promise<void> => {
     setCompiling(true)

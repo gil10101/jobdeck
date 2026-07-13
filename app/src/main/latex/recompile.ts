@@ -6,24 +6,32 @@ import { resolveLatex, toAbs } from '../paths'
 
 const execFileAsync = promisify(execFile)
 
-const DOC_FILES = {
-  resume: 'Gil_Lu_Resume.tex',
-  cover: 'Gil_Lu_Cover_Letter.tex'
+const DOC_SUFFIXES = {
+  resume: '_Resume.tex',
+  cover: '_Cover_Letter.tex'
 } as const
 
 /** Compile a document twice (hyperref), report page count, clean aux files. */
 export async function recompileDoc(
   folderRel: string,
-  doc: keyof typeof DOC_FILES
+  doc: keyof typeof DOC_SUFFIXES
 ): Promise<{ pages: number | null; logTail: string }> {
   const folderAbs = toAbs(folderRel)
-  const texName = DOC_FILES[doc]
-  const texAbs = path.join(folderAbs, texName)
+  const suffix = DOC_SUFFIXES[doc]
   const eng = resolveLatex()
   if (!eng) throw new Error('no LaTeX engine found — install pdflatex or tectonic')
-  if (!fs.existsSync(texAbs)) {
-    // Fall back to any single .tex matching the doc type loosely (renamed templates).
-    throw new Error(`${texName} not found in ${folderRel}`)
+
+  // The build agent writes `<profile.documents.fileBasename>_Resume.tex` etc.,
+  // so resolve the real on-disk name by suffix instead of a fixed filename.
+  let dirNames: string[] = []
+  try {
+    dirNames = fs.readdirSync(folderAbs)
+  } catch {
+    /* folder missing; dirNames stays empty, falls through to the not-found error */
+  }
+  const texName = dirNames.find((n) => n.endsWith(suffix))
+  if (!texName) {
+    throw new Error(`no file ending in ${suffix} found in ${folderRel}`)
   }
 
   // tectonic auto-runs enough passes in one invocation and takes no

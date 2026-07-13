@@ -10,10 +10,11 @@ export interface FolderFacts {
   folderRel: string
   doneOnDisk: boolean
   files: {
-    resumePdf: boolean
-    resumeTex: boolean
-    coverPdf: boolean
-    coverTex: boolean
+    /** Real on-disk filename of the doc matching this suffix, or null when absent. */
+    resumePdf: string | null
+    resumeTex: string | null
+    coverPdf: string | null
+    coverTex: string | null
     answers: boolean
     posting: boolean
     report: boolean
@@ -26,15 +27,16 @@ export interface FolderFacts {
 }
 
 const KNOWN_FILES = {
-  resumePdf: 'Gil_Lu_Resume.pdf',
-  resumeTex: 'Gil_Lu_Resume.tex',
-  coverPdf: 'Gil_Lu_Cover_Letter.pdf',
-  coverTex: 'Gil_Lu_Cover_Letter.tex',
   answers: 'application_answers.md',
   posting: 'job_posting.md',
   report: 'report.json',
   message: 'message_to_hiring_team.md'
 } as const
+
+/** First filename in `names` ending with `suffix` (case-sensitive), or null. */
+function findBySuffix(names: string[], suffix: string): string | null {
+  return names.find((n) => n.endsWith(suffix)) ?? null
+}
 
 /** Scan documents/applications/* and return per-folder facts. */
 export function scanApplications(): FolderFacts[] {
@@ -54,11 +56,17 @@ export function scanApplications(): FolderFacts[] {
     const doneOnDisk = DONE_PREFIX_RE.test(entry.name)
 
     const has = (name: string): boolean => fs.existsSync(path.join(abs, name))
+    let dirNames: string[] = []
+    try {
+      dirNames = fs.readdirSync(abs)
+    } catch {
+      /* unreadable folder; résumé/cover fields resolve to null below */
+    }
     const files = {
-      resumePdf: has(KNOWN_FILES.resumePdf),
-      resumeTex: has(KNOWN_FILES.resumeTex),
-      coverPdf: has(KNOWN_FILES.coverPdf),
-      coverTex: has(KNOWN_FILES.coverTex),
+      resumePdf: findBySuffix(dirNames, '_Resume.pdf'),
+      resumeTex: findBySuffix(dirNames, '_Resume.tex'),
+      coverPdf: findBySuffix(dirNames, '_Cover_Letter.pdf'),
+      coverTex: findBySuffix(dirNames, '_Cover_Letter.tex'),
       answers: has(KNOWN_FILES.answers),
       posting: has(KNOWN_FILES.posting),
       report: has(KNOWN_FILES.report),

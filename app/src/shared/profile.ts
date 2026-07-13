@@ -177,7 +177,7 @@ export interface SearchConfig {
 }
 
 export interface DocumentPrefs {
-  /** Sanitized output-file stem: "Gil_Lu" → Gil_Lu_Resume.tex. [A-Za-z0-9_]+ only. */
+  /** Sanitized output-file stem: "Jane_Doe" → Jane_Doe_Resume.tex. [A-Za-z0-9_]+ only. */
   fileBasename: string
   coverLetterWordRange: [number, number]
   coverLetterRegister: string

@@ -6,16 +6,22 @@ import { parseAnswers } from './answers'
 import { parsePosting } from './posting'
 import { parseReport } from './report'
 
-const FILE_KINDS: { name: string; kind: AppFileInfo['kind'] }[] = [
-  { name: 'Gil_Lu_Resume.pdf', kind: 'pdf' },
-  { name: 'Gil_Lu_Cover_Letter.pdf', kind: 'pdf' },
-  { name: 'Gil_Lu_Resume.tex', kind: 'tex' },
-  { name: 'Gil_Lu_Cover_Letter.tex', kind: 'tex' },
+const FIXED_FILE_KINDS: { name: string; kind: AppFileInfo['kind'] }[] = [
   { name: 'application_answers.md', kind: 'md' },
   { name: 'job_posting.md', kind: 'md' },
   { name: 'message_to_hiring_team.md', kind: 'md' },
   { name: 'interview_prep.md', kind: 'md' },
   { name: 'report.json', kind: 'json' }
+]
+
+/** Résumé/cover doc kinds, identified by filename suffix rather than a fixed
+ *  name — the build agent writes `<profile.documents.fileBasename>_Resume.tex`
+ *  etc., so the real on-disk name varies per user. */
+const SUFFIX_FILE_KINDS: { suffix: string; kind: AppFileInfo['kind'] }[] = [
+  { suffix: '_Resume.pdf', kind: 'pdf' },
+  { suffix: '_Cover_Letter.pdf', kind: 'pdf' },
+  { suffix: '_Resume.tex', kind: 'tex' },
+  { suffix: '_Cover_Letter.tex', kind: 'tex' }
 ]
 
 function readIfExists(abs: string): string | null {
@@ -42,12 +48,29 @@ export function buildApplicationDetail(row: TrackerRow): ApplicationDetail {
   if (!row.folderPath) return detail
 
   const folderAbs = toAbs(row.folderPath)
-  for (const f of FILE_KINDS) {
+  for (const f of FIXED_FILE_KINDS) {
     const abs = path.join(folderAbs, f.name)
     detail.files.push({
       name: f.name,
       relPath: `${row.folderPath}/${f.name}`,
       exists: fs.existsSync(abs),
+      kind: f.kind
+    })
+  }
+
+  let dirNames: string[] = []
+  try {
+    dirNames = fs.readdirSync(folderAbs)
+  } catch {
+    /* folder missing on disk; no résumé/cover entries to add */
+  }
+  for (const f of SUFFIX_FILE_KINDS) {
+    const realName = dirNames.find((n) => n.endsWith(f.suffix))
+    if (!realName) continue
+    detail.files.push({
+      name: realName,
+      relPath: `${row.folderPath}/${realName}`,
+      exists: true,
       kind: f.kind
     })
   }
