@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { ProfileFile } from '@shared/profile'
 import { emptyProfile } from '@shared/profile'
-import { APP_DIR, BUN_EXE, MASTER_DIR, PDFLATEX, REPO_ROOT, toAbs, todayISO, todayMMDD } from '../paths'
+import { APP_DIR, BUN_EXE, MASTER_DIR, REPO_ROOT, resolveLatex, toAbs, todayISO, todayMMDD } from '../paths'
 import { loadConfig } from '../appConfig'
 import { pickExampleFolder } from '../fsops/FolderScanner'
 import {
@@ -77,6 +77,24 @@ function pdftotextLine(): string {
   return 'pdftotext is not available on this machine — set `"atsCheck": "skipped"` in report.json (do not fail the build over this).'
 }
 
+/** Tell the agent exactly which LaTeX engine exists on THIS host and how to run it. */
+function latexLine(): string {
+  const eng = resolveLatex()
+  if (!eng) {
+    return 'No LaTeX engine was found on this host. Still write the `.tex` files, then try `tectonic <file.tex>` or `pdflatex <file.tex>` on PATH; if neither exists, note in report.json that compilation could not run.'
+  }
+  if (eng.kind === 'tectonic') {
+    return [
+      `Compile with tectonic: \`"${eng.path}" <file.tex>\` run ONCE per document (tectonic auto-runs`,
+      'enough passes). tectonic is XeTeX-based, so any pdfTeX-only ATS line such as',
+      '`\\input glyphtounicode` / `\\pdfgentounicode=1` MUST be wrapped in',
+      '`\\ifdefined\\pdfgentounicode ... \\fi` so it is skipped under tectonic (XeTeX already',
+      'embeds a real Unicode text layer). Confirm each PDF is exactly 1 page from the tectonic output.'
+    ].join(' ')
+  }
+  return `Compile with ${eng.kind}: \`"${eng.path}" -interaction=nonstopmode <file.tex>\` run TWICE per document (hyperref). Confirm the log says \`(1 page\`.`
+}
+
 /** Build-application prompt — fully self-contained; requires a profile. */
 export function buildPrompt(slots: PromptSlots, profile: ProfileFile): string {
   const template = fs.readFileSync(TEMPLATE_PATH, 'utf-8')
@@ -102,7 +120,7 @@ export function buildPrompt(slots: PromptSlots, profile: ProfileFile): string {
     ROLE_HINT: slots.roleHint || 'derive from the posting',
     TODAY_ISO: todayISO(),
     DATE_MMDD: todayMMDD(),
-    PDFLATEX: PDFLATEX,
+    LATEX_LINE: latexLine(),
     REPO_ROOT: REPO_ROOT
   })
 }

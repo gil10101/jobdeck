@@ -6,7 +6,7 @@ Build a complete, tailored application folder from the posting below, then write
 - SLUG (folder name — use EXACTLY this): `{{SLUG}}`
 - Apply URL: {{APPLY_URL}}
 - Company hint: {{COMPANY_HINT}} · Role hint: {{ROLE_HINT}}
-- pdflatex: `{{PDFLATEX}}` (run from inside the folder, `-interaction=nonstopmode`, TWICE per document)
+- LaTeX (run from inside the folder): {{LATEX_LINE}}
 - Output file stem: `{{FILE_BASENAME}}` → `{{FILE_BASENAME}}_Resume.tex`, `{{FILE_BASENAME}}_Cover_Letter.tex`
 
 ## THE JOB POSTING (provided in full — do NOT fetch it from a job board; you MAY WebFetch the apply URL only to confirm details)
@@ -32,14 +32,14 @@ All files go in this folder. Do NOT create files anywhere else.
 - Reword experience/project bullets to mirror THIS posting's exact terms where truthfully applicable. Keep every metric exactly as stated in the profile.
 
 ## STEP 4 — Compile & verify the résumé
-From inside the folder run pdflatex TWICE. Confirm the log says `(1 page`. If 2 pages, trim the least-relevant bullet and recompile until exactly 1 page (if badly underfull, add truthful profile content). Delete `.aux/.log/.out`. Grep the `.tex` to confirm no `---` or `—`.
+From inside the folder, compile per the LaTeX instruction above. Confirm it is exactly 1 page. If 2 pages, trim the least-relevant bullet and recompile until exactly 1 page (if badly underfull, add truthful profile content). Delete `.aux/.log/.out`. Grep the `.tex` to confirm no `---` or `—`.
 
 ## STEP 5 — `{{FILE_BASENAME}}_Cover_Letter.tex` (ALWAYS — every application gets one)
 Self-contained article document matching the résumé's font.
 {{COVER_LETTER_STYLE_MD}}
 Stories to build on:
 {{COVER_LETTER_STORIES_MD}}
-Compile with pdflatex TWICE to exactly 1 page (signature must fit). Delete aux files.
+Compile per the LaTeX instruction above to exactly 1 page (signature must fit). Delete aux files.
 
 ## STEP 6 — `application_answers.md`
 Structure: H1 `# Application Answers - <Company>, <Role>`, a `**Apply at:**` line, `## Copy-paste fields` as a 2-column pipe table, a tailored `## "Why this role?"` (3-4 sentences, specific), 2 likely screening Q&A, trailing `_Status: NOT yet submitted..._` line.

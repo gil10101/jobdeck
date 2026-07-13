@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { promisify } from 'node:util'
-import { PDFLATEX, toAbs } from '../paths'
+import { resolveLatex, toAbs } from '../paths'
 
 const execFileAsync = promisify(execFile)
 
@@ -19,30 +19,38 @@ export async function recompileDoc(
   const folderAbs = toAbs(folderRel)
   const texName = DOC_FILES[doc]
   const texAbs = path.join(folderAbs, texName)
-  if (!fs.existsSync(PDFLATEX)) throw new Error(`pdflatex not found at ${PDFLATEX}`)
+  const eng = resolveLatex()
+  if (!eng) throw new Error('no LaTeX engine found — install pdflatex or tectonic')
   if (!fs.existsSync(texAbs)) {
     // Fall back to any single .tex matching the doc type loosely (renamed templates).
     throw new Error(`${texName} not found in ${folderRel}`)
   }
 
+  // tectonic auto-runs enough passes in one invocation and takes no
+  // -interaction flag; the pdflatex family needs two passes for hyperref.
+  const passes = eng.kind === 'tectonic' ? 1 : 2
+  const args = eng.kind === 'tectonic' ? [texName] : ['-interaction=nonstopmode', texName]
   let stdout = ''
-  for (let i = 0; i < 2; i++) {
+  for (let i = 0; i < passes; i++) {
     try {
-      const res = await execFileAsync(PDFLATEX, ['-interaction=nonstopmode', texName], {
+      const res = await execFileAsync(eng.path, args, {
         cwd: folderAbs,
         timeout: 90_000,
         maxBuffer: 8 * 1024 * 1024,
         windowsHide: true
       })
-      stdout = res.stdout ?? ''
+      stdout = (res.stdout ?? '') + (res.stderr ?? '')
     } catch (err) {
-      // pdflatex exits non-zero on warnings too; keep its output for diagnosis.
-      const e = err as { stdout?: string; message?: string }
-      stdout = e.stdout ?? e.message ?? String(err)
+      // pdflatex/tectonic exit non-zero on warnings too; keep output for diagnosis.
+      const e = err as { stdout?: string; stderr?: string; message?: string }
+      stdout = (e.stdout ?? '') + (e.stderr ?? '') || e.message || String(err)
     }
   }
 
-  const pageMatch = stdout.match(/Output written on .*\((\d+) pages?/)
+  // pdflatex: "Output written on X.pdf (1 page, …)". tectonic is terser, so
+  // fall back to any "(N page[s]" the log contains.
+  const pageMatch =
+    stdout.match(/Output written on .*?\((\d+) pages?/) ?? stdout.match(/\((\d+) pages?[,)]/)
   const pages = pageMatch ? parseInt(pageMatch[1], 10) : null
 
   const base = texName.replace(/\.tex$/, '')

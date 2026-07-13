@@ -2,7 +2,7 @@ import { BrowserWindow, app, dialog, ipcMain } from 'electron'
 import fs from 'node:fs'
 import { loadConfig, saveConfig } from './appConfig'
 import { importFromV1Repo } from './workspace/importV1'
-import { PDFLATEX } from './paths'
+import { resolveLatex } from './paths'
 
 /**
  * IPC that must work BEFORE a workspace exists (first-run/onboarding).
@@ -30,11 +30,17 @@ export function registerCoreIpc(deps: {
     return { workspacePath: c.workspacePath, onboardedAt: c.onboardedAt }
   })
 
-  handle('env:check', () => ({
-    pdflatex: { ok: fs.existsSync(PDFLATEX), path: PDFLATEX },
-    platform: process.platform,
-    appVersion: app.getVersion()
-  }))
+  handle('env:check', () => {
+    const eng = resolveLatex()
+    return {
+      pdflatex: {
+        ok: !!eng,
+        path: eng ? `${eng.path} (${eng.kind})` : 'no LaTeX engine found (install pdflatex or tectonic)'
+      },
+      platform: process.platform,
+      appVersion: app.getVersion()
+    }
+  })
 
   handle('workspace:choose', async (req: { title?: string }) => {
     const win = deps.getWindow()

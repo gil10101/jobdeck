@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
+import { loadConfig } from './appConfig'
 
 /**
  * V2: the app operates on a user-chosen WORKSPACE directory (not a git repo).
@@ -88,14 +89,46 @@ function assertReady(): void {
   }
 }
 
-/** pdflatex resolution: config override → PATH → TinyTeX → MiKTeX (M2 wires config). */
-export const PDFLATEX = path.join(
-  process.env.APPDATA ?? '',
-  'TinyTeX',
-  'bin',
-  'windows',
-  'pdflatex.exe'
-)
+export type LatexKind = 'pdflatex' | 'xelatex' | 'lualatex' | 'tectonic'
+export interface LatexEngine {
+  path: string
+  kind: LatexKind
+}
+
+function inferLatexKind(p: string): LatexKind {
+  const b = path.basename(p).toLowerCase()
+  if (b.includes('tectonic')) return 'tectonic'
+  if (b.includes('xelatex')) return 'xelatex'
+  if (b.includes('lualatex')) return 'lualatex'
+  return 'pdflatex'
+}
+
+// Common install locations, best-first: real pdflatex, then tectonic (a common
+// single-binary engine on macOS/Homebrew), then xe/lua, then the Windows
+// TinyTeX path. A config override (Settings) wins over all of these.
+const LATEX_CANDIDATES: LatexEngine[] = [
+  { path: '/Library/TeX/texbin/pdflatex', kind: 'pdflatex' },
+  { path: '/usr/local/bin/pdflatex', kind: 'pdflatex' },
+  { path: '/opt/homebrew/bin/pdflatex', kind: 'pdflatex' },
+  { path: '/usr/bin/pdflatex', kind: 'pdflatex' },
+  { path: '/opt/homebrew/bin/tectonic', kind: 'tectonic' },
+  { path: '/usr/local/bin/tectonic', kind: 'tectonic' },
+  { path: '/usr/bin/tectonic', kind: 'tectonic' },
+  { path: '/Library/TeX/texbin/xelatex', kind: 'xelatex' },
+  { path: '/Library/TeX/texbin/lualatex', kind: 'lualatex' },
+  { path: path.join(process.env.APPDATA ?? '', 'TinyTeX', 'bin', 'windows', 'pdflatex.exe'), kind: 'pdflatex' }
+]
+
+/** Resolve an available LaTeX engine on this host: config override → known
+ *  install locations. Returns null when none is installed. */
+export function resolveLatex(): LatexEngine | null {
+  const override = loadConfig().pdflatexPath
+  if (override && fs.existsSync(override)) return { path: override, kind: inferLatexKind(override) }
+  for (const c of LATEX_CANDIDATES) {
+    if (c.path && fs.existsSync(c.path)) return c
+  }
+  return null
+}
 
 /** Legacy v1 bun path — used only by the deprecated boardsBridge until M3 removes it. */
 export const BUN_EXE = 'C:\\Users\\gillu\\.bun\\bin\\bun.exe'
