@@ -179,7 +179,7 @@ export default function OnboardingWizard(): JSX.Element {
 
   return (
     <div className="flex h-full items-center justify-center overflow-auto py-8">
-      <div className={`panel p-8 ${step === 'review' ? 'w-[780px]' : 'w-[600px]'}`}>
+      <div className={`panel p-8 ${step === 'review' ? 'w-[min(1140px,95vw)]' : 'w-[600px]'}`}>
         {/* progress */}
         <div className="mt-1 flex items-center justify-center gap-1">
           {labels.map((l, i) => (
@@ -290,15 +290,21 @@ export default function OnboardingWizard(): JSX.Element {
             <p className="text-xs text-gray-400">
               Review the draft. Answer the open questions (blank = skip), fix anything wrong, then save.
             </p>
-            <GapAnswers
-              gaps={draft.gaps}
-              answers={gapAnswers}
-              onChange={setGapAnswers}
-              onApply={() => void applyAnswers()}
-              busy={busy}
-            />
-            <div className="mt-3 max-h-[46vh] overflow-auto pr-1">
-              <ProfileEditor value={draft} onChange={setDraft} />
+            <div className="mt-3 flex gap-4">
+              {draft.gaps.length > 0 && (
+                <div className="max-h-[62vh] w-[380px] shrink-0 overflow-auto pr-1">
+                  <GapAnswers
+                    gaps={draft.gaps}
+                    answers={gapAnswers}
+                    onChange={setGapAnswers}
+                    onApply={() => void applyAnswers()}
+                    busy={busy}
+                  />
+                </div>
+              )}
+              <div className="max-h-[62vh] min-w-0 flex-1 overflow-auto pr-1">
+                <ProfileEditor value={draft} onChange={setDraft} />
+              </div>
             </div>
             <div className="mt-3 flex items-center gap-2">
               <button className="btn btn-green" disabled={busy} onClick={saveProfile}>
