@@ -17,6 +17,8 @@ import { APP_DATA_DIR, ONBOARDING_DIR, REPO_ROOT } from './paths'
 import { validateProfile } from './profile/profileSchema'
 import { loadProfile, saveProfile } from './profile/profileStore'
 import type { ProfileFile } from '@shared/profile'
+import { allCompanies } from './companies/companiesStore'
+import { backfillCompanies, ensureRating, ensureRatingBg, seedFromText } from './companies/ratingService'
 import type { AgentRunner } from './agent/AgentRunner'
 import type { Store } from './store/Store'
 import type { TrackerRepo } from './store/trackerRepo'
@@ -128,6 +130,10 @@ export function registerIpc(services: Services): void {
     store.mutate(['intake'], (s) => {
       s.intake.push(item)
     })
+    // Company-scoped Glassdoor rating: seed from anything the posting text
+    // already quotes, then kick off a background lookup either way.
+    seedFromText(item.companyHint, text)
+    ensureRatingBg(item.companyHint)
     return item
   })
   handle('intake:dismiss', ({ id }) => {
@@ -385,4 +391,16 @@ export function registerIpc(services: Services): void {
       return s.settings
     })
   )
+
+  // ---- companies (Glassdoor ratings, company-scoped) ----
+  handle('companies:get', () => allCompanies())
+  handle('companies:ensure', ({ company }) => ensureRating(company))
+  handle('companies:backfill', () => {
+    const names = [
+      ...store.state.rows.map((r) => r.company),
+      ...store.state.candidates.map((c) => c.company),
+      ...store.state.intake.filter((i) => i.state !== 'dismissed').map((i) => i.companyHint)
+    ]
+    return backfillCompanies(names)
+  })
 }

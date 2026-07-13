@@ -3,11 +3,17 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { EXPORTS_DIR, toAbs } from '../paths'
+import { loadCompanies, normalizeKey } from '../companies/companiesStore'
 import type { Store } from '../store/Store'
 
+// Column order: Position(1) Company(2) Glassdoor(3) Salary(4) Location(5)
+// Date Posted(6) Job App Link(7) Date Applied(8) Cover Letter Y/N(9)
+// Cover Letter Link(10) Resume Link(11) Status(12/L) — cell indices and the
+// Status conditional-formatting range below are keyed to this exact order.
 const COLUMNS = [
   { header: 'Position', key: 'position', width: 34 },
   { header: 'Company', key: 'company', width: 26 },
+  { header: 'Glassdoor', key: 'glassdoor', width: 12 },
   { header: 'Salary', key: 'salary', width: 20 },
   { header: 'Location', key: 'location', width: 24 },
   { header: 'Date Posted', key: 'datePosted', width: 13 },
@@ -48,10 +54,14 @@ export async function exportToXlsx(store: Store): Promise<{ path: string }> {
   ws.columns = COLUMNS as Partial<ExcelJS.Column>[]
   ws.getRow(1).font = { bold: true }
 
+  const companies = loadCompanies()
   for (const r of store.state.rows) {
+    const info = companies[normalizeKey(r.company)]
+    const glassdoor = info?.rating != null ? '★ ' + info.rating.toFixed(1) : ''
     const row = ws.addRow({
       position: r.position,
       company: r.company,
+      glassdoor,
       salary: r.salary,
       location: r.location,
       datePosted: r.datePosted ?? '',
@@ -63,14 +73,18 @@ export async function exportToXlsx(store: Store): Promise<{ path: string }> {
       statusText: r.statusText
     })
     row.alignment = { vertical: 'top', wrapText: true }
+    if (glassdoor && info?.url) {
+      row.getCell(3).value = { text: glassdoor, hyperlink: info.url }
+      row.getCell(3).font = { color: { argb: 'FF0563C1' }, underline: true }
+    }
     // Hyperlinks: apply URL + file links.
     if (r.applyUrl && /^https?:/i.test(r.applyUrl)) {
-      row.getCell(6).value = { text: r.applyUrl, hyperlink: r.applyUrl }
-      row.getCell(6).font = { color: { argb: 'FF0563C1' }, underline: true }
+      row.getCell(7).value = { text: r.applyUrl, hyperlink: r.applyUrl }
+      row.getCell(7).font = { color: { argb: 'FF0563C1' }, underline: true }
     }
     for (const [col, rel] of [
-      [9, r.coverLetterPath],
-      [10, r.resumePath]
+      [10, r.coverLetterPath],
+      [11, r.resumePath]
     ] as const) {
       if (rel) {
         try {
@@ -81,7 +95,7 @@ export async function exportToXlsx(store: Store): Promise<{ path: string }> {
         }
       }
     }
-    row.getCell(11).font = { bold: true }
+    row.getCell(12).font = { bold: true }
   }
 
   // Conditional formatting — priority order with stopIfTrue, "not yet" BEFORE the applied family.
@@ -100,8 +114,11 @@ export async function exportToXlsx(store: Store): Promise<{ path: string }> {
     { text: 'applied', color: 'green' },
     { text: 'submitted', color: 'green' }
   ]
+  // Status is column L (12th): Position, Company, Glassdoor, Salary, Location,
+  // Date Posted, Job App Link, Date Applied, Cover Letter Y/N, Cover Letter
+  // Link, Resume Link, Status — the Glassdoor insert shifted it from K to L.
   ws.addConditionalFormatting({
-    ref: 'K2:K1000',
+    ref: 'L2:L1000',
     rules: [
       ...rules.map((r, i) => ({
         type: 'containsText' as const,
@@ -115,7 +132,7 @@ export async function exportToXlsx(store: Store): Promise<{ path: string }> {
       {
         type: 'expression' as const,
         priority: rules.length + 1,
-        formulae: ['LEN(K2)>0'],
+        formulae: ['LEN(L2)>0'],
         style: cfStyle(FILL.yellow)
       }
     ]

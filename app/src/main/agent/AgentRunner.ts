@@ -16,6 +16,7 @@ import {
 import { parseReport, validateReport } from '../parsers/report'
 import { validateProfile } from '../profile/profileSchema'
 import { loadProfile } from '../profile/profileStore'
+import { ensureRatingBg } from '../companies/ratingService'
 import type { Store } from '../store/Store'
 import type { TrackerRepo } from '../store/trackerRepo'
 import type { TodoWatcher } from '../fsops/TodoWatcher'
@@ -438,6 +439,7 @@ export class AgentRunner {
     const folderRel = toRel(folderAbs)
     run.meta.folderPath = folderRel
     this.tracker.upsertFromReport(parsed, run.meta.id, folderRel)
+    ensureRatingBg(parsed.company)
 
     // TODO-file intake → rename to [DONE]
     const intake = this.store.state.intake.find((i) => i.id === run.meta.intakeId)
@@ -509,6 +511,7 @@ export class AgentRunner {
       Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && !!x.trim()) : null
 
     let added = 0
+    const newCompanies: string[] = []
     this.store.mutate(['candidates'], (s) => {
       for (const c of incoming) {
         const position = (c.position ?? '').trim()
@@ -516,6 +519,7 @@ export class AgentRunner {
         if (!position || !company) continue
         if (known.has(key(position, company))) continue
         known.add(key(position, company))
+        newCompanies.push(company)
         s.candidates.push({
           id: randomUUID(),
           position,
@@ -543,6 +547,7 @@ export class AgentRunner {
         added++
       }
     })
+    for (const company of newCompanies) ensureRatingBg(company)
 
     run.meta.summary = `${added} new candidate${added === 1 ? '' : 's'} (${incoming.length} reported)`
     run.meta.problems = parsed.problems?.length ? parsed.problems : null

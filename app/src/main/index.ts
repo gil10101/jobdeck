@@ -10,6 +10,7 @@ import { TrackerRepo } from './store/trackerRepo'
 import { TodoWatcher } from './fsops/TodoWatcher'
 import { RunStore } from './agent/runStore'
 import { AgentRunner } from './agent/AgentRunner'
+import { initRatingService } from './companies/ratingService'
 import { registerIpc } from './ipcRegistry'
 import { createMainWindow, installWebviewHardening } from './window'
 
@@ -57,6 +58,10 @@ function bootWorkspace(workspacePath: string): void {
   const runStore = new RunStore()
   runner = new AgentRunner(store, tracker, todo, runStore, (channel, payload) =>
     send(channel, payload)
+  )
+  initRatingService(
+    (payload) => send('push:companiesChanged', payload),
+    () => store!.state.settings.model
   )
 
   store.on('changed', (domains: string[]) => send('push:storeChanged', { domains }))
