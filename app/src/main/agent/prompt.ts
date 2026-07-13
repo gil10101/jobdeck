@@ -54,7 +54,7 @@ function imagesSection(imagePaths: string[]): string {
 function masterResumePath(p: ProfileFile): string {
   const candidates = [
     path.join(MASTER_DIR, `${p.documents.fileBasename}_Resume.tex`),
-    path.join(MASTER_DIR, 'main_example.tex') // v1 import before master regeneration
+    path.join(MASTER_DIR, 'main_example.tex') // fallback name for a user-provided master résumé
   ]
   for (const c of candidates) {
     if (fs.existsSync(c)) return `master/${path.basename(c)}`
@@ -149,7 +149,7 @@ export interface ScoutSlots {
   outputPath: string
 }
 
-/** M3 replaces this with the judge prompt; criteria already come from the profile. */
+/** Scout prompt — the search criteria come from the profile. */
 export function buildScoutPrompt(s: ScoutSlots, profile: ProfileFile | null): string {
   let out = fs.readFileSync(SCOUT_TEMPLATE_PATH, 'utf-8')
   const exclude =
@@ -180,7 +180,7 @@ export function buildScoutPrompt(s: ScoutSlots, profile: ProfileFile | null): st
 }
 
 export interface OnboardSlots {
-  /** Absolute paths of source files (uploaded résumé PDFs, v1-import staging, …). */
+  /** Absolute paths of source files (uploaded résumé PDFs, pasted text sources, …). */
   sourceFiles: string[]
   /** Pasted source text (résumé text, LinkedIn about, …). */
   sourceText: string

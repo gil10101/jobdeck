@@ -1,4 +1,4 @@
-// M0 probe: dump raw SDKMessages + verify CLAUDE.md/settings actually load.
+// Agent probe: dump raw SDKMessages + verify project settings actually load.
 // Usage: npm run probe:agent   (from app/)
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { writeFileSync } from 'node:fs'

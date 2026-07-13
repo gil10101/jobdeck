@@ -13,7 +13,7 @@ import { INTAKE_IMAGES_DIR, UPLOADS_DIR, toAbs, toRel } from './paths'
 import { listLibrary, readLibraryFile } from './fsops/library'
 import { recompileDoc } from './latex/recompile'
 import { getBoardsStatus, setJobrightCreds, testJobright } from './boards/boardsBridge'
-import { APP_DATA_DIR, ONBOARDING_DIR, REPO_ROOT } from './paths'
+import { APP_DATA_DIR, REPO_ROOT } from './paths'
 import { validateProfile } from './profile/profileSchema'
 import { loadProfile, saveProfile } from './profile/profileStore'
 import type { ProfileFile } from '@shared/profile'
@@ -232,7 +232,7 @@ export function registerIpc(services: Services): void {
   handle('library:list', () => listLibrary())
   handle('library:read', ({ relPath }) => readLibraryFile(relPath))
 
-  // ---- profile (v2 core) ----
+  // ---- profile ----
   handle('profile:get', () => loadProfile())
   handle('profile:save', ({ profile }) => {
     const result = validateProfile(profile)
@@ -259,16 +259,7 @@ export function registerIpc(services: Services): void {
       return runner.start({ kind: 'onboard', refineDraft: draft, refineAnswers: qa })
     }
     let sourceFiles: string[] = []
-    if (source === 'v1-import') {
-      const stage = path.join(ONBOARDING_DIR, 'v1-import')
-      if (!fs.existsSync(stage)) {
-        throw new Error('no v1-import sources staged — use "Import from v1" first')
-      }
-      sourceFiles = fs
-        .readdirSync(stage)
-        .filter((f) => !f.startsWith('.'))
-        .map((f) => path.join(stage, f))
-    } else if (source === 'uploads') {
+    if (source === 'uploads') {
       // "agent handles the rest": every file the user dropped into the library.
       sourceFiles = fs.existsSync(UPLOADS_DIR)
         ? fs
@@ -276,16 +267,6 @@ export function registerIpc(services: Services): void {
             .filter((f) => !f.startsWith('.'))
             .map((f) => path.join(UPLOADS_DIR, f))
         : []
-      // Include v1-import staging too when present — more context never hurts extraction.
-      const stage = path.join(ONBOARDING_DIR, 'v1-import')
-      if (fs.existsSync(stage)) {
-        sourceFiles.push(
-          ...fs
-            .readdirSync(stage)
-            .filter((f) => !f.startsWith('.'))
-            .map((f) => path.join(stage, f))
-        )
-      }
       if (!sourceFiles.length && !text?.trim()) {
         throw new Error('no uploads yet — add files in Library first')
       }

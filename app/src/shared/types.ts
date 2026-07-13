@@ -68,7 +68,7 @@ export interface ReportJson {
   fitNote: string
   problems: string[]
   files: Record<string, string>
-  /** app.report.v2 additions (absent on v1 reports). */
+  /** Optional richer fields; may be absent on older/minimal reports. */
   keywordCoverage?: { keyword: string; status: string; where: string }[] | null
   atsCheck?: string | null
 }
@@ -239,16 +239,6 @@ export interface TrackerStoreFile {
   intake: IntakeItem[]
   candidates: CandidateJob[]
   settings: AppSettings
-}
-
-export interface V1ImportSummary {
-  applicationsCopied: number
-  trackerImported: boolean
-  trackerRows: number
-  masterResumeCopied: boolean
-  intakeImagesCopied: number
-  onboardingSourcesStaged: string[]
-  warnings: string[]
 }
 
 export interface LibraryFile {

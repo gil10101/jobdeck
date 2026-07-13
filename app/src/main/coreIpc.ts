@@ -1,7 +1,6 @@
 import { BrowserWindow, app, dialog, ipcMain } from 'electron'
 import fs from 'node:fs'
 import { loadConfig, saveConfig } from './appConfig'
-import { importFromV1Repo } from './workspace/importV1'
 import { resolveLatex } from './paths'
 
 /**
@@ -58,18 +57,6 @@ export function registerCoreIpc(deps: {
     await deps.completeSetup(dir)
     return { workspacePath: dir }
   })
-
-  handle(
-    'workspace:importV1',
-    async ({ repoRoot, dir }: { repoRoot: string; dir: string }) => {
-      if (!repoRoot || !dir) throw new Error('choose both the v1 folder and the new workspace folder')
-      fs.mkdirSync(dir, { recursive: true })
-      const summary = importFromV1Repo(repoRoot, dir)
-      saveConfig({ workspacePath: dir })
-      await deps.completeSetup(dir)
-      return summary
-    }
-  )
 
   handle('onboarding:complete', () => {
     saveConfig({ onboardedAt: new Date().toISOString() })

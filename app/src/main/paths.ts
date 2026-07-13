@@ -5,7 +5,7 @@ import path from 'node:path'
 import { loadConfig } from './appConfig'
 
 /**
- * V2: the app operates on a user-chosen WORKSPACE directory (not a git repo).
+ * the app operates on a user-chosen WORKSPACE directory (not a git repo).
  * Paths are ESM live bindings initialized by initWorkspace() at boot (or after
  * the first-run picker). Anything touching them before init throws loudly.
  *
@@ -18,8 +18,8 @@ import { loadConfig } from './appConfig'
 
 const NOT_READY = '__WORKSPACE_NOT_INITIALIZED__'
 
-// Live bindings — consumers imported these names in v1; values now flip at init.
-// REPO_ROOT is kept as the legacy alias of the workspace root (renamed in M2 sweeps).
+// Live bindings initialized by initWorkspace() at boot. REPO_ROOT
+// is an alias of the workspace root.
 export let REPO_ROOT = NOT_READY
 export let APP_DATA_DIR = NOT_READY // legacy alias: internal data now lives inside the workspace
 export let RUNS_DIR = NOT_READY

@@ -2,9 +2,9 @@ import type { ProfileFile, Story } from '@shared/profile'
 
 /**
  * ProfileRenderer — pure functions from profile.json to the markdown fragments
- * injected into agent prompts. This replaces the v1 agents' "read CLAUDE.md"
- * step, so the rendering must carry the same guidance quality: inclusion rules,
- * verbatim phrases, and framing constraints become explicit imperatives.
+ * injected into agent prompts so they read the profile directly (no external
+ * instructions file). The rendering must carry real guidance quality: inclusion
+ * rules, verbatim phrases, and framing constraints become explicit imperatives.
  */
 
 function section(title: string, body: string): string {

@@ -316,8 +316,8 @@ export class AgentRunner {
         options: {
           cwd: REPO_ROOT,
           systemPrompt: { type: 'preset', preset: 'claude_code' },
-          // Explicitly NO settings sources: prompts are fully self-contained in
-          // v2 (no CLAUDE.md dependency) — provable by grepping the saved prompt.
+          // Explicitly NO settings sources: prompts are fully self-contained
+          // (no external instructions-file dependency) — provable by grepping the saved prompt.
           settingSources: [],
           permissionMode: 'bypassPermissions',
           maxTurns: settings.maxTurns,

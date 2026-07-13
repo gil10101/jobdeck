@@ -19,7 +19,6 @@ export default function OnboardingWizard(): JSX.Element {
   const [busy, setBusy] = useState(false)
   const [uploadNames, setUploadNames] = useState<string[]>([])
   const [pasteText, setPasteText] = useState('')
-  const [importedV1, setImportedV1] = useState(false)
   const [run, setRun] = useState<RunMeta | null>(null)
   const [runStatusLine, setRunStatusLine] = useState('starting…')
   const [draft, setDraft] = useState<ProfileFile | null>(null)
@@ -64,32 +63,6 @@ export default function OnboardingWizard(): JSX.Element {
       })
       if (!path) return
       await call('workspace:create', { dir: path })
-      await useApp.getState().refreshConfig()
-      setStep('sources')
-    } catch (err) {
-      toast(String(err), 'error')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const importV1 = async (): Promise<void> => {
-    setBusy(true)
-    try {
-      const { path: repoRoot } = await call('workspace:choose', {
-        title: 'Select your old workspace folder (contains CLAUDE.md + documents/applications)'
-      })
-      if (!repoRoot) return
-      const { path: dir } = await call('workspace:choose', {
-        title: 'Choose (or create) a NEW folder — your data is COPIED into it'
-      })
-      if (!dir) return
-      const summary = await call('workspace:importV1', { repoRoot, dir })
-      toast(
-        `Imported ${summary.applicationsCopied} application folders + ${summary.trackerRows} tracker rows`,
-        'success'
-      )
-      setImportedV1(true)
       await useApp.getState().refreshConfig()
       setStep('sources')
     } catch (err) {
@@ -211,9 +184,6 @@ export default function OnboardingWizard(): JSX.Element {
               <button className="btn btn-primary justify-center py-2.5" disabled={busy} onClick={createWorkspace}>
                 Create a new workspace…
               </button>
-              <button className="btn justify-center py-2.5" disabled={busy} onClick={importV1}>
-                Import from an existing workspace (copies your data)…
-              </button>
             </div>
           </div>
         )}
@@ -229,11 +199,6 @@ export default function OnboardingWizard(): JSX.Element {
               <button className="btn btn-primary" onClick={upload}>
                 ⇪ Add files…
               </button>
-              {importedV1 && (
-                <span className="chip border-green-800 text-green-300">
-                  ✓ old workspace staged as a source
-                </span>
-              )}
             </div>
             {uploadNames.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1">
@@ -253,7 +218,7 @@ export default function OnboardingWizard(): JSX.Element {
             <div className="mt-4 flex items-center gap-2">
               <button
                 className="btn btn-primary"
-                disabled={busy || (uploadNames.length === 0 && !pasteText.trim() && !importedV1)}
+                disabled={busy || (uploadNames.length === 0 && !pasteText.trim())}
                 onClick={extract}
               >
                 Extract my profile →

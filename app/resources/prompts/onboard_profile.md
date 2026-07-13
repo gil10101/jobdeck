@@ -24,7 +24,6 @@ Write `{{OUTPUT_PATH}}` matching this annotated skeleton exactly (arrays may be 
 - `narrative.stories`: reusable concrete stories (a measurable win, a fixed messy process, a differentiator project) with `use` tags (cover_letter/interview/answers).
 - `customRules`: any per-user workflow rules that don't fit elsewhere (e.g. special documents for specific job portals).
 - `documents.fileBasename`: sanitized from the candidate's full name (letters/digits/underscores).
-- v1-import specific: CLAUDE.md's "Job Search Configuration" → searchConfig; CV-template/tailoring guides → tailoring; job-evaluation guides → evaluation; behavioral files → behavioral.
 
 ## DO NOT
 - Do NOT write any file other than `{{OUTPUT_PATH}}`.

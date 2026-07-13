@@ -9,8 +9,7 @@ import type {
   RunEvent,
   RunMeta,
   ScanResult,
-  TrackerRow,
-  V1ImportSummary
+  TrackerRow
 } from './types'
 import type { ProfileFile } from './profile'
 
@@ -74,7 +73,6 @@ export interface IpcInvokeContract {
   }
   'workspace:choose': { req: { title?: string }; res: { path: string | null } }
   'workspace:create': { req: { dir: string }; res: { workspacePath: string } }
-  'workspace:importV1': { req: { repoRoot: string; dir: string }; res: V1ImportSummary }
   'app:pickFile': {
     req: { filters?: { name: string; extensions: string[] }[] }
     res: { path: string | null }
@@ -87,7 +85,7 @@ export interface IpcInvokeContract {
   }
   'onboard:start': {
     req: {
-      source: 'v1-import' | 'text' | 'files' | 'uploads' | 'refine'
+      source: 'text' | 'files' | 'uploads' | 'refine'
       text?: string
       files?: string[]
       /** refine: current draft + gap answers to merge into it. */
@@ -160,7 +158,6 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'env:check',
   'workspace:choose',
   'workspace:create',
-  'workspace:importV1',
   'app:pickFile',
   'profile:get',
   'profile:save',

@@ -15,7 +15,7 @@ import { registerIpc } from './ipcRegistry'
 import { createMainWindow, installWebviewHardening } from './window'
 
 // Dev isolation: distinct userData so a JobDeck dev instance never collides
-// with an installed build (or with v1, which has its own app name already).
+// with an installed build.
 if (!app.isPackaged) {
   app.setPath('userData', path.join(app.getPath('appData'), 'JobDeckDev'))
 }
