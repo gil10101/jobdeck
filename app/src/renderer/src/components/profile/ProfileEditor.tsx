@@ -220,7 +220,7 @@ export default function ProfileEditor(props: {
           items={p.publications}
           onChange={(publications) => patch({ publications })}
           makeEmpty={() => ({ citation: '', url: null })}
-          title={(x) => x.citation.slice(0, 60)}
+          title={(x) => x.citation?.slice(0, 60) ?? ''}
           addLabel="publication"
           render={(x, set) => (
             <div className="mt-1">

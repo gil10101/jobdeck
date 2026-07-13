@@ -16,6 +16,7 @@ export default function ProfilePanel(): JSX.Element {
   const navigate = useApp((s) => s.navigate)
   const [profile, setProfile] = useState<ProfileFile | null>(null)
   const [extracting, setExtracting] = useState<RunMeta | null>(null)
+  const [refining, setRefining] = useState(false)
   const [draft, setDraft] = useState<ProfileFile | null>(null)
   const [gapAnswers, setGapAnswers] = useState<Record<string, string>>({})
   const [pasteText, setPasteText] = useState('')
@@ -33,16 +34,23 @@ export default function ProfilePanel(): JSX.Element {
       if (meta.id !== extracting.id) return
       if (meta.status === 'succeeded') {
         setExtracting(null)
+        setRefining(false)
         void call('profile:draft', { runId: meta.id }).then(({ draft: d, error }) => {
           if (d) {
             setDraft(d)
             setGapAnswers({})
-            toast(`Draft ready — review, answer gaps, then Save (${meta.summary ?? ''})`, 'success')
+            toast(
+              refining
+                ? 'Answers merged into the draft'
+                : `Draft ready — review, answer gaps, then Save (${meta.summary ?? ''})`,
+              'success'
+            )
           } else if (error) toast(error, 'error')
         })
       } else if (meta.status === 'failed' || meta.status === 'cancelled') {
         setExtracting(null)
-        toast(`Extraction ${meta.status}: ${meta.errorText ?? ''}`, 'error')
+        setRefining(false)
+        toast(`${refining ? 'Refine' : 'Extraction'} ${meta.status}: ${meta.errorText ?? ''}`, 'error')
       }
     })
     return off
@@ -64,6 +72,7 @@ export default function ProfilePanel(): JSX.Element {
         text: source === 'text' ? pasteText : undefined,
         files
       })
+      setRefining(false)
       setExtracting(meta)
       toast('Extraction agent launched — watch it in Runs', 'success')
       void useApp.getState().refreshRuns()
@@ -99,6 +108,7 @@ export default function ProfilePanel(): JSX.Element {
     setBusy(true)
     try {
       const meta = await call('onboard:start', { source: 'refine', draft, answers })
+      setRefining(true)
       setExtracting(meta)
       toast('Merging your answers…', 'success')
       void useApp.getState().refreshRuns()
@@ -185,7 +195,7 @@ export default function ProfilePanel(): JSX.Element {
       {extracting && (
         <div className="mt-3 flex items-center gap-2 text-xs text-cyan-300">
           <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400" />
-          Extracting profile…
+          {refining ? 'Merging your answers…' : 'Extracting profile…'}
           <button
             className="btn px-2 py-0.5 text-[10px]"
             onClick={() => navigate({ view: 'runs', runId: extracting.id })}
@@ -201,7 +211,11 @@ export default function ProfilePanel(): JSX.Element {
             <span className="text-[11px] font-semibold text-gray-200">
               Draft — answer gaps, edit, then save
             </span>
-            <button className="btn btn-green ml-auto px-2 py-0.5 text-[10px]" disabled={busy} onClick={saveDraft}>
+            <button
+              className="btn btn-green ml-auto px-2 py-0.5 text-[10px]"
+              disabled={busy || extracting !== null}
+              onClick={saveDraft}
+            >
               Validate & save
             </button>
             <button className="btn px-2 py-0.5 text-[10px]" onClick={() => setDraft(null)}>

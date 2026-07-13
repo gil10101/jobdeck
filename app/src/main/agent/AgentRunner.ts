@@ -295,6 +295,14 @@ export class AgentRunner {
 
   private async execute(run: ActiveRun): Promise<void> {
     this.setStatus(run, 'running')
+    if (run.meta.kind === 'onboard') {
+      try {
+        fs.rmSync(path.join(TMP_DIR, 'profile.draft.json'), { force: true })
+      } catch {
+        // best-effort: a stale draft that can't be removed will still be
+        // caught by finalizeOnboard's validation
+      }
+    }
     try {
       const prompt = this.buildRunPrompt(run)
       this.runStore.savePrompt(run.meta.id, prompt) // audit: exactly what the agent saw

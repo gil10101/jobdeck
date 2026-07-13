@@ -107,6 +107,7 @@ export function StringList(props: {
   onChange: (items: string[]) => void
   addLabel?: string
 }): JSX.Element {
+  const items = props.items ?? []
   const set = (i: number, v: string): void => {
     const next = [...props.items]
     next[i] = v
@@ -117,7 +118,7 @@ export function StringList(props: {
       {props.label && (
         <div className="text-[10px] uppercase tracking-wide text-gray-500">{props.label}</div>
       )}
-      {props.items.map((item, i) => (
+      {items.map((item, i) => (
         <div key={i} className="mt-1 flex items-center gap-1">
           <input
             className="input w-full text-[11px]"
@@ -127,7 +128,7 @@ export function StringList(props: {
           <button
             type="button"
             className="btn px-1.5 py-0.5 text-[10px] text-gray-500"
-            onClick={() => props.onChange(props.items.filter((_, j) => j !== i))}
+            onClick={() => props.onChange(items.filter((_, j) => j !== i))}
           >
             ✕
           </button>
@@ -136,7 +137,7 @@ export function StringList(props: {
       <button
         type="button"
         className="btn mt-1 px-2 py-0.5 text-[10px]"
-        onClick={() => props.onChange([...props.items, ''])}
+        onClick={() => props.onChange([...items, ''])}
       >
         + {props.addLabel ?? 'add'}
       </button>
@@ -150,6 +151,7 @@ export function CommaList(props: {
   items: string[]
   onChange: (items: string[]) => void
 }): JSX.Element {
+  const items = props.items ?? []
   const [draft, setDraft] = useState<string | null>(null)
   const commit = (): void => {
     if (draft === null) return
@@ -168,7 +170,7 @@ export function CommaList(props: {
       </span>
       <input
         className="input mt-0.5 w-full text-[11px]"
-        value={draft ?? props.items.join(', ')}
+        value={draft ?? items.join(', ')}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
       />
@@ -199,7 +201,7 @@ export function JsonBlock<T>(props: {
       <div className="text-[10px] uppercase tracking-wide text-gray-500">{props.label} (JSON)</div>
       <textarea
         className="input mt-0.5 min-h-[80px] w-full resize-y font-mono text-[10px] leading-relaxed"
-        value={text ?? JSON.stringify(props.value, null, 2)}
+        value={text ?? JSON.stringify(props.value ?? null, null, 2)}
         spellCheck={false}
         onChange={(e) => setText(e.target.value)}
         onBlur={commit}
@@ -218,6 +220,7 @@ export function EntryList<T>(props: {
   addLabel: string
   render: (item: T, set: (patch: Partial<T>) => void) => ReactNode
 }): JSX.Element {
+  const items = props.items ?? []
   const setAt = (i: number, patch: Partial<T>): void => {
     const next = [...props.items]
     next[i] = { ...next[i], ...patch }
@@ -225,7 +228,7 @@ export function EntryList<T>(props: {
   }
   return (
     <div>
-      {props.items.map((item, i) => (
+      {items.map((item, i) => (
         <div key={i} className="mt-2 rounded-md border border-gray-800 p-2">
           <div className="flex items-center">
             <span className="text-[11px] font-medium text-gray-300">
@@ -234,7 +237,7 @@ export function EntryList<T>(props: {
             <button
               type="button"
               className="btn ml-auto px-1.5 py-0.5 text-[10px] text-gray-500"
-              onClick={() => props.onChange(props.items.filter((_, j) => j !== i))}
+              onClick={() => props.onChange(items.filter((_, j) => j !== i))}
             >
               ✕ remove
             </button>
@@ -245,7 +248,7 @@ export function EntryList<T>(props: {
       <button
         type="button"
         className="btn mt-2 px-2 py-0.5 text-[10px]"
-        onClick={() => props.onChange([...props.items, props.makeEmpty()])}
+        onClick={() => props.onChange([...items, props.makeEmpty()])}
       >
         + {props.addLabel}
       </button>
