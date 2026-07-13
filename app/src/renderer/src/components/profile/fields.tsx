@@ -1,6 +1,51 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 
+/**
+ * Dropdown over a fixed option set. When `allowOther` is set and the current
+ * value isn't one of the options (and isn't empty), a free-text input appears
+ * so an unusual value is never silently dropped.
+ */
+export function SelectField(props: {
+  label: string
+  value: string | null
+  onChange: (v: string) => void
+  options: { value: string; label: string }[]
+  allowOther?: boolean
+  placeholder?: string
+}): JSX.Element {
+  const value = props.value ?? ''
+  const known = props.options.some((o) => o.value === value)
+  const isOther = props.allowOther && value !== '' && !known
+  return (
+    <label className="block min-w-0">
+      <span className="text-[10px] uppercase tracking-wide text-gray-500">{props.label}</span>
+      <select
+        className="input mt-0.5 w-full text-[11px]"
+        value={isOther ? '__other__' : value}
+        onChange={(e) => props.onChange(e.target.value === '__other__' ? ' ' : e.target.value)}
+      >
+        <option value="">{props.placeholder ?? '— select —'}</option>
+        {props.options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+        {props.allowOther && <option value="__other__">Other…</option>}
+      </select>
+      {isOther && (
+        <input
+          className="input mt-1 w-full text-[11px]"
+          value={value.trimStart()}
+          placeholder="Type your own"
+          onChange={(e) => props.onChange(e.target.value)}
+          autoFocus
+        />
+      )}
+    </label>
+  )
+}
+
 /** Collapsible editor section. */
 export function Section(props: {
   title: string

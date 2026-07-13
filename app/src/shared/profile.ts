@@ -150,8 +150,11 @@ export interface TailoringConfig {
   hardRules: string[]
 }
 
+export type EmploymentType = 'full-time' | 'part-time' | 'contract' | 'internship'
+
 export interface SearchConfig {
-  targetRoles: { title: string; priority: 1 | 2 | 3 | 4 }[]
+  /** Ordered by priority: index 0 = highest. `priority` mirrors the 1-based position. */
+  targetRoles: { title: string; priority: number }[]
   timing: { maxAgeDays: number }
   availability: string
   salary: {
@@ -163,6 +166,7 @@ export interface SearchConfig {
   minCompanySize: number | null
   locationTiers: { tier: 'ideal' | 'acceptable' | 'borderline'; description: string }[]
   workModels: ('onsite' | 'hybrid' | 'remote')[]
+  employmentTypes: EmploymentType[]
   excludeCompanies: string[]
   extraHardFilters: string[]
   boards: {
@@ -237,6 +241,7 @@ export function emptyProfile(): ProfileFile {
       minCompanySize: null,
       locationTiers: [],
       workModels: ['onsite', 'hybrid', 'remote'],
+      employmentTypes: [],
       excludeCompanies: [],
       extraHardFilters: [],
       boards: {

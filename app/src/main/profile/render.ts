@@ -171,6 +171,7 @@ export function renderSearchCriteriaMd(p: ProfileFile): string {
     s.locationTiers.length &&
       `- Locations: ${s.locationTiers.map((t) => `${t.tier}: ${t.description}`).join(' | ')}`,
     s.workModels.length < 3 && `- Work models allowed: ${s.workModels.join(', ')}`,
+    s.employmentTypes.length && `- Employment types: ${s.employmentTypes.join(', ')}`,
     s.excludeCompanies.length && `- NEVER suggest these companies: ${s.excludeCompanies.join(', ')}`,
     ...s.extraHardFilters.map((f) => `- ${f}`),
     p.narrative.dealBreakers.length &&

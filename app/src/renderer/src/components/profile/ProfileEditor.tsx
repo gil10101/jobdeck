@@ -17,10 +17,18 @@ import {
   JsonBlock,
   NumField,
   Section,
+  SelectField,
   StringList,
   TextAreaField,
   TextField
 } from './fields'
+import CategoryPicker from './CategoryPicker'
+import {
+  EMPLOYMENT_TYPES,
+  PROFICIENCY_OPTIONS,
+  ROLE_TAXONOMY,
+  WORK_AUTH_OPTIONS
+} from './roleTaxonomy'
 
 const n = (v: string): string | null => (v.trim() ? v : null)
 
@@ -58,7 +66,13 @@ export default function ProfileEditor(props: {
           <TextField label="LinkedIn" value={p.identity.linkedin} onChange={(v) => identity({ linkedin: v })} />
           <TextField label="GitHub" value={p.identity.github} onChange={(v) => identity({ github: v })} />
           <TextField label="Website" value={p.identity.website} onChange={(v) => identity({ website: v })} />
-          <TextField label="Work authorization" value={p.identity.workAuth} onChange={(v) => identity({ workAuth: v })} />
+          <SelectField
+            label="Work authorization"
+            value={p.identity.workAuth}
+            onChange={(v) => identity({ workAuth: v })}
+            options={WORK_AUTH_OPTIONS}
+            allowOther
+          />
         </div>
         <div className="mt-2">
           <TextField label="Current status" value={p.identity.status} onChange={(v) => identity({ status: v })} placeholder="e.g. M.S. candidate, actively looking" />
@@ -73,7 +87,13 @@ export default function ProfileEditor(props: {
             render={(l, set) => (
               <div className="mt-1 grid grid-cols-2 gap-2">
                 <TextField label="Language" value={l.name} onChange={(v) => set({ name: v })} />
-                <TextField label="Proficiency" value={l.proficiency} onChange={(v) => set({ proficiency: v })} />
+                <SelectField
+                  label="Proficiency"
+                  value={l.proficiency}
+                  onChange={(v) => set({ proficiency: v })}
+                  options={PROFICIENCY_OPTIONS}
+                  allowOther
+                />
               </div>
             )}
           />
@@ -334,32 +354,16 @@ export default function ProfileEditor(props: {
       </Section>
 
       <Section title="Job search" summary={`${p.searchConfig.targetRoles.length} target roles`} defaultOpen={false}>
-        <EntryList
-          items={p.searchConfig.targetRoles}
-          onChange={(targetRoles) => search({ targetRoles })}
-          makeEmpty={() => ({ title: '', priority: 1 as const })}
-          title={(r) => `P${r.priority} ${r.title}`}
-          addLabel="target role"
-          render={(r, set) => (
-            <div className="mt-1 grid grid-cols-[1fr_90px] gap-2">
-              <TextField label="Role title" value={r.title} onChange={(v) => set({ title: v })} />
-              <label className="block">
-                <span className="text-[10px] uppercase tracking-wide text-gray-500">Priority</span>
-                <select
-                  className="input mt-0.5 w-full text-[11px]"
-                  value={r.priority}
-                  onChange={(e) => set({ priority: Number(e.target.value) as 1 | 2 | 3 | 4 })}
-                >
-                  {[1, 2, 3, 4].map((x) => (
-                    <option key={x} value={x}>
-                      P{x}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-          )}
-        />
+        <div className="text-[10px] uppercase tracking-wide text-gray-500">
+          Target roles <span className="normal-case text-gray-600">(order = priority)</span>
+        </div>
+        <div className="mt-1">
+          <CategoryPicker
+            taxonomy={ROLE_TAXONOMY}
+            selected={p.searchConfig.targetRoles}
+            onChange={(targetRoles) => search({ targetRoles })}
+          />
+        </div>
         <div className="mt-2 grid grid-cols-2 gap-2">
           <TextField label="Availability" value={p.searchConfig.availability} onChange={(v) => search({ availability: v })} />
           <TextField
@@ -387,7 +391,8 @@ export default function ProfileEditor(props: {
             onChange={(internshipsExempt) => search({ salary: { ...p.searchConfig.salary, internshipsExempt } })}
           />
         </div>
-        <div className="mt-2 flex items-center gap-4">
+        <div className="mt-2 text-[10px] uppercase tracking-wide text-gray-500">Work models</div>
+        <div className="mt-1 flex items-center gap-4">
           {(['onsite', 'hybrid', 'remote'] as const).map((m) => (
             <CheckField
               key={m}
@@ -398,6 +403,23 @@ export default function ProfileEditor(props: {
                   workModels: on
                     ? [...p.searchConfig.workModels, m]
                     : p.searchConfig.workModels.filter((x) => x !== m)
+                })
+              }
+            />
+          ))}
+        </div>
+        <div className="mt-2 text-[10px] uppercase tracking-wide text-gray-500">Employment types</div>
+        <div className="mt-1 flex flex-wrap items-center gap-4">
+          {EMPLOYMENT_TYPES.map((t) => (
+            <CheckField
+              key={t.value}
+              label={t.label}
+              checked={p.searchConfig.employmentTypes.includes(t.value)}
+              onChange={(on) =>
+                search({
+                  employmentTypes: on
+                    ? [...p.searchConfig.employmentTypes, t.value]
+                    : p.searchConfig.employmentTypes.filter((x) => x !== t.value)
                 })
               }
             />
