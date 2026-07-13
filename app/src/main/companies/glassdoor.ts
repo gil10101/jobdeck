@@ -72,8 +72,22 @@ function coerceRating(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? Math.min(5, Math.max(0, v)) : null
 }
 
+/** The URL is produced by the LLM and later opened in the user's browser /
+ *  written as a spreadsheet hyperlink, so constrain it hard: https only, and
+ *  the host must be glassdoor.com (or a subdomain). Anything else → null. */
 function coerceUrl(v: unknown): string | null {
-  return typeof v === 'string' && v.trim() ? v.trim() : null
+  const s = typeof v === 'string' ? v.trim() : ''
+  if (!s) return null
+  try {
+    const u = new URL(s)
+    const host = u.hostname.toLowerCase()
+    if (u.protocol !== 'https:' || (host !== 'glassdoor.com' && !host.endsWith('.glassdoor.com'))) {
+      return null
+    }
+    return u.toString()
+  } catch {
+    return null
+  }
 }
 
 function coerceReviewCount(v: unknown): number | null {

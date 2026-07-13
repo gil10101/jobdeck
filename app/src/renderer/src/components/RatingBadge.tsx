@@ -16,7 +16,10 @@ export default function RatingBadge(props: {
     </>
   )
 
-  if (!url) return <span className="chip gap-1 text-[10px]">{content}</span>
+  // Defense in depth: the URL originates from an LLM lookup, so only ever hand
+  // an https URL to openExternal (blocks javascript:/file: and the like).
+  const safeUrl = url && /^https:\/\//i.test(url) ? url : null
+  if (!safeUrl) return <span className="chip gap-1 text-[10px]">{content}</span>
 
   return (
     <button
@@ -25,7 +28,7 @@ export default function RatingBadge(props: {
       title="Open Glassdoor"
       onClick={(e) => {
         e.stopPropagation()
-        void call('app:openExternal', { url }).catch(() => undefined)
+        void call('app:openExternal', { url: safeUrl }).catch(() => undefined)
       }}
     >
       {content}

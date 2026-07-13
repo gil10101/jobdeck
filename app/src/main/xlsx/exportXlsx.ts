@@ -73,7 +73,7 @@ export async function exportToXlsx(store: Store): Promise<{ path: string }> {
       statusText: r.statusText
     })
     row.alignment = { vertical: 'top', wrapText: true }
-    if (glassdoor && info?.url) {
+    if (glassdoor && info?.url && /^https:\/\//i.test(info.url)) {
       row.getCell(3).value = { text: glassdoor, hyperlink: info.url }
       row.getCell(3).font = { color: { argb: 'FF0563C1' }, underline: true }
     }
