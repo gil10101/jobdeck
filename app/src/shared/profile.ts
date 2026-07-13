@@ -1,6 +1,6 @@
-// The candidate profile — v2's single source of truth, stored at
+// The candidate profile — the app's single source of truth, stored at
 // <workspace>/profile.json. Pure types + defaults; shared by main and renderer.
-// Everything the v1 prompts used to hardcode now lives here as per-user data.
+// The agent prompts read everything about the candidate from here.
 
 export const PROFILE_SCHEMA_ID = 'profile.v1'
 
