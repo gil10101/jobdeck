@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import type { ProfileFile } from '@shared/profile'
 import { PROFILE_FILE } from '../paths'
+import { validateProfile } from './profileSchema'
 
 let cached: ProfileFile | null = null
 
@@ -12,7 +13,12 @@ export function loadProfile(): ProfileFile | null {
   if (cached) return cached
   try {
     if (!fs.existsSync(PROFILE_FILE)) return null
-    cached = JSON.parse(fs.readFileSync(PROFILE_FILE, 'utf-8')) as ProfileFile
+    const raw = JSON.parse(fs.readFileSync(PROFILE_FILE, 'utf-8'))
+    // Heal older on-disk profiles to the current schema (e.g. a field added
+    // after they were saved) so every consumer — the editor and the prompt
+    // renderers — sees a complete object and never reads an absent field.
+    const result = validateProfile(raw)
+    cached = result.ok ? result.profile : (raw as ProfileFile)
     return cached
   } catch (err) {
     console.error('[profile] load failed:', err)

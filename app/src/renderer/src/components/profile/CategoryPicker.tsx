@@ -19,23 +19,24 @@ export default function CategoryPicker(props: {
 }): JSX.Element {
   const [active, setActive] = useState(0)
   const [custom, setCustom] = useState('')
-  const chosen = new Set(props.selected.map((r) => r.title.toLowerCase()))
+  const selected = props.selected ?? []
+  const chosen = new Set(selected.map((r) => r.title.toLowerCase()))
 
   const renumber = (list: { title: string }[]): PickedRole[] =>
     list.map((r, i) => ({ title: r.title, priority: i + 1 }))
 
   const toggle = (title: string): void => {
     if (chosen.has(title.toLowerCase())) {
-      props.onChange(renumber(props.selected.filter((r) => r.title.toLowerCase() !== title.toLowerCase())))
+      props.onChange(renumber(selected.filter((r) => r.title.toLowerCase() !== title.toLowerCase())))
     } else {
-      props.onChange(renumber([...props.selected, { title }]))
+      props.onChange(renumber([...selected, { title }]))
     }
   }
 
   const move = (i: number, dir: -1 | 1): void => {
     const j = i + dir
-    if (j < 0 || j >= props.selected.length) return
-    const next = [...props.selected]
+    if (j < 0 || j >= selected.length) return
+    const next = [...selected]
     ;[next[i], next[j]] = [next[j], next[i]]
     props.onChange(renumber(next))
   }
@@ -43,7 +44,7 @@ export default function CategoryPicker(props: {
   const addCustom = (): void => {
     const title = custom.trim()
     if (title && !chosen.has(title.toLowerCase())) {
-      props.onChange(renumber([...props.selected, { title }]))
+      props.onChange(renumber([...selected, { title }]))
     }
     setCustom('')
   }
@@ -53,9 +54,9 @@ export default function CategoryPicker(props: {
   return (
     <div>
       {/* selected, ordered by priority */}
-      {props.selected.length > 0 ? (
+      {selected.length > 0 ? (
         <div className="flex flex-wrap gap-1">
-          {props.selected.map((r, i) => (
+          {selected.map((r, i) => (
             <span
               key={r.title}
               className="chip flex items-center gap-1 border-cyan-800 bg-cyan-950/50 text-cyan-200"

@@ -414,12 +414,12 @@ export default function ProfileEditor(props: {
             <CheckField
               key={t.value}
               label={t.label}
-              checked={p.searchConfig.employmentTypes.includes(t.value)}
+              checked={(p.searchConfig.employmentTypes ?? []).includes(t.value)}
               onChange={(on) =>
                 search({
                   employmentTypes: on
-                    ? [...p.searchConfig.employmentTypes, t.value]
-                    : p.searchConfig.employmentTypes.filter((x) => x !== t.value)
+                    ? [...(p.searchConfig.employmentTypes ?? []), t.value]
+                    : (p.searchConfig.employmentTypes ?? []).filter((x) => x !== t.value)
                 })
               }
             />
