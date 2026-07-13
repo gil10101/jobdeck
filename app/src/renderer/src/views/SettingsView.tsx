@@ -110,7 +110,7 @@ export default function SettingsView(): JSX.Element {
 
   return (
     <div className="h-full overflow-auto">
-      <div className="mx-auto max-w-2xl p-6">
+      <div className="mx-auto max-w-6xl p-6">
         <h1 className="text-sm font-semibold text-gray-100">Settings</h1>
 
         <ProfilePanel />
