@@ -32,7 +32,7 @@ export interface RunInput {
   applyUrl?: string
   companyHint?: string
   roleHint?: string
-  /** Scout runs: optional extra instructions from Gil. */
+  /** Scout runs: optional extra instructions from the user. */
   instructions?: string
   /** Interview runs: the tracker row being prepped (folder + position/company). */
   rowFolderRel?: string

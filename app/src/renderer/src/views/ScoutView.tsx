@@ -18,7 +18,7 @@ function FitPill({ score }: { score: number | null }): JSX.Element {
     <span
       className="inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-bold"
       style={{ color, borderColor: color }}
-      title="Agent fit score (0-100) against your CLAUDE.md profile"
+      title="Agent fit score (0-100) against your profile"
     >
       {score ?? '–'}
       <span className="text-[8px] font-normal uppercase opacity-70">fit</span>

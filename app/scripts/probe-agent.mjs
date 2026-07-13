@@ -50,8 +50,13 @@ const dumpPath = path.join(__dirname, 'probe-dump.json')
 writeFileSync(dumpPath, JSON.stringify(messages, null, 2), 'utf-8')
 console.log('\n[probe] full dump →', dumpPath)
 console.log('[probe] assistant text:', JSON.stringify(finalText.trim()))
-console.log(
-  finalText.includes('gillu1212@gmail.com')
-    ? '[probe] ✓ CLAUDE.md LOADED (candidate email found)'
-    : '[probe] ✗ CLAUDE.md NOT loaded — check systemPrompt preset + settingSources'
-)
+// Optionally assert the response contains an expected string (e.g. an email you
+// know is in the loaded project instructions): PROBE_EXPECT=you@example.com npm run probe:agent
+const expect = process.env.PROBE_EXPECT ?? ''
+if (expect) {
+  console.log(
+    finalText.includes(expect)
+      ? '[probe] ✓ project instructions LOADED (expected string found)'
+      : '[probe] ✗ project instructions NOT loaded — check systemPrompt preset + settingSources'
+  )
+}

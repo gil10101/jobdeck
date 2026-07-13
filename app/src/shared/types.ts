@@ -114,7 +114,7 @@ export interface RunMeta {
   endedAt: string | null
 }
 
-/** A job surfaced by a scout run, awaiting Gil's review. */
+/** A job surfaced by a scout run, awaiting the user's review. */
 export interface CandidateJob {
   id: string
   position: string
@@ -125,7 +125,7 @@ export interface CandidateJob {
   datePosted: string | null
   applyUrl: string
   source: string
-  /** Agent's 0-100 fit judgment against the CLAUDE.md profile/criteria. */
+  /** Agent's 0-100 fit judgment against the candidate profile/criteria. */
   fitScore: number | null
   fitNote: string
   postingText: string

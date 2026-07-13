@@ -159,13 +159,21 @@ export function buildScoutPrompt(s: ScoutSlots, profile: ProfileFile | null): st
   const criteria = profile
     ? renderSearchCriteriaMd(profile)
     : '(no profile configured — use conservative judgment)'
+  const linkedinQueries =
+    profile?.searchConfig.boards.linkedin.queries.length
+      ? profile.searchConfig.boards.linkedin.queries.map((q) => `"${q}"`).join(', ')
+      : profile?.searchConfig.targetRoles.length
+        ? profile.searchConfig.targetRoles.map((r) => `"${r.title}"`).join(', ')
+        : 'the target roles listed in the criteria above'
   const replacements: Record<string, string> = {
     REPO_ROOT: REPO_ROOT,
     TODAY_ISO: todayISO(),
     BUN: resolveBun(),
+    CANDIDATE_NAME: profile?.identity.fullName || 'the candidate',
     EXCLUDE_LIST: exclude,
     OUTPUT_PATH: s.outputPath,
     SEARCH_CRITERIA_MD: criteria,
+    LINKEDIN_QUERIES: linkedinQueries,
     INSTRUCTIONS: s.instructions.trim() || '(none — run the standard sweep)'
   }
   return fill(out, replacements)

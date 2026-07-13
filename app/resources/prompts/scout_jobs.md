@@ -1,17 +1,10 @@
-# Scout job postings for Gil Lu
+# Scout job postings for {{CANDIDATE_NAME}}
 
 Repo root: `{{REPO_ROOT}}` (cwd). Today: {{TODAY_ISO}}.
-Your job: search the job boards, filter HARD against Gil's criteria, judge fit honestly, and write a machine-readable candidates file. You do NOT build documents and you do NOT apply — a human reviews your candidates afterward.
+Your job: search the job boards, filter HARD against the candidate's criteria, judge fit honestly, and write a machine-readable candidates file. You do NOT build documents and you do NOT apply — a human reviews your candidates afterward.
 
-## STEP 1 — Load the criteria
-Read the **Job Search Configuration** section of `CLAUDE.md`. The hard filters (recap, but CLAUDE.md is authoritative):
-- Roles: Data Analyst / BI / Analytics Engineer first; Data Engineer second; junior DBA third; Data Scientist internships only.
-- **Full-time: posted salary max ≤ $90k** (skip 90k+). **Internships & part-time data roles: always eligible** (no ceiling).
-- **Company size 51+** (no 1-50 startups).
-- **Team-based** roles preferred (reports to a manager, other analysts around) — deprioritize sole-analyst postings.
-- Location: NYC ≤25 mi (all boroughs), fully-remote US, Long Island (Nassau), Newark NJ.
-- **Posted within the last 14 days.**
-- NO women's/female clothing & lingerie brands (e.g. Adore Me). No security-clearance roles. No heavy on-call. No sales/consulting travel.
+## STEP 1 — The search criteria (hard filters — apply ruthlessly)
+{{SEARCH_CRITERIA_MD}}
 
 ## STEP 2 — Search the boards (bun CLIs, zero-auth except jobright)
 Run these with the Bash tool from the repo root (bun at `{{BUN}}`). All support `--format json`.
@@ -19,11 +12,11 @@ Run these with the Bash tool from the repo root (bun at `{{BUN}}`). All support 
 1. **jobright (primary — personalized fit scores):**
    `"{{BUN}}" run ".agents/skills/jobright-search/cli/src/cli.ts" recommend --min-size 51 --maxage 14 -n 40 --format json`
 2. **LinkedIn (public, no auth):**
-   `"{{BUN}}" run ".agents/skills/linkedin-search/cli/src/cli.ts" search -q "data analyst" --location "New York" --jobage 14 -n 25 --format json`
-   Vary `-q` across: "data analyst", "business intelligence analyst", "analytics engineer", "junior data engineer", "data analyst intern". For promising results fetch the full JD: `... detail <id> --format plain`
+   `"{{BUN}}" run ".agents/skills/linkedin-search/cli/src/cli.ts" search -q "<role>" --location "<location>" --jobage 14 -n 25 --format json`
+   Vary `-q` across the candidate's target roles: {{LINKEDIN_QUERIES}}. Use the candidate's primary location from the criteria above. For promising results fetch the full JD: `... detail <id> --format plain`
 3. **freehire (optional, remote-heavy):**
-   `"{{BUN}}" run ".agents/skills/freehire-search/cli/src/cli.ts" search -q "data analyst" --jobage 14 -n 25 --format json`
-4. You MAY also use WebSearch for cityjobs.nyc.gov / Indeed postings if the CLIs come up thin — but verify any city posting is OPEN and its civil-service minimum fits a quantitative M.S. (Staff Analyst yes; City Research Scientist needs a science/public-health master's — usually NO).
+   `"{{BUN}}" run ".agents/skills/freehire-search/cli/src/cli.ts" search -q "<role>" --jobage 14 -n 25 --format json`
+4. You MAY also use WebSearch for public-sector / Indeed postings if the CLIs come up thin — but verify any government posting is OPEN and its stated minimum qualifications actually fit the candidate's degree.
 
 If a CLI errors (auth/session), note it in `problems` and continue with the others.
 
@@ -31,7 +24,7 @@ If a CLI errors (auth/session), note it in `problems` and continue with the othe
 - Apply the hard filters above ruthlessly. When salary is unlisted, keep the job but say so in fitNote.
 - SKIP anything already tracked or previously rejected — this list is off-limits:
 {{EXCLUDE_LIST}}
-- For each keeper, judge **fitScore 0-100** against Gil's actual profile (skills, new-grad level, team preference) and write a one-line **honest fitNote** naming any genuine gap (never inflate).
+- For each keeper, judge **fitScore 0-100** against the candidate's actual profile (skills, seniority level, team preference) and write a one-line **honest fitNote** naming any genuine gap (never inflate).
 - For strong keepers (fitScore ≥ 70), get the fullest posting text you can (LinkedIn `detail`, or the jobright summary if that's all there is).
 - Target: the best 5-15 candidates, quality over quantity.
 
@@ -66,7 +59,7 @@ Write `{{OUTPUT_PATH}}` as VALID JSON (no fences, no comments):
 ```
 Extract the structured arrays faithfully from the posting text (empty array `[]` when the posting genuinely does not state that section — never invent items).
 
-## Extra instructions from Gil (may narrow or widen the search)
+## Extra instructions (may narrow or widen the search)
 {{INSTRUCTIONS}}
 
 ## DO NOT
