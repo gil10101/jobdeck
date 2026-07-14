@@ -71,6 +71,8 @@ function bootWorkspace(workspacePath: string): void {
     tracker,
     todo,
     runner,
+    runStore,
+    send,
     getWindow: () => mainWindow
   })
 

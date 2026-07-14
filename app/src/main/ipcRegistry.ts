@@ -20,15 +20,19 @@ import type { ProfileFile } from '@shared/profile'
 import { allCompanies } from './companies/companiesStore'
 import { backfillCompanies, ensureRating, ensureRatingBg, seedFromText } from './companies/ratingService'
 import type { AgentRunner } from './agent/AgentRunner'
+import type { RunStore } from './agent/runStore'
 import type { Store } from './store/Store'
 import type { TrackerRepo } from './store/trackerRepo'
 import type { TodoWatcher } from './fsops/TodoWatcher'
+import { AssistantManager } from './assistant/assistantManager'
 
 export interface Services {
   store: Store
   tracker: TrackerRepo
   todo: TodoWatcher
   runner: AgentRunner
+  runStore: RunStore
+  send: (channel: string, payload: unknown) => void
   getWindow: () => BrowserWindow | null
 }
 
@@ -38,7 +42,7 @@ type Handler<C extends IpcChannel> = (
 
 /** Register every invoke channel with a uniform {ok,data|error} wrapper. */
 export function registerIpc(services: Services): void {
-  const { store, tracker, todo, runner } = services
+  const { store, tracker, todo, runner, runStore, send } = services
 
   function handle<C extends IpcChannel>(channel: C, fn: Handler<C>): void {
     ipcMain.handle(channel, async (_event, req) => {
@@ -384,4 +388,20 @@ export function registerIpc(services: Services): void {
     ]
     return backfillCompanies(names)
   })
+
+  // ---- assistant: in-app chat, IPC channels mirror AssistantManager 1:1 ----
+  const assistant = new AssistantManager({
+    store,
+    tracker,
+    runStore,
+    startScout: (instructions) => runner.start({ kind: 'scout', instructions }),
+    send
+  })
+  handle('assistant:send', (req) => assistant.send(req))
+  handle('assistant:stop', (req) => assistant.stop(req))
+  handle('assistant:approve', (req) => assistant.approve(req))
+  handle('assistant:newConversation', () => assistant.newConversation())
+  handle('assistant:listConversations', () => assistant.list())
+  handle('assistant:getConversation', ({ id }) => assistant.get(id))
+  handle('assistant:deleteConversation', ({ id }) => assistant.del(id))
 }
