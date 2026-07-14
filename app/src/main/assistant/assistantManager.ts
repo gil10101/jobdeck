@@ -55,7 +55,7 @@ export class AssistantManager {
   }
 
   del(id: string): void {
-    this.sessions.get(id)?.stop()
+    this.sessions.get(id)?.dispose()
     this.sessions.delete(id)
     deleteConversation(id)
   }

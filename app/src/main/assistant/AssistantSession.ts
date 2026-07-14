@@ -52,6 +52,7 @@ export class AssistantSession {
   private generation = 0
   private runClosed = false
   private running = false
+  private disposed = false
 
   private controller: AbortController | null = null
   private seq = 0
@@ -96,7 +97,7 @@ export class AssistantSession {
       this.conversation.title = titleFromMessage(text)
     }
     this.conversation.messages.push(userMessage)
-    saveConversation(this.conversation)
+    if (!this.disposed) saveConversation(this.conversation)
     this.deps.send('push:assistantMessage', { conversationId: this.conversationId, message: userMessage })
 
     this.setState('thinking')
@@ -116,6 +117,13 @@ export class AssistantSession {
     this.wakeInput()
     this.denyPendingApprovals()
     this.setState('idle')
+  }
+
+  /** Stop permanently for deletion: the dying run's final save must not
+   *  resurrect the conversation file after deleteConversation removes it. */
+  dispose(): void {
+    this.disposed = true
+    this.stop()
   }
 
   resolveApproval(approvalId: string, decision: 'allow' | 'deny'): void {
@@ -331,7 +339,7 @@ export class AssistantSession {
       })
       this.currentAssistantMessage = null
     }
-    saveConversation(this.conversation)
+    if (!this.disposed) saveConversation(this.conversation)
     this.setState('idle')
   }
 
