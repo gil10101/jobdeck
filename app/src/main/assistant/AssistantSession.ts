@@ -10,10 +10,14 @@ import { emptyUsage, loadConversation, readMemory, saveConversation } from './co
 import { buildAssistantMcp } from './tools'
 
 // One interactive Claude Agent SDK session bound to a single conversation.
-// Streaming-input mode: a single long-lived query() fed by a push-able async
-// queue, so every user turn in the conversation shares one context — sibling
-// to AgentRunner (one-shot runs), but this one stays alive across turns.
-// Owns: the live query handle, its AbortController, the input queue, the
+// Streaming-input mode: each active run is one query() fed by a run-local
+// async generator that drains the session-owned `pending` texts, so every
+// user turn within a run shares one context — sibling to AgentRunner
+// (one-shot runs). A generation counter fences superseded runs: a stale
+// run's generator can never consume a pending text, and after stop() or
+// query death a later send() revives the session with a fresh run that
+// drains whatever is still pending.
+// Owns: the live query handle, its AbortController, the pending texts, the
 // accumulated token usage, and the pending-approval map.
 
 const TEXT_FLUSH_MS = 100
@@ -41,14 +45,21 @@ function titleFromMessage(text: string): string {
 export class AssistantSession {
   private conversation: AssistantConversation
 
-  // Streaming-input queue: query() consumes inputStream(), pushUser() feeds it.
-  private queue: SDKUserMessage[] = []
-  private resolveNext: (() => void) | null = null
-  private closed = false
+  // Streaming-input plumbing: each run() owns a fresh generator over `pending`;
+  // `generation` fences superseded runs, `wake` re-checks the current one.
+  private pending: string[] = []
+  private wake: (() => void) | null = null
+  private generation = 0
+  private runClosed = false
   private running = false
 
   private controller: AbortController | null = null
   private seq = 0
+  private lastStatus: AssistantStatus = 'idle'
+
+  // SDK result messages carry session-cumulative usage/cost figures, so
+  // conversation totals are run-start baselines plus the latest result.
+  private usageBase = { costUsd: 0, inputTokens: 0, outputTokens: 0, cacheTokens: 0 }
 
   // Accumulates events/text for the assistant turn currently in flight.
   private currentAssistantMessage: AssistantMessage | null = null
@@ -72,7 +83,7 @@ export class AssistantSession {
     }
   }
 
-  /** Enqueue a user turn; starts the persistent query loop on the first call. */
+  /** Enqueue a user turn; starts a run when none is active (including reviving after stop()). */
   send(text: string): void {
     const userMessage: AssistantMessage = {
       id: randomUUID().slice(0, 8),
@@ -89,21 +100,21 @@ export class AssistantSession {
     this.deps.send('push:assistantMessage', { conversationId: this.conversationId, message: userMessage })
 
     this.setState('thinking')
-    this.pushUser(text)
-    if (!this.running) {
-      this.running = true
+    this.pending.push(text)
+    if (this.running) {
+      this.wakeInput()
+    } else {
       void this.run()
     }
   }
 
-  /** Interrupt the live query and deny anything still awaiting approval. */
+  /** Interrupt the live query and deny anything still awaiting approval; a later send() revives the session. */
   stop(): void {
     this.controller?.abort()
-    this.closed = true
-    this.resolveNext?.()
-    this.resolveNext = null
-    for (const pending of this.approvals.values()) pending.resolve(false)
-    this.approvals.clear()
+    this.runClosed = true
+    this.running = false
+    this.wakeInput()
+    this.denyPendingApprovals()
     this.setState('idle')
   }
 
@@ -115,64 +126,96 @@ export class AssistantSession {
     this.setState('thinking')
   }
 
-  private async *inputStream(): AsyncGenerator<SDKUserMessage> {
-    while (!this.closed) {
-      if (this.queue.length === 0) await new Promise<void>((r) => (this.resolveNext = r))
-      while (this.queue.length) yield this.queue.shift()!
+  private wakeInput(): void {
+    this.wake?.()
+    this.wake = null
+  }
+
+  private denyPendingApprovals(): void {
+    for (const pending of this.approvals.values()) pending.resolve(false)
+    this.approvals.clear()
+  }
+
+  /** Run-local input stream: drains `pending`, parks until woken, exits once this run is closed or superseded. */
+  private async *inputStream(gen: number): AsyncGenerator<SDKUserMessage> {
+    while (!this.runClosed && gen === this.generation) {
+      const text = this.pending.shift()
+      if (text === undefined) {
+        await new Promise<void>((resolve) => (this.wake = resolve))
+        continue
+      }
+      yield { type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null }
     }
   }
 
-  private pushUser(text: string): void {
-    this.queue.push({ type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null })
-    this.resolveNext?.()
-    this.resolveNext = null
-  }
-
-  /** The one long-lived query() for this session's whole life; runs until stop() closes the input stream. */
+  /** One query() run: alive while turns flow, ends when stop() closes its input or the query dies. */
   private async run(): Promise<void> {
-    const { query } = await import('@anthropic-ai/claude-agent-sdk')
-    const mcp = buildAssistantMcp({
-      store: this.deps.store,
-      tracker: this.deps.tracker,
-      runStore: this.deps.runStore,
-      startScout: this.deps.startScout,
-      requestApproval: (tool, preview) => this.requestApproval(tool, preview)
-    })
+    this.running = true
+    this.generation++
+    const gen = this.generation
+    this.runClosed = false
+    const usage = this.conversation.usage
+    this.usageBase = {
+      costUsd: usage.costUsd,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cacheTokens: usage.cacheTokens
+    }
     const controller = new AbortController()
     this.controller = controller
-    const model = this.deps.store.state.settings.model
-    const q = query({
-      prompt: this.inputStream(),
-      options: {
-        cwd: REPO_ROOT,
-        systemPrompt: { type: 'preset', preset: 'claude_code', append: this.systemAppend() },
-        settingSources: [],
-        permissionMode: 'default',
-        mcpServers: { deck: mcp },
-        canUseTool: (name, input, { signal }) => this.canUse(name, input, signal),
-        abortController: controller,
-        includePartialMessages: true,
-        env: { ...process.env } as Record<string, string>,
-        ...(model ? { model } : {})
-      }
-    })
-    this.setState('thinking')
     try {
+      const { query } = await import('@anthropic-ai/claude-agent-sdk')
+      const mcp = buildAssistantMcp({
+        store: this.deps.store,
+        tracker: this.deps.tracker,
+        runStore: this.deps.runStore,
+        startScout: this.deps.startScout,
+        requestApproval: (tool, preview) => this.requestApproval(tool, preview)
+      })
+      const model = this.deps.store.state.settings.model
+      const q = query({
+        prompt: this.inputStream(gen),
+        options: {
+          cwd: REPO_ROOT,
+          systemPrompt: { type: 'preset', preset: 'claude_code', append: this.systemAppend() },
+          settingSources: [],
+          permissionMode: 'default',
+          mcpServers: { deck: mcp },
+          canUseTool: (name, input, { signal }) => this.canUse(name, input, signal),
+          abortController: controller,
+          includePartialMessages: true,
+          env: { ...process.env } as Record<string, string>,
+          ...(model ? { model } : {})
+        }
+      })
+      this.setState('thinking')
       for await (const msg of q) {
-        this.onMessage(msg)
+        if (gen === this.generation) this.onMessage(msg)
       }
-      this.flushText(true)
-      this.closeTurn()
+      if (gen === this.generation) {
+        this.flushText(true)
+        this.closeTurn()
+      }
     } catch (err) {
-      this.flushText(true)
-      if (!controller.signal.aborted) {
-        console.error('[assistant] session query failed:', err)
-        this.emit({ kind: 'result', ok: false, errorText: String(err) })
+      if (gen === this.generation) {
+        this.flushText(true)
+        if (!controller.signal.aborted) {
+          console.error('[assistant] session query failed:', err)
+          this.emit({ kind: 'result', ok: false, errorText: String(err) })
+        }
+        this.closeTurn()
+      } else if (!controller.signal.aborted) {
+        console.error('[assistant] superseded session query failed:', err)
       }
-      this.closeTurn()
     } finally {
-      this.running = false
-      this.setState('idle')
+      // Only the run that still owns the session may tear down shared state.
+      if (gen === this.generation) {
+        this.runClosed = true
+        this.wakeInput()
+        this.denyPendingApprovals()
+        this.running = false
+        this.setState('idle')
+      }
     }
   }
 
@@ -187,6 +230,8 @@ export class AssistantSession {
   }
 
   private onMessage(msg: SDKMessage): void {
+    // A turn starting after a previous result pushed 'idle' must show as live again.
+    if (this.lastStatus === 'idle') this.setState('thinking')
     const mapped = mapMessage(msg)
     if (mapped.textDelta) {
       this.textBuffer += mapped.textDelta
@@ -206,6 +251,8 @@ export class AssistantSession {
         }
         this.textBuffer = ''
       }
+      // Streamed partial text must land in this turn before the result closes it.
+      if (e.kind === 'result') this.flushText(true)
       this.emit(e)
       if (e.kind === 'result') {
         if (msg.type === 'result') this.applyUsage(msg)
@@ -215,18 +262,24 @@ export class AssistantSession {
     }
   }
 
-  /** Pull token/cost/context-window detail the mapped event doesn't carry — straight off the raw SDK result. */
+  /** Token/cost/context-window detail off the raw SDK result — figures are session-cumulative, so baseline + assign, never +=. */
   private applyUsage(rawMsg: SDKResultMessage): void {
     const usage = this.conversation.usage
     const inputTokens = rawMsg.usage.input_tokens ?? 0
     const cacheTokens = (rawMsg.usage.cache_read_input_tokens ?? 0) + (rawMsg.usage.cache_creation_input_tokens ?? 0)
-    usage.inputTokens = inputTokens
-    usage.outputTokens = rawMsg.usage.output_tokens ?? 0
-    usage.cacheTokens = cacheTokens
+    usage.inputTokens = this.usageBase.inputTokens + inputTokens
+    usage.outputTokens = this.usageBase.outputTokens + (rawMsg.usage.output_tokens ?? 0)
+    usage.cacheTokens = this.usageBase.cacheTokens + cacheTokens
+    // Context size: the latest result's input+cache footprint (assigned, never summed).
     usage.contextTokens = inputTokens + cacheTokens
-    usage.costUsd += rawMsg.total_cost_usd ?? 0
-    const contextWindow = Object.values(rawMsg.modelUsage ?? {})[0]?.contextWindow
-    if (contextWindow) usage.contextWindow = contextWindow
+    usage.costUsd = this.usageBase.costUsd + (rawMsg.total_cost_usd ?? 0)
+    // A result can report several models (e.g. a background small model); the
+    // conversation's window is the largest one. Keep the prior value when absent.
+    let contextWindow = 0
+    for (const m of Object.values(rawMsg.modelUsage ?? {})) {
+      if (m.contextWindow > contextWindow) contextWindow = m.contextWindow
+    }
+    if (contextWindow > 0) usage.contextWindow = contextWindow
   }
 
   /** Stamp, buffer into the in-flight assistant message, and push to the renderer. */
@@ -283,6 +336,7 @@ export class AssistantSession {
   }
 
   private setState(status: AssistantStatus): void {
+    this.lastStatus = status
     this.deps.send('push:assistantState', { conversationId: this.conversationId, status })
   }
 
