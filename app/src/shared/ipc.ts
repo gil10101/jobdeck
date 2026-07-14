@@ -2,8 +2,14 @@
 import type {
   ApplicationDetail,
   AppSettings,
+  AssistantApproval,
+  AssistantConversation,
+  AssistantMessage,
+  AssistantStatus,
+  AssistantUsage,
   CandidateJob,
   CompanyInfo,
+  ConversationMeta,
   IntakeItem,
   LibraryCategory,
   RunEvent,
@@ -110,6 +116,13 @@ export interface IpcInvokeContract {
   'companies:get': { req: void; res: Record<string, CompanyInfo> }
   'companies:ensure': { req: { company: string }; res: CompanyInfo | null }
   'companies:backfill': { req: void; res: { fetched: number } }
+  'assistant:send': { req: { conversationId: string | null; text: string }; res: { conversationId: string } }
+  'assistant:stop': { req: { conversationId: string }; res: void }
+  'assistant:approve': { req: { approvalId: string; decision: 'allow' | 'deny' }; res: void }
+  'assistant:newConversation': { req: void; res: { conversationId: string } }
+  'assistant:listConversations': { req: void; res: ConversationMeta[] }
+  'assistant:getConversation': { req: { id: string }; res: AssistantConversation | null }
+  'assistant:deleteConversation': { req: { id: string }; res: void }
 }
 
 export type IpcChannel = keyof IpcInvokeContract
@@ -121,6 +134,11 @@ export interface IpcPushContract {
   'push:todoNew': IntakeItem
   'push:storeChanged': { domains: ('rows' | 'intake' | 'settings' | 'candidates')[] }
   'push:companiesChanged': Record<string, CompanyInfo>
+  'push:assistantEvent': { conversationId: string; event: RunEvent }
+  'push:assistantApproval': AssistantApproval
+  'push:assistantUsage': { conversationId: string } & AssistantUsage
+  'push:assistantState': { conversationId: string; status: AssistantStatus }
+  'push:assistantMessage': { conversationId: string; message: AssistantMessage }
 }
 
 export type IpcPushChannel = keyof IpcPushContract
@@ -175,7 +193,14 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'settings:set',
   'companies:get',
   'companies:ensure',
-  'companies:backfill'
+  'companies:backfill',
+  'assistant:send',
+  'assistant:stop',
+  'assistant:approve',
+  'assistant:newConversation',
+  'assistant:listConversations',
+  'assistant:getConversation',
+  'assistant:deleteConversation'
 ]
 
 export const PUSH_CHANNELS: IpcPushChannel[] = [
@@ -183,7 +208,12 @@ export const PUSH_CHANNELS: IpcPushChannel[] = [
   'push:runChanged',
   'push:todoNew',
   'push:storeChanged',
-  'push:companiesChanged'
+  'push:companiesChanged',
+  'push:assistantEvent',
+  'push:assistantApproval',
+  'push:assistantUsage',
+  'push:assistantState',
+  'push:assistantMessage'
 ]
 
 /** Build a local-file:// URL for a repo-relative path (PDF preview etc.). */

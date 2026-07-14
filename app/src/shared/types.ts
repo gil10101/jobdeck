@@ -159,6 +159,40 @@ export type RunEvent =
       errorText?: string
     }
 
+export interface AssistantUsage {
+  inputTokens: number
+  outputTokens: number
+  cacheTokens: number
+  costUsd: number
+  contextTokens: number // running context size for the donut
+  contextWindow: number // model max, for the donut denominator
+}
+
+export interface AssistantMessage {
+  id: string
+  role: 'user' | 'assistant'
+  text: string
+  events: RunEvent[] // reuse existing RunEvent; [] for user msgs
+  createdAt: string
+}
+
+export interface ConversationMeta { id: string; title: string; updatedAt: string }
+
+export interface AssistantConversation extends ConversationMeta {
+  createdAt: string
+  messages: AssistantMessage[]
+  usage: AssistantUsage
+}
+
+export interface AssistantApproval {
+  approvalId: string
+  conversationId: string
+  tool: string // e.g. 'add_profile_entry'
+  preview: string // human-readable preview
+}
+
+export type AssistantStatus = 'idle' | 'thinking' | 'awaiting-approval'
+
 export interface AnswersField {
   label: string
   value: string
