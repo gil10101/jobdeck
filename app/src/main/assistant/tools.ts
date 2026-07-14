@@ -11,9 +11,9 @@ import type { ExperienceEntry, ProjectEntry, SkillCategory } from '@shared/profi
 import { emptyProfile } from '@shared/profile'
 
 // In-process MCP server exposing the app's state to the assistant agent.
-// This file holds both halves: READ tools (get_profile, list_applications, …)
-// and ACTION tools (add_profile_entry, start_scout, remember) that mutate
-// store/profile/tracker state, gated through `requestApproval` below.
+// READ tools (get_profile, list_applications, …) run freely. Of the ACTION
+// tools, add_profile_entry and start_scout gate through `requestApproval`;
+// `remember` appends to long-term memory without approval by design.
 
 export interface AssistantToolDeps {
   store: Store
@@ -87,6 +87,8 @@ export function buildAssistantMcp(deps: AssistantToolDeps): ReturnType<typeof cr
     "Get an agent run's metadata plus a compact timeline of its most recent events, by run id.",
     { runId: z.string() },
     async ({ runId }) => {
+      // runId reaches path.join in RunStore — reject traversal-shaped ids.
+      if (!/^[A-Za-z0-9_-]+$/.test(runId)) return json({ error: `invalid run id: ${runId}` })
       const meta = deps.runStore.getMeta(runId)
       if (!meta) return json({ error: `run not found: ${runId}` })
       const events = deps.runStore.getEvents(runId).slice(-40)
@@ -98,7 +100,22 @@ export function buildAssistantMcp(deps: AssistantToolDeps): ReturnType<typeof cr
     'list_candidates',
     'List new scouted candidate jobs awaiting review (not yet accepted or rejected).',
     {},
-    async () => json(deps.store.state.candidates.filter((c) => c.state === 'new'))
+    async () =>
+      json(
+        deps.store.state.candidates
+          .filter((c) => c.state === 'new')
+          .map((c) => ({
+            id: c.id,
+            position: c.position,
+            company: c.company,
+            salary: c.salary,
+            location: c.location,
+            workModel: c.workModel,
+            fitScore: c.fitScore,
+            fitNote: c.fitNote,
+            applyUrl: c.applyUrl
+          }))
+      )
   )
 
   const getSettings = tool(
@@ -124,16 +141,58 @@ export function buildAssistantMcp(deps: AssistantToolDeps): ReturnType<typeof cr
 
   const addProfileEntry = tool(
     'add_profile_entry',
-    "Add one entry to the candidate's profile: a job (experience), a project, or a skill category. Requires the user's approval before saving.",
+    "Add one entry to the candidate's profile. section='experience' needs {title, company, location?, startDate?, endDate?, bullets?, technologies?}; 'project' needs {name, oneLiner?, url?, bullets?, technologies?}; 'skill' needs {category, items}. Requires the user's approval before saving.",
     { section: z.enum(['experience', 'project', 'skill']), entry: z.record(z.string(), z.any()) },
     async ({ section, entry }) => {
-      const preview = `${section}: ${JSON.stringify(entry)}`
+      // Build a complete, correctly-shaped entry (the model's input keys are
+      // untrusted) so a malformed call can never persist a partial object.
+      const str = (v: unknown): string => (typeof v === 'string' ? v : '')
+      const strOrNull = (v: unknown): string | null => (typeof v === 'string' && v ? v : null)
+      const strArr = (v: unknown): string[] =>
+        Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
+      let built: ExperienceEntry | ProjectEntry | SkillCategory
+      if (section === 'experience') {
+        if (!str(entry.title) || !str(entry.company)) {
+          return json({ error: 'experience entries require string fields "title" and "company"' })
+        }
+        built = {
+          title: str(entry.title),
+          company: str(entry.company),
+          location: str(entry.location),
+          startDate: str(entry.startDate),
+          endDate: str(entry.endDate),
+          bullets: strArr(entry.bullets),
+          technologies: strArr(entry.technologies),
+          inclusionRule: strOrNull(entry.inclusionRule),
+          framingNotes: strOrNull(entry.framingNotes)
+        }
+      } else if (section === 'project') {
+        if (!str(entry.name)) return json({ error: 'project entries require a string field "name"' })
+        built = {
+          name: str(entry.name),
+          oneLiner: str(entry.oneLiner),
+          bullets: strArr(entry.bullets),
+          technologies: strArr(entry.technologies),
+          url: strOrNull(entry.url),
+          mustKeepPhrases: strArr(entry.mustKeepPhrases),
+          framingNotes: strOrNull(entry.framingNotes),
+          inclusionRule: strOrNull(entry.inclusionRule)
+        }
+      } else {
+        if (!str(entry.category) || strArr(entry.items).length === 0) {
+          return json({ error: 'skill entries require a string "category" and a non-empty string array "items"' })
+        }
+        built = { category: str(entry.category), items: strArr(entry.items) }
+      }
+      const preview = `${section}: ${JSON.stringify(built)}`
       const ok = await deps.requestApproval('add_profile_entry', preview)
       if (!ok) return json({ denied: true })
-      const p = loadProfile() ?? emptyProfile()
-      if (section === 'experience') p.experience.push(entry as unknown as ExperienceEntry)
-      else if (section === 'project') p.projects.push(entry as unknown as ProjectEntry)
-      else p.skills.push(entry as unknown as SkillCategory)
+      // Clone: loadProfile() returns the module cache by reference, and a
+      // validation failure must not leave the entry in the live object.
+      const p = structuredClone(loadProfile() ?? emptyProfile())
+      if (section === 'experience') p.experience.push(built as ExperienceEntry)
+      else if (section === 'project') p.projects.push(built as ProjectEntry)
+      else p.skills.push(built as SkillCategory)
       const result = validateProfile(p)
       if (!result.ok) return json({ error: 'invalid profile after adding entry', problems: result.problems })
       saveProfile(result.profile)
@@ -143,7 +202,7 @@ export function buildAssistantMcp(deps: AssistantToolDeps): ReturnType<typeof cr
 
   const startScout = tool(
     'start_scout',
-    'Start a scout run that searches the job boards for matching postings. Requires the user\'s approval before running.',
+    "Start a scout run that searches the job boards for matching postings. Requires the user's approval before running.",
     { instructions: z.string().optional() },
     async ({ instructions }) => {
       const preview = instructions ?? '(standard sweep)'

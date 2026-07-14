@@ -104,6 +104,11 @@ export function readMemory(): string {
 }
 
 export function appendMemory(note: string): void {
+  // memory.md is fed back into future sessions, and the note can originate from
+  // model output over untrusted posting text — collapse newlines so one note
+  // can't forge extra memory lines, and cap runaway length.
+  const clean = note.replace(/\s+/g, ' ').trim().slice(0, 500)
+  if (!clean) return
   fs.mkdirSync(assistantDir(), { recursive: true })
-  fs.appendFileSync(memoryFile(), `- ${note}\n`, 'utf-8')
+  fs.appendFileSync(memoryFile(), `- ${clean}\n`, 'utf-8')
 }

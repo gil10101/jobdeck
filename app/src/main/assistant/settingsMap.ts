@@ -53,6 +53,16 @@ export const SETTINGS_MAP: SettingEntry[] = [
     topic: 'workspace/app-data locations',
     location: 'Settings → Locations',
     note: 'shows the workspace and app-data folder paths on disk'
+  },
+  {
+    topic: 'type into apply forms',
+    location: 'Settings → Workflow → Experimental: type into apply forms',
+    note: 'adds a ⌨ button on answer fields in the Apply view that types into the embedded browser'
+  },
+  {
+    topic: 'glassdoor ratings',
+    location: 'Settings → Job boards → Glassdoor ratings',
+    note: 'fetch ratings for all tracked companies; new companies are looked up automatically'
   }
 ]
 
