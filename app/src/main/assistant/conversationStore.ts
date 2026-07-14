@@ -18,6 +18,8 @@ function conversationsDir(): string {
 }
 
 function conversationFile(id: string): string {
+  // id is used as a filename — reject anything that could traverse out of the dir.
+  if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error(`invalid conversation id: ${id}`)
   return path.join(conversationsDir(), `${id}.json`)
 }
 
