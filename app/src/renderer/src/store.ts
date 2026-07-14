@@ -1,13 +1,19 @@
 import { create } from 'zustand'
 import type {
   AppSettings,
+  AssistantApproval,
+  AssistantMessage,
+  AssistantStatus,
+  AssistantUsage,
   CandidateJob,
   CompanyInfo,
+  ConversationMeta,
   IntakeItem,
+  RunEvent,
   RunMeta,
   TrackerRow
 } from '@shared/types'
-import { call } from './api'
+import { call, onPush } from './api'
 
 /** Normalize a company name into the key used by the main-process companies map. */
 export function companyKey(name: string): string {
@@ -35,6 +41,41 @@ export interface AppConfigInfo {
   onboardedAt: string | null
 }
 
+export interface AssistantSlice {
+  open: boolean
+  conversationId: string | null
+  messages: AssistantMessage[]
+  streaming: { text: string; events: RunEvent[] } | null
+  usage: AssistantUsage
+  status: AssistantStatus
+  pendingApproval: AssistantApproval | null
+  history: ConversationMeta[]
+}
+
+function initialAssistantUsage(): AssistantUsage {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheTokens: 0,
+    costUsd: 0,
+    contextTokens: 0,
+    contextWindow: 200000
+  }
+}
+
+function initialAssistantSlice(): AssistantSlice {
+  return {
+    open: false,
+    conversationId: null,
+    messages: [],
+    streaming: null,
+    usage: initialAssistantUsage(),
+    status: 'idle',
+    pendingApproval: null,
+    history: []
+  }
+}
+
 interface AppState {
   route: Route
   /** null = not fetched yet; workspacePath null = first-run required. */
@@ -46,6 +87,7 @@ interface AppState {
   settings: AppSettings | null
   companies: Record<string, CompanyInfo>
   toasts: Toast[]
+  assistant: AssistantSlice
   navigate: (route: Route) => void
   refreshConfig: () => Promise<void>
   refreshRows: () => Promise<void>
@@ -59,6 +101,13 @@ interface AppState {
   upsertRunMeta: (meta: RunMeta) => void
   toast: (text: string, kind?: Toast['kind']) => void
   dismissToast: (id: number) => void
+  toggleAssistant: (open?: boolean) => void
+  sendAssistant: (text: string) => Promise<void>
+  stopAssistant: () => void
+  approveAssistant: (decision: 'allow' | 'deny') => void
+  newAssistantChat: () => Promise<void>
+  openAssistantChat: (id: string) => Promise<void>
+  refreshAssistantHistory: () => Promise<void>
 }
 
 let toastSeq = 1
@@ -73,6 +122,7 @@ export const useApp = create<AppState>((set, get) => ({
   settings: null,
   companies: {},
   toasts: [],
+  assistant: initialAssistantSlice(),
 
   navigate: (route) => set({ route }),
 
@@ -167,5 +217,127 @@ export const useApp = create<AppState>((set, get) => ({
     const ttl = kind === 'error' ? 10000 : 5000
     setTimeout(() => get().dismissToast(id), ttl)
   },
-  dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }))
+  dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
+
+  toggleAssistant: (open) =>
+    set((s) => ({ assistant: { ...s.assistant, open: open ?? !s.assistant.open } })),
+
+  sendAssistant: async (text) => {
+    const { conversationId: current } = get().assistant
+    try {
+      const { conversationId } = await call('assistant:send', { conversationId: current, text })
+      set((s) => ({ assistant: { ...s.assistant, conversationId } }))
+    } catch (err) {
+      get().toast(`Failed to send message: ${String(err)}`, 'error')
+    }
+  },
+
+  stopAssistant: () => {
+    const { conversationId } = get().assistant
+    if (!conversationId) return
+    call('assistant:stop', { conversationId }).catch((err) => {
+      get().toast(`Failed to stop assistant: ${String(err)}`, 'error')
+    })
+  },
+
+  approveAssistant: (decision) => {
+    const { pendingApproval } = get().assistant
+    if (!pendingApproval) return
+    call('assistant:approve', { approvalId: pendingApproval.approvalId, decision }).catch((err) => {
+      get().toast(`Failed to submit approval: ${String(err)}`, 'error')
+    })
+    set((s) => ({ assistant: { ...s.assistant, pendingApproval: null } }))
+  },
+
+  newAssistantChat: async () => {
+    try {
+      const { conversationId } = await call('assistant:newConversation', undefined)
+      set((s) => ({
+        assistant: {
+          ...s.assistant,
+          conversationId,
+          messages: [],
+          streaming: null,
+          usage: initialAssistantUsage(),
+          status: 'idle',
+          pendingApproval: null
+        }
+      }))
+    } catch (err) {
+      get().toast(`Failed to start new chat: ${String(err)}`, 'error')
+    }
+  },
+
+  openAssistantChat: async (id) => {
+    try {
+      const conversation = await call('assistant:getConversation', { id })
+      if (!conversation) {
+        get().toast('Conversation not found', 'error')
+        return
+      }
+      set((s) => ({
+        assistant: {
+          ...s.assistant,
+          conversationId: id,
+          messages: conversation.messages,
+          usage: conversation.usage,
+          streaming: null,
+          pendingApproval: null,
+          status: 'idle'
+        }
+      }))
+    } catch (err) {
+      get().toast(`Failed to open conversation: ${String(err)}`, 'error')
+    }
+  },
+
+  refreshAssistantHistory: async () => {
+    try {
+      const history = await call('assistant:listConversations', undefined)
+      set((s) => ({ assistant: { ...s.assistant, history } }))
+    } catch {
+      /* ignore */
+    }
+  }
 }))
+
+// Assistant push subscriptions — mirrors the coarse push wiring in main.tsx (module-scope,
+// useApp.getState()/setState()), scoped here since this slice's channels are assistant-only.
+// Every handler is guarded on conversationId so pushes for a different/background conversation
+// are ignored.
+onPush('push:assistantMessage', ({ conversationId, message }) => {
+  if (conversationId !== useApp.getState().assistant.conversationId) return
+  useApp.setState((s) => ({
+    assistant: {
+      ...s.assistant,
+      messages: [...s.assistant.messages, message],
+      // The assistant turn is complete once its final message arrives; drop the partial buffer.
+      streaming: message.role === 'assistant' ? null : s.assistant.streaming
+    }
+  }))
+})
+
+onPush('push:assistantEvent', ({ conversationId, event }) => {
+  if (conversationId !== useApp.getState().assistant.conversationId) return
+  useApp.setState((s) => {
+    const prev = s.assistant.streaming ?? { text: '', events: [] }
+    // 'text' events carry a cumulative buffer, not a delta — replace, don't append.
+    const text = event.kind === 'text' ? event.text : prev.text
+    return { assistant: { ...s.assistant, streaming: { text, events: [...prev.events, event] } } }
+  })
+})
+
+onPush('push:assistantUsage', ({ conversationId, ...usage }) => {
+  if (conversationId !== useApp.getState().assistant.conversationId) return
+  useApp.setState((s) => ({ assistant: { ...s.assistant, usage } }))
+})
+
+onPush('push:assistantState', ({ conversationId, status }) => {
+  if (conversationId !== useApp.getState().assistant.conversationId) return
+  useApp.setState((s) => ({ assistant: { ...s.assistant, status } }))
+})
+
+onPush('push:assistantApproval', (approval) => {
+  if (approval.conversationId !== useApp.getState().assistant.conversationId) return
+  useApp.setState((s) => ({ assistant: { ...s.assistant, pendingApproval: approval } }))
+})
