@@ -90,10 +90,15 @@ export default function SettingsView(): JSX.Element {
 
   const saveCreds = async (): Promise<void> => {
     try {
-      await call('boards:setCreds', { email: jobrightEmail, password: jobrightPassword })
+      const res = await call('boards:setCreds', { email: jobrightEmail, password: jobrightPassword })
       setJobrightPassword('')
       setBoards(await call('boards:getStatus', undefined))
-      toast('jobright credentials saved (session reset — next call logs in fresh)', 'success')
+      toast(
+        res.loginOk
+          ? 'jobright credentials saved — logged in, session ready'
+          : `credentials saved, but login failed: ${res.message}`,
+        res.loginOk ? 'success' : 'error'
+      )
     } catch (err) {
       toast(String(err), 'error')
     }

@@ -13,8 +13,7 @@ import {
   todayMMDD,
   uniqueSlug
 } from '../paths'
-import { assertScoutable } from '../boards/boardsBridge'
-import { jobrightEnv } from '../boards/credStore'
+import { assertScoutable, refreshJobrightSession } from '../boards/boardsBridge'
 import { parseReport, validateReport } from '../parsers/report'
 import { validateProfile } from '../profile/profileSchema'
 import { loadProfile } from '../profile/profileStore'
@@ -301,6 +300,15 @@ export class AgentRunner {
 
   private async execute(run: ActiveRun): Promise<void> {
     this.setStatus(run, 'running')
+    if (run.meta.kind === 'scout') {
+      // Pre-mint the jobright session so the agent's CLI calls run session-only
+      // (no credentials in the agent's env). Best-effort: on failure the CLI
+      // reports SESSION_EXPIRED / NO_CREDS and the agent relays it.
+      const refreshed = await refreshJobrightSession()
+      if (!refreshed.ok) {
+        console.warn('[runner] jobright session refresh skipped:', refreshed.message)
+      }
+    }
     if (run.meta.kind === 'onboard') {
       try {
         fs.rmSync(path.join(TMP_DIR, 'profile.draft.json'), { force: true })
@@ -329,13 +337,7 @@ export class AgentRunner {
           abortController: run.controller,
           includePartialMessages: settings.includePartialMessages,
           stderr: (data: string) => this.runStore.appendStderr(run.meta.id, data),
-          // Scout runs get board credentials as env vars (decrypted from the
-          // OS-keychain store) so no plaintext credentials file has to exist
-          // in the workspace for the CLIs the agent invokes.
-          env: {
-            ...process.env,
-            ...(run.meta.kind === 'scout' ? jobrightEnv() : {})
-          } as Record<string, string>,
+          env: { ...process.env } as Record<string, string>,
           ...(settings.model ? { model: settings.model } : {})
         }
       })

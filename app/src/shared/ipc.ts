@@ -73,7 +73,10 @@ export interface IpcInvokeContract {
   'boards:getStatus': { req: void; res: BoardsStatus }
   'boards:install': { req: { board: BoardId }; res: BoardsStatus }
   'boards:installBun': { req: void; res: { ok: boolean; message: string; status: BoardsStatus } }
-  'boards:setCreds': { req: { email: string; password: string }; res: void }
+  'boards:setCreds': {
+    req: { email: string; password: string }
+    res: { loginOk: boolean; message: string }
+  }
   'boards:test': { req: void; res: { ok: boolean; message: string } }
   'app:info': { req: void; res: { repoRoot: string; appDataDir: string } }
   'config:get': { req: void; res: { workspacePath: string | null; onboardedAt: string | null } }

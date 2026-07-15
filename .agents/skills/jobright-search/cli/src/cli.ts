@@ -10,12 +10,16 @@
 // private API. Keep volume low, do not share your session, and do not use it
 // for bulk data collection. Run it on your own responsibility.
 //
-// Credentials are read from (in order):
+// Auth is SESSION-FIRST: a cached session cookie (.session.json at the skill
+// root, gitignored) is used when present, so routine calls need no credentials
+// at all. Credentials are only read when a login is actually required — no
+// session yet, an expired session, or the explicit `login` command — from:
 //   1. env vars  JOBRIGHT_EMAIL / JOBRIGHT_PASSWORD
 //   2. credentials.json at the skill root (gitignored):
 //        { "email": "you@example.com", "password": "..." }
-// The session cookie is cached in .session.json at the skill root (gitignored)
-// and reused until it expires, at which point the CLI logs in again.
+// `login` mints/refreshes the session explicitly; a wrapper (like the desktop
+// app) can run it with env credentials and then invoke every other command
+// credential-free.
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs"
 import { fileURLToPath } from "node:url"
@@ -46,7 +50,7 @@ interface Creds {
   password: string
 }
 
-function loadCreds(): Creds {
+function tryLoadCreds(): Creds | null {
   const email = process.env.JOBRIGHT_EMAIL
   const password = process.env.JOBRIGHT_PASSWORD
   if (email && password) return { email, password }
@@ -58,9 +62,22 @@ function loadCreds(): Creds {
       fail(`credentials.json is not valid JSON: ${(e as Error).message}`, "BAD_CREDS_FILE")
     }
   }
+  return null
+}
+
+function requireCreds(context: "initial" | "expired"): Creds {
+  const creds = tryLoadCreds()
+  if (creds) return creds
+  if (context === "expired") {
+    fail(
+      "Jobright session expired and no credentials are available to refresh it. " +
+        "Run `login` with JOBRIGHT_EMAIL / JOBRIGHT_PASSWORD set (in the desktop app: Settings → Job boards).",
+      "SESSION_EXPIRED",
+    )
+  }
   fail(
-    `no Jobright credentials found. Set JOBRIGHT_EMAIL / JOBRIGHT_PASSWORD, or create ${CREDS_PATH} ` +
-      `with {"email":"...","password":"..."}`,
+    `no Jobright session or credentials found. Run \`login\` with JOBRIGHT_EMAIL / JOBRIGHT_PASSWORD set, ` +
+      `or create ${CREDS_PATH} with {"email":"...","password":"..."}`,
     "NO_CREDS",
   )
 }
@@ -115,8 +132,13 @@ async function login(creds: Creds): Promise<string> {
 }
 
 // Perform an authenticated GET, transparently re-logging-in once if the
-// cached session is stale.
-async function authGet(path: string, sessionId: string, creds: Creds): Promise<{ json: any; sessionId: string }> {
+// cached session is stale (which needs credentials — absent ones fail as
+// SESSION_EXPIRED so a wrapper can prompt for re-auth).
+async function authGet(
+  path: string,
+  sessionId: string,
+  creds: Creds | null,
+): Promise<{ json: any; sessionId: string }> {
   const doGet = (sid: string) =>
     fetch(`${API}${path}`, { method: "GET", headers: { ...BROWSER_HEADERS, Cookie: `SESSION_ID=${sid}` } })
 
@@ -130,7 +152,7 @@ async function authGet(path: string, sessionId: string, creds: Creds): Promise<{
   const unauth = !res.ok || json?.success === false
   if (unauth) {
     // session likely expired — log in fresh and retry once
-    const fresh = await login(creds)
+    const fresh = await login(creds ?? requireCreds("expired"))
     res = await doGet(fresh)
     try {
       json = await res.json()
@@ -213,8 +235,11 @@ interface FeedOpts {
 }
 
 async function fetchFeed(opts: FeedOpts): Promise<JobRow[]> {
-  const creds = loadCreds()
-  let sessionId = loadCachedSession() ?? (await login(creds))
+  // Session-first: credentials are touched only when there is no cached
+  // session (or authGet later finds it expired).
+  const creds = tryLoadCreds()
+  let sessionId = loadCachedSession()
+  if (!sessionId) sessionId = await login(creds ?? requireCreds("initial"))
 
   const rows: JobRow[] = []
   const seen = new Set<string>()
@@ -389,6 +414,7 @@ function numFlag(flags: Flags, name: string): number | undefined {
 const HELP = `jobright-cli — your personalized, AI-fit-scored Jobright.ai job feed (personal use only)
 
 USAGE
+  bun run src/cli.ts login                 # mint/refresh the cached session (needs credentials)
   bun run src/cli.ts recommend [flags]     # your personalized matched feed (primary)
   bun run src/cli.ts search -q "<terms>"   # recommend + client-side keyword filter
 
@@ -409,11 +435,14 @@ FLAGS (recommend / search)
   --format <fmt>       json (default) | table | plain.
 
 EXAMPLES
+  bun run src/cli.ts login
   bun run src/cli.ts recommend --limit 30 --format table
   bun run src/cli.ts search -q "data analyst" -l "New York" --maxage 14 --format table
   bun run src/cli.ts recommend --min-score 80 --format plain
 
-Credentials: env JOBRIGHT_EMAIL / JOBRIGHT_PASSWORD, or credentials.json at the skill root.
+Auth: session-first — a cached session (.session.json) is used when present, no
+credentials needed. The login command mints/refreshes the session using env
+JOBRIGHT_EMAIL / JOBRIGHT_PASSWORD (or credentials.json at the skill root).
 Note: Jobright's feed is already personalized to your profile; "search" filters that feed
 locally by keyword — it does not run a separate global search.
 `
@@ -428,6 +457,14 @@ async function main(): Promise<number> {
   }
 
   const format = (["json", "table", "plain"].includes(flags.format as string) ? flags.format : "json") as string
+
+  if (cmd === "login") {
+    // Explicit session mint/refresh: always performs a fresh login so a
+    // wrapper can guarantee a valid session before credential-free calls.
+    await login(requireCreds("initial"))
+    process.stdout.write(JSON.stringify({ ok: true, session: "saved" }) + "\n")
+    return 0
+  }
 
   if (cmd === "recommend" || cmd === "search") {
     const query =

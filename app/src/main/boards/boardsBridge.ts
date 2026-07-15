@@ -188,6 +188,29 @@ export function setJobrightCreds(email: string, password: string): void {
   }
 }
 
+/** Mint/refresh the jobright session by running the CLI's `login` with
+ *  credentials decrypted into that one process's env. Scout agents then run
+ *  every call session-only — the password never enters an agent process. */
+export async function refreshJobrightSession(): Promise<{ ok: boolean; message: string }> {
+  const cli = cliEntrypoint('jobright')
+  if (!fs.existsSync(cli)) return { ok: false, message: 'jobright CLI not installed' }
+  const env = jobrightEnv()
+  if (!env.JOBRIGHT_EMAIL) return { ok: false, message: 'no jobright credentials saved' }
+  try {
+    await execFileAsync(resolveBun(), ['run', cli, 'login'], {
+      cwd: REPO_ROOT,
+      timeout: 30_000,
+      maxBuffer: 1024 * 1024,
+      windowsHide: true,
+      env: { ...process.env, ...env }
+    })
+    return { ok: true, message: 'jobright session refreshed' }
+  } catch (err) {
+    const e = err as { stderr?: string; message?: string }
+    return { ok: false, message: (e.stderr || e.message || String(err)).slice(0, 400) }
+  }
+}
+
 /** Live login test: fetch 1 recommendation through the CLI. */
 export async function testJobright(): Promise<{ ok: boolean; message: string }> {
   const cli = cliEntrypoint('jobright')
