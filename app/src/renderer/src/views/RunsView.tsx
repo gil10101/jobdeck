@@ -43,6 +43,16 @@ import { useRunEvents } from '../hooks/useRunEvents'
 import Timeline from './runs/Timeline'
 import ReportCard from './runs/ReportCard'
 
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${Math.round(n / 1_000)}k`
+  return String(n)
+}
+
+function ctxPct(tokens: number, window: number): number {
+  return Math.min(100, Math.round((tokens / window) * 100))
+}
+
 const STATUS_STYLE: Record<RunMeta['status'], string> = {
   queued: 'text-yellow-300',
   running: 'text-cyan-300',
@@ -73,6 +83,7 @@ export default function RunsView({ runId }: { runId?: string }): JSX.Element {
     else if (!selected && runs.length) setSelected(runs[0].id)
   }, [runId, runs.length])
 
+  const totalTokens = runs.reduce((sum, r) => sum + (r.totalTokens ?? 0), 0)
   const totalCost = runs.reduce((sum, r) => sum + (r.costUsd ?? 0), 0)
   const report = meta?.slug ? (rows.find((r) => r.slug === meta.slug)?.report ?? null) : null
 
@@ -83,9 +94,9 @@ export default function RunsView({ runId }: { runId?: string }): JSX.Element {
           <h1 className="text-sm font-semibold text-gray-100">Runs</h1>
           <span
             className="text-[10px] text-gray-500"
-            title="Estimated API-equivalent usage. Runs use your Claude subscription login — nothing is billed per run."
+            title="Total tokens across all runs. Runs use your Claude subscription login — nothing is billed per run."
           >
-            usage ≈${totalCost.toFixed(2)}
+            {totalTokens > 0 ? `usage ${fmtTokens(totalTokens)} tokens` : `usage ≈$${totalCost.toFixed(2)}`}
           </span>
         </div>
         <div className="min-h-0 flex-1 overflow-auto">
@@ -121,12 +132,15 @@ export default function RunsView({ runId }: { runId?: string }): JSX.Element {
               </div>
               <div className="truncate text-xs font-medium text-gray-200">{r.slug}</div>
               {r.summary && <div className="truncate text-[10px] text-green-300">{r.summary}</div>}
-              {r.costUsd != null && (
+              {(r.contextTokens != null || r.costUsd != null) && (
                 <div
                   className="text-[10px] text-gray-600"
-                  title="Estimated API-equivalent usage — covered by your subscription, not billed"
+                  title="Context window used at the end of the run — subscription usage, not billed"
                 >
-                  ≈${r.costUsd.toFixed(2)} · {Math.round((r.durationMs ?? 0) / 1000)}s
+                  {r.contextTokens != null && r.contextWindow
+                    ? `ctx ${ctxPct(r.contextTokens, r.contextWindow)}%`
+                    : `≈$${(r.costUsd ?? 0).toFixed(2)}`}{' '}
+                  · {Math.round((r.durationMs ?? 0) / 1000)}s
                 </div>
               )}
               {r.errorText && (
@@ -155,12 +169,17 @@ export default function RunsView({ runId }: { runId?: string }): JSX.Element {
                   {meta.summary}
                 </span>
               )}
-              {meta.costUsd != null && (
+              {(meta.contextTokens != null || meta.costUsd != null) && (
                 <span
                   className="text-[11px] text-gray-500"
-                  title="Estimated API-equivalent usage — covered by your subscription, not billed"
+                  title="Context window used at the end of the run, and total tokens consumed — subscription usage, not billed"
                 >
-                  usage ≈${meta.costUsd.toFixed(2)} · {meta.numTurns ?? '?'} turns
+                  {meta.contextTokens != null && meta.contextWindow
+                    ? `ctx ${ctxPct(meta.contextTokens, meta.contextWindow)}%${
+                        meta.totalTokens ? ` · ${fmtTokens(meta.totalTokens)} tokens` : ''
+                      }`
+                    : `usage ≈$${(meta.costUsd ?? 0).toFixed(2)}`}{' '}
+                  · {meta.numTurns ?? '?'} turns
                 </span>
               )}
               {(meta.status === 'running' || meta.status === 'queued') && (

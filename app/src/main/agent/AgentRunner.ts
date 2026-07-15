@@ -57,6 +57,8 @@ interface ActiveRun {
   /** Context footprint of the latest completed assistant step (input + cache
    *  tokens) — result-message usage is cumulative and can't provide this. */
   contextTokens?: number
+  /** Cumulative tokens for the whole run, from the result message. */
+  totalTokens?: number
 }
 
 type SendFn = (channel: 'push:runEvent' | 'push:runChanged', payload: unknown) => void
@@ -356,6 +358,16 @@ export class AgentRunner {
             (u.cache_read_input_tokens ?? 0) +
             (u.cache_creation_input_tokens ?? 0)
         }
+        if (msg.type === 'result') {
+          // Result usage is cumulative across the run — exactly right for the
+          // run's total token consumption.
+          const u = msg.usage
+          run.totalTokens =
+            (u?.input_tokens ?? 0) +
+            (u?.output_tokens ?? 0) +
+            ((u?.cache_read_input_tokens as number) ?? 0) +
+            ((u?.cache_creation_input_tokens as number) ?? 0)
+        }
         const mapped = mapMessage(msg)
         if (mapped.textDelta) {
           run.textBuffer += mapped.textDelta
@@ -384,6 +396,9 @@ export class AgentRunner {
             run.meta.costUsd = e.costUsd ?? null
             run.meta.durationMs = e.durationMs ?? null
             run.meta.numTurns = e.numTurns ?? null
+            run.meta.contextTokens = run.contextTokens ?? null
+            run.meta.contextWindow = e.contextWindow ?? null
+            run.meta.totalTokens = run.totalTokens ?? null
           }
           this.emit(run, e)
         }

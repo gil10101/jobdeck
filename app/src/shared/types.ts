@@ -107,6 +107,12 @@ export interface RunMeta {
   costUsd: number | null
   durationMs: number | null
   numTurns: number | null
+  /** Context footprint of the run's last step vs the model window (per-step
+   *  figures; absent on runs recorded before these were tracked). */
+  contextTokens?: number | null
+  contextWindow?: number | null
+  /** Total tokens the whole run consumed (input + output + cache). */
+  totalTokens?: number | null
   folderPath: string | null
   /** Kind-specific output artifact (onboard: the profile draft json path). */
   resultPath: string | null
