@@ -15,6 +15,8 @@ export type PartialRunEvent =
       costUsd?: number
       durationMs?: number
       numTurns?: number
+      contextTokens?: number
+      contextWindow?: number
       errorText?: string
     }
 
@@ -133,12 +135,22 @@ export function mapMessage(raw: unknown): MappedMessage {
   if (type === 'result') {
     const subtype = (msg.subtype as string) ?? ''
     const isError = (msg.is_error as boolean) ?? subtype.startsWith('error')
+    // Largest window across the models the run used (a result can report a
+    // background small model too). Context TOKENS are per-step and therefore
+    // tracked by the caller, not derivable from this cumulative message.
+    let contextWindow = 0
+    for (const m of Object.values((msg.modelUsage as Record<string, { contextWindow?: number }>) ?? {})) {
+      if (typeof m.contextWindow === 'number' && m.contextWindow > contextWindow) {
+        contextWindow = m.contextWindow
+      }
+    }
     out.events.push({
       kind: 'result',
       ok: !isError && (subtype === 'success' || subtype === 'end' || subtype === ''),
       costUsd: (msg.total_cost_usd as number) ?? undefined,
       durationMs: (msg.duration_ms as number) ?? undefined,
       numTurns: (msg.num_turns as number) ?? undefined,
+      contextWindow: contextWindow > 0 ? contextWindow : undefined,
       errorText: isError ? ((msg.result as string) || subtype || 'agent errored') : undefined
     })
     return out

@@ -54,6 +54,9 @@ interface ActiveRun {
   seq: number
   textBuffer: string
   flushTimer: NodeJS.Timeout | null
+  /** Context footprint of the latest completed assistant step (input + cache
+   *  tokens) — result-message usage is cumulative and can't provide this. */
+  contextTokens?: number
 }
 
 type SendFn = (channel: 'push:runEvent' | 'push:runChanged', payload: unknown) => void
@@ -346,6 +349,13 @@ export class AgentRunner {
       let resultError: string | null = null
 
       for await (const msg of q) {
+        if (msg.type === 'assistant' && msg.message.usage) {
+          const u = msg.message.usage
+          run.contextTokens =
+            (u.input_tokens ?? 0) +
+            (u.cache_read_input_tokens ?? 0) +
+            (u.cache_creation_input_tokens ?? 0)
+        }
         const mapped = mapMessage(msg)
         if (mapped.textDelta) {
           run.textBuffer += mapped.textDelta
@@ -368,6 +378,7 @@ export class AgentRunner {
             run.textBuffer = ''
           }
           if (e.kind === 'result') {
+            e.contextTokens = run.contextTokens
             resultOk = e.ok
             resultError = e.errorText ?? null
             run.meta.costUsd = e.costUsd ?? null

@@ -107,13 +107,15 @@ export default function Timeline({ events }: { events: RunEvent[] }): JSX.Elemen
                 }`}
               >
                 {e.ok ? '✓ agent finished' : `✗ ${e.errorText ?? 'agent errored'}`}
-                {typeof e.costUsd === 'number' && (
+                {(typeof e.contextTokens === 'number' || typeof e.costUsd === 'number') && (
                   <span
                     className="ml-2 text-[10px] opacity-70"
-                    title="Estimated API-equivalent usage — covered by your subscription, not billed"
+                    title="Context window used at the end of the run — subscription usage, not billed"
                   >
-                    usage ≈${e.costUsd.toFixed(2)} · {Math.round((e.durationMs ?? 0) / 1000)}s ·{' '}
-                    {e.numTurns ?? '?'} turns
+                    {typeof e.contextTokens === 'number' && typeof e.contextWindow === 'number'
+                      ? `ctx ${Math.min(100, Math.round((e.contextTokens / e.contextWindow) * 100))}% (${Math.round(e.contextTokens / 1000)}k of ${Math.round(e.contextWindow / 1000)}k)`
+                      : `usage ≈$${(e.costUsd ?? 0).toFixed(2)}`}{' '}
+                    · {Math.round((e.durationMs ?? 0) / 1000)}s · {e.numTurns ?? '?'} turns
                   </span>
                 )}
               </div>

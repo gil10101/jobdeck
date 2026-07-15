@@ -156,6 +156,10 @@ export type RunEvent =
       costUsd?: number
       durationMs?: number
       numTurns?: number
+      /** Context footprint of the run's LAST step (per-step usage, not the
+       *  cumulative result totals) — drives the "ctx N%" display. */
+      contextTokens?: number
+      contextWindow?: number
       errorText?: string
     }
 
