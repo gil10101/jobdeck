@@ -1,6 +1,7 @@
 import Sidebar from './components/Sidebar'
 import ToastHost from './components/Toast'
 import ApplyView from './views/ApplyView'
+import AssistantFab from './views/assistant/AssistantFab'
 import DetailView from './views/DetailView'
 import OnboardingWizard from './views/onboarding/OnboardingWizard'
 import IntakeView from './views/IntakeView'
@@ -39,6 +40,7 @@ export default function App(): JSX.Element {
         {route.view === 'apply' && <ApplyView rowId={route.rowId} />}
       </main>
       <ToastHost />
+      <AssistantFab />
     </div>
   )
 }
