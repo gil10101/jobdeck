@@ -72,6 +72,10 @@ export class AssistantSession {
   private flushTimer: NodeJS.Timeout | null = null
 
   private approvals = new Map<string, PendingApproval>()
+  // The renderer (and liveState()) hold a single approval slot, so concurrent
+  // approval-gated tool calls — the SDK may run canUseTool for parallel tool
+  // calls concurrently — are surfaced one at a time through this chain.
+  private approvalChain: Promise<unknown> = Promise.resolve()
 
   constructor(
     public readonly conversationId: string,
@@ -398,10 +402,24 @@ export class AssistantSession {
       tool,
       preview
     }
-    return new Promise<boolean>((resolve) => {
-      this.approvals.set(info.approvalId, { info, resolve })
-      this.setState('awaiting-approval')
-      this.deps.send('push:assistantApproval', info)
-    })
+    const gen = this.generation
+    const result = this.approvalChain.then(
+      () =>
+        new Promise<boolean>((resolve) => {
+          // The owning run may have been stopped — or stopped and already
+          // superseded by a fresh one — while this request waited its turn;
+          // it must be denied here, not pushed as an unanswerable zombie card.
+          if (this.runClosed || gen !== this.generation) {
+            resolve(false)
+            return
+          }
+          this.approvals.set(info.approvalId, { info, resolve })
+          this.setState('awaiting-approval')
+          this.deps.send('push:assistantApproval', info)
+        })
+    )
+    // The chain must advance on deny/stop as well, so queued requests never hang.
+    this.approvalChain = result.catch(() => undefined)
+    return result
   }
 }
