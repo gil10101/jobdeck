@@ -14,7 +14,7 @@ export default function TokenDonut({ usage }: { usage: AssistantUsage }): JSX.El
   return (
     <div
       className="flex items-center gap-1.5"
-      title="Estimated API-equivalent usage — covered by your subscription, not billed"
+      title="Estimated API-equivalent usage and context size for this conversation"
     >
       <svg width="24" height="24" viewBox="0 0 24 24" className="-rotate-90" aria-hidden="true">
         <circle cx="12" cy="12" r={RADIUS} fill="none" strokeWidth="2.5" className="stroke-edge" />

@@ -18,12 +18,13 @@ export default function AssistantPanel(): JSX.Element {
   const approveAssistant = useApp((s) => s.approveAssistant)
   const newAssistantChat = useApp((s) => s.newAssistantChat)
   const openAssistantChat = useApp((s) => s.openAssistantChat)
+  const deleteAssistantChat = useApp((s) => s.deleteAssistantChat)
   const refreshAssistantHistory = useApp((s) => s.refreshAssistantHistory)
 
   const [historyOpen, setHistoryOpen] = useState(false)
 
-  // No conversation is created on open — sendAssistant creates one on the
-  // first send, so merely peeking at the panel never leaves an empty
+  // Conversations are created lazily by sendAssistant and persisted on the
+  // first message, so opening the panel or clicking "+" never leaves an empty
   // conversation file behind.
   const title = history.find((h) => h.id === conversationId)?.title ?? 'Assistant'
 
@@ -54,19 +55,31 @@ export default function AssistantPanel(): JSX.Element {
                 <div className="px-3 py-2 text-[11px] text-gray-500">No past conversations</div>
               )}
               {history.map((h) => (
-                <button
-                  key={h.id}
-                  className={`block w-full truncate px-3 py-1.5 text-left text-xs hover:bg-panel ${
-                    h.id === conversationId ? 'text-cyan-300' : 'text-gray-200'
-                  }`}
-                  onMouseDown={(e) => {
-                    e.preventDefault()
-                    void openAssistantChat(h.id)
-                    setHistoryOpen(false)
-                  }}
-                >
-                  {h.title}
-                </button>
+                <div key={h.id} className="group flex items-center hover:bg-panel">
+                  <button
+                    className={`min-w-0 flex-1 truncate px-3 py-1.5 text-left text-xs ${
+                      h.id === conversationId ? 'text-cyan-300' : 'text-gray-200'
+                    }`}
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      void openAssistantChat(h.id)
+                      setHistoryOpen(false)
+                    }}
+                  >
+                    {h.title}
+                  </button>
+                  <button
+                    className="invisible shrink-0 px-2 py-1.5 text-[10px] text-gray-500 hover:text-red-400 group-hover:visible"
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      void deleteAssistantChat(h.id)
+                    }}
+                    aria-label={`Delete "${h.title}"`}
+                    title="Delete conversation"
+                  >
+                    ✕
+                  </button>
+                </div>
               ))}
             </div>
           )}

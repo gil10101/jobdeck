@@ -28,6 +28,9 @@ export default function Composer({
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => {
+          // IME users confirm a composition candidate with Enter; that Enter
+          // must not send the half-composed draft.
+          if (e.nativeEvent.isComposing) return
           if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault()
             send()

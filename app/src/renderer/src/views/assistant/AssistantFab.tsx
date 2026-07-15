@@ -1,9 +1,17 @@
+import { useEffect, useState } from 'react'
 import { useApp } from '../../store'
 import AssistantPanel from './AssistantPanel'
 
 export default function AssistantFab(): JSX.Element {
   const open = useApp((s) => s.assistant.open)
   const toggleAssistant = useApp((s) => s.toggleAssistant)
+
+  // Mounted on first open and kept mounted after, so closing the panel
+  // preserves its local state (composer draft, scroll position).
+  const [everOpened, setEverOpened] = useState(false)
+  useEffect(() => {
+    if (open) setEverOpened(true)
+  }, [open])
 
   return (
     <div className="fixed bottom-5 right-5 z-50 h-[52px] w-[52px]">
@@ -29,14 +37,14 @@ export default function AssistantFab(): JSX.Element {
           <path d="M8 17v4l5-4" />
         </svg>
       </button>
-      {/* Wrapper stays mounted while closed (scaled to 0) so both open and close animate;
-          only the panel's own contents mount/unmount with `open`. */}
+      {/* Wrapper stays mounted while closed (scaled to 0) so both open and close animate. */}
       <div
         className={`absolute bottom-0 right-0 h-[min(85vh,720px)] w-[400px] max-w-[calc(100vw-2.5rem)] origin-bottom-right overflow-hidden rounded-xl border border-edge bg-panel shadow-2xl transition-all duration-200 ease-out motion-reduce:transition-none ${
           open ? 'scale-100 opacity-100' : 'pointer-events-none scale-0 opacity-0'
         }`}
+        aria-hidden={!open}
       >
-        {open && <AssistantPanel />}
+        {everOpened && <AssistantPanel />}
       </div>
     </div>
   )

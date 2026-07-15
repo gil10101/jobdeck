@@ -35,8 +35,10 @@ function ToolRow({
   )
 }
 
-// Tool rows first, then prose. A message's settled `text` supersedes its streamed 'text'
-// events, so 'text'/'init'/'status'/'result' event kinds are never rendered here.
+// Tool rows first, then prose, then any failure. A message's settled `text`
+// supersedes its streamed 'text' events, and successful 'result'/'init'/'status'
+// events are run-page detail — only failed results render, since an errored turn
+// may otherwise produce a message with no visible content at all.
 function AssistantBlock({
   events,
   text,
@@ -52,6 +54,9 @@ function AssistantBlock({
   }
   const starts = events.filter(
     (e): e is RunEvent & { kind: 'tool_start' } => e.kind === 'tool_start'
+  )
+  const failures = events.filter(
+    (e): e is RunEvent & { kind: 'result' } => e.kind === 'result' && !e.ok
   )
 
   return (
@@ -69,6 +74,14 @@ function AssistantBlock({
           {pulse && <span className="animate-pulse text-cyan-400"> ▍</span>}
         </div>
       )}
+      {failures.map((e) => (
+        <div
+          key={e.seq}
+          className="mt-1 whitespace-pre-wrap rounded-md border border-red-900 bg-red-950/40 px-2 py-1.5 text-red-300"
+        >
+          ✗ {e.errorText ?? 'assistant run failed'}
+        </div>
+      ))}
     </div>
   )
 }
@@ -91,7 +104,7 @@ export default function MessageList({
     if (pinnedRef.current && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [messages.length, streaming?.text.length, streaming?.events.length])
+  }, [messages.length, streaming?.text.length, streaming?.events.length, pendingApproval])
 
   const onScroll = (): void => {
     const el = scrollRef.current
