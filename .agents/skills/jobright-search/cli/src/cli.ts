@@ -29,6 +29,11 @@ const API = "https://swan-api.jobright.ai"
 const SKILL_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 const CREDS_PATH = join(SKILL_ROOT, "credentials.json")
 const SESSION_PATH = join(SKILL_ROOT, ".session.json")
+const FEED_CACHE_PATH = join(SKILL_ROOT, ".feed-cache.json")
+// Repeated invocations (e.g. an agent checking several role angles) must not
+// re-hammer the API — burst traffic gets the session revoked. The feed barely
+// changes minute-to-minute, so a short-lived local cache absorbs the repeats.
+const FEED_CACHE_TTL_MS = 10 * 60 * 1000
 
 const BROWSER_HEADERS: Record<string, string> = {
   Origin: "https://jobright.ai",
@@ -70,8 +75,10 @@ function requireCreds(context: "initial" | "expired"): Creds {
   if (creds) return creds
   if (context === "expired") {
     fail(
-      "Jobright session expired and no credentials are available to refresh it. " +
-        "Run `login` with JOBRIGHT_EMAIL / JOBRIGHT_PASSWORD set (in the desktop app: Settings → Job boards).",
+      "Jobright session expired mid-run and no credentials are available here to refresh it. " +
+        "If saved credentials exist in the desktop app, simply RE-RUN the scout — the app refreshes " +
+        "the session automatically at run start. Otherwise run `login` with JOBRIGHT_EMAIL / " +
+        "JOBRIGHT_PASSWORD set. Do not retry this command in a loop; the session will not come back on its own.",
       "SESSION_EXPIRED",
     )
   }
@@ -250,7 +257,40 @@ interface FeedOpts {
   sort: number
 }
 
+interface FeedCache {
+  savedAt: string
+  sort: number
+  rows: JobRow[]
+}
+
+function loadFeedCache(opts: FeedOpts): JobRow[] | null {
+  if (opts.refresh) return null
+  try {
+    const c = JSON.parse(readFileSync(FEED_CACHE_PATH, "utf-8")) as FeedCache
+    const fresh = Date.now() - new Date(c.savedAt).getTime() < FEED_CACHE_TTL_MS
+    if (fresh && c.sort === opts.sort && Array.isArray(c.rows) && c.rows.length >= opts.limit) {
+      return c.rows.slice(0, opts.limit)
+    }
+  } catch {
+    /* no cache */
+  }
+  return null
+}
+
+function saveFeedCache(sort: number, rows: JobRow[]): void {
+  try {
+    writeFileSync(
+      FEED_CACHE_PATH,
+      JSON.stringify({ savedAt: new Date().toISOString(), sort, rows } satisfies FeedCache, null, 2),
+    )
+  } catch {
+    /* non-fatal */
+  }
+}
+
 async function fetchFeed(opts: FeedOpts): Promise<JobRow[]> {
+  const cached = loadFeedCache(opts)
+  if (cached) return cached
   // Session-first: credentials are touched only when there is no cached
   // session (or authGet later finds it expired).
   const creds = tryLoadCreds()
@@ -286,6 +326,7 @@ async function fetchFeed(opts: FeedOpts): Promise<JobRow[]> {
     position += list.length
     if (added === 0) break
   }
+  saveFeedCache(opts.sort, rows)
   return rows.slice(0, opts.limit)
 }
 
@@ -457,7 +498,7 @@ FLAGS (recommend / search)
                        (e.g. --min-size 51 drops 1-50 and 11-50; unknown sizes kept, shown as "?").
   --maxage <days>      Keep only jobs posted within N days.
   --limit, -n <n>      Max jobs to return. Default 30.
-  --refresh            Ask Jobright to re-rank the feed (slower, freshest).
+  --refresh            Ask Jobright to re-rank the feed (slower, freshest; bypasses the local cache).
   --sort <n>           sortCondition passed to Jobright (default 0).
   --format <fmt>       json (default) | table | plain.
 
@@ -470,6 +511,10 @@ EXAMPLES
 Auth: session-first — a cached session (.session.json) is used when present, no
 credentials needed. The login command mints/refreshes the session using env
 JOBRIGHT_EMAIL / JOBRIGHT_PASSWORD (or credentials.json at the skill root).
+
+IMPORTANT: never run several jobright commands in parallel — burst traffic gets
+the session revoked. The feed is fetched once and cached locally for 10 minutes,
+so repeated recommend/search calls within a run are cheap and safe.
 Note: Jobright's feed is already personalized to your profile; "search" filters that feed
 locally by keyword — it does not run a separate global search.
 `

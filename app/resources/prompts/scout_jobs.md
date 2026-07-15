@@ -11,7 +11,8 @@ Run these with the Bash tool from the repo root (bun at `{{BUN}}`). All support 
 {{BOARDS_NOTE}}
 
 1. **jobright (primary — personalized fit scores):**
-   `"{{BUN}}" run ".agents/skills/jobright-search/cli/src/cli.ts" recommend --min-size 51 --maxage 14 -n 40 --format json`
+   `"{{BUN}}" run ".agents/skills/jobright-search/cli/src/cli.ts" recommend --min-size 51 --maxage 14 -n 60 --format json`
+   Run this ONCE. The feed is personalized to the candidate — it is NOT query-driven — so a single `recommend` covers every target role; judge each returned job against all the target roles yourself. Do NOT run one jobright command per role, do NOT use `search -q` to slice the feed by keyword (its term filter silently drops relevant jobs whose text phrases things differently), and NEVER run jobright commands in parallel — burst traffic gets the session revoked mid-run. If a call returns SESSION_EXPIRED, skip jobright for the rest of this run and report that re-running the scout restores the session automatically.
    Each jobright row already includes the structured JD: `responsibilities`, `mustHave`, `preferred`, `education`, `benefits`, `skills`, `summary`. Map them STRAIGHT into the output fields below (`mustHave` → `minimumQualifications`, `preferred` → `preferredQualifications`) — do not re-derive them from the summary prose.
 2. **LinkedIn (public, no auth):**
    `"{{BUN}}" run ".agents/skills/linkedin-search/cli/src/cli.ts" search -q "<role>" --location "<location>" --jobage 14 -n 25 --format json`

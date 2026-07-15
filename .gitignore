@@ -89,6 +89,7 @@ upskill/*.md
 # Portal credentials + cached sessions (personal secrets — never commit)
 .agents/skills/*/credentials.json
 .agents/skills/*/.session.json
+.agents/skills/*/.feed-cache.json
 
 # Mission-control app (app/) build output + personal data store
 app/out/
