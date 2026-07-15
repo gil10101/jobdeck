@@ -70,7 +70,7 @@ Write `applications/{{SLUG}}/report.json` as VALID JSON (no fences):
   "company": "<company name>",
   "salary": "<posted range or 'not listed'>",
   "location": "<city/remote>",
-  "datePosted": "<YYYY-MM-DD or null>",
+  "datePosted": "<YYYY-MM-DD; when the posting only shows a relative age ('1 week ago'), compute the approximate date from today's date instead of using null; null only when there is no age signal at all>",
   "applyUrl": "<best apply URL>",
   "coverLetter": true,
   "resumePages": 1,
@@ -92,6 +92,8 @@ Write `applications/{{SLUG}}/report.json` as VALID JSON (no fences):
 }
 ```
 Report page counts and checks TRUTHFULLY (the app re-verifies files on disk).
+
+`problems` is ONLY for issues the user must act on or know about: a failed check, an unverifiable claim, a missing input. Successful workarounds, expected data gaps, and explanations of how you did something are NOT problems — omit them; an empty array is the normal result.
 
 ## DO NOT
 - Do NOT touch anything in `applications/TODO/` (the app renames processed files).
