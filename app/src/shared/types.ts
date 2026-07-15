@@ -196,6 +196,29 @@ export interface AssistantApproval {
 
 export type AssistantStatus = 'idle' | 'thinking' | 'awaiting-approval'
 
+// ---- job-board search CLIs ----
+
+export type BoardId = 'jobright' | 'linkedin' | 'freehire'
+
+export interface BoardStatus {
+  id: BoardId
+  /** CLI entrypoint present in the workspace. */
+  installed: boolean
+  /** Where the CLI lives (workspace-relative), installed or not. */
+  path: string
+  /** Credentials state; null for boards that need none. */
+  configured: boolean | null
+  /** Saved account email, when the board uses credentials. */
+  email: string | null
+}
+
+export interface BoardsStatus {
+  /** The bun runtime that executes the CLIs was found. */
+  bunOk: boolean
+  bunPath: string
+  boards: BoardStatus[]
+}
+
 export interface AnswersField {
   label: string
   value: string

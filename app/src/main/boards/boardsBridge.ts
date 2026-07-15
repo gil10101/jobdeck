@@ -2,34 +2,145 @@ import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { promisify } from 'node:util'
-import { REPO_ROOT, resolveBun } from '../paths'
+import type { BoardId, BoardsStatus } from '@shared/types'
+import { APP_DIR, REPO_ROOT, resolveBun } from '../paths'
 
 const execFileAsync = promisify(execFile)
 
-const JOBRIGHT_SKILL_DIR = path.join(REPO_ROOT, '.agents', 'skills', 'jobright-search')
-const CREDS_FILE = path.join(JOBRIGHT_SKILL_DIR, 'credentials.json')
-const SESSION_FILE = path.join(JOBRIGHT_SKILL_DIR, '.session.json')
-const JOBRIGHT_CLI = path.join(JOBRIGHT_SKILL_DIR, 'cli', 'src', 'cli.ts')
+// The job-board search CLIs are small bun scripts living in the WORKSPACE at
+// .agents/skills/<board>-search (agent runs execute them there). The app ships
+// pristine copies under its own resources/skills, so a fresh workspace can be
+// scaffolded — and a broken install repaired — without any external download.
 
-export function getBoardsStatus(): { jobright: { configured: boolean; email: string | null } } {
+export const BOARD_IDS: BoardId[] = ['jobright', 'linkedin', 'freehire']
+
+function skillDirName(board: BoardId): string {
+  return `${board}-search`
+}
+
+function workspaceSkillDir(board: BoardId, root: string = REPO_ROOT): string {
+  return path.join(root, '.agents', 'skills', skillDirName(board))
+}
+
+function bundledSkillDir(board: BoardId): string {
+  return path.join(APP_DIR, 'resources', 'skills', skillDirName(board))
+}
+
+function cliEntrypoint(board: BoardId, root: string = REPO_ROOT): string {
+  return path.join(workspaceSkillDir(board, root), 'cli', 'src', 'cli.ts')
+}
+
+// REPO_ROOT is a live binding set by initWorkspace(), so these paths are
+// computed per call rather than cached at module load.
+function credsFile(): string {
+  return path.join(workspaceSkillDir('jobright'), 'credentials.json')
+}
+
+function sessionFile(): string {
+  return path.join(workspaceSkillDir('jobright'), '.session.json')
+}
+
+function jobrightCreds(): { configured: boolean; email: string | null } {
   try {
-    if (fs.existsSync(CREDS_FILE)) {
-      const creds = JSON.parse(fs.readFileSync(CREDS_FILE, 'utf-8')) as { email?: string }
-      return { jobright: { configured: !!creds.email, email: creds.email ?? null } }
+    const file = credsFile()
+    if (fs.existsSync(file)) {
+      const creds = JSON.parse(fs.readFileSync(file, 'utf-8')) as { email?: string }
+      return { configured: !!creds.email, email: creds.email ?? null }
     }
   } catch {
     /* fall through */
   }
-  return { jobright: { configured: false, email: null } }
+  return { configured: false, email: null }
+}
+
+export function getBoardsStatus(): BoardsStatus {
+  const bunPath = resolveBun()
+  // resolveBun falls back to the bare command name when no known location
+  // exists; only an absolute hit counts as "found".
+  const bunOk = path.isAbsolute(bunPath) && fs.existsSync(bunPath)
+  return {
+    bunOk,
+    bunPath,
+    boards: BOARD_IDS.map((id) => {
+      const creds = id === 'jobright' ? jobrightCreds() : { configured: null, email: null }
+      return {
+        id,
+        installed: fs.existsSync(cliEntrypoint(id)),
+        path: path.join('.agents', 'skills', skillDirName(id)),
+        configured: creds.configured,
+        email: creds.email
+      }
+    })
+  }
+}
+
+/** Copy the bundled CLI into the workspace. Merges over an existing install
+ *  (repair/update) without touching credentials or cached sessions. */
+export function installBoard(board: BoardId, root: string = REPO_ROOT): BoardsStatus {
+  const src = bundledSkillDir(board)
+  if (!fs.existsSync(path.join(src, 'cli', 'src', 'cli.ts'))) {
+    throw new Error(`bundled CLI missing for board: ${board}`)
+  }
+  fs.cpSync(src, workspaceSkillDir(board, root), { recursive: true, force: true })
+  return getBoardsStatus()
+}
+
+/** Best-effort scaffold of every board CLI into a (new) workspace. */
+export function installAllBoards(root: string): void {
+  for (const id of BOARD_IDS) {
+    try {
+      installBoard(id, root)
+    } catch (err) {
+      console.error(`[boards] failed to scaffold ${id}:`, err)
+    }
+  }
+}
+
+/** Human-readable availability line for the scout prompt; null when everything is usable. */
+export function boardsAvailabilityNote(): string | null {
+  const status = getBoardsStatus()
+  if (!status.bunOk) {
+    return 'NONE of the board CLIs can run: the bun runtime is not installed. Skip STEP 2 entirely and tell the user to install bun (https://bun.sh) and the board CLIs from Settings → Job boards.'
+  }
+  const missing = status.boards.filter((b) => !b.installed)
+  if (missing.length === status.boards.length) {
+    return 'NONE of the board CLIs are installed in this workspace. Skip STEP 2 and tell the user to install them from Settings → Job boards.'
+  }
+  const parts: string[] = []
+  for (const b of missing) {
+    parts.push(`The ${b.id} CLI is not installed — skip it (installable from Settings → Job boards).`)
+  }
+  const jr = status.boards.find((b) => b.id === 'jobright')
+  if (jr?.installed && jr.configured === false) {
+    parts.push(
+      'jobright has no credentials configured — skip it and note that the user can add credentials in Settings → Job boards.'
+    )
+  }
+  return parts.length ? parts.join(' ') : null
+}
+
+/** Throws a user-actionable error when a scout run cannot search anything. */
+export function assertScoutable(): void {
+  const status = getBoardsStatus()
+  if (!status.bunOk) {
+    throw new Error(
+      'Cannot scout: the bun runtime (runs the job-board CLIs) was not found. Install it from https://bun.sh, then retry.'
+    )
+  }
+  if (status.boards.every((b) => !b.installed)) {
+    throw new Error(
+      'Cannot scout: no job-board CLIs are installed in this workspace. Install them from Settings → Job boards, then retry.'
+    )
+  }
 }
 
 /** Write jobright credentials (gitignored file) and clear the cached session. */
 export function setJobrightCreds(email: string, password: string): void {
   if (!email.trim() || !password) throw new Error('email and password are required')
-  fs.mkdirSync(JOBRIGHT_SKILL_DIR, { recursive: true })
-  fs.writeFileSync(CREDS_FILE, JSON.stringify({ email: email.trim(), password }, null, 2), 'utf-8')
+  fs.mkdirSync(workspaceSkillDir('jobright'), { recursive: true })
+  fs.writeFileSync(credsFile(), JSON.stringify({ email: email.trim(), password }, null, 2), 'utf-8')
   try {
-    fs.unlinkSync(SESSION_FILE) // force fresh login with the new creds
+    fs.unlinkSync(sessionFile()) // force fresh login with the new creds
   } catch {
     /* ignore */
   }
@@ -37,12 +148,13 @@ export function setJobrightCreds(email: string, password: string): void {
 
 /** Live login test: fetch 1 recommendation through the CLI. */
 export async function testJobright(): Promise<{ ok: boolean; message: string }> {
-  if (!fs.existsSync(JOBRIGHT_CLI)) return { ok: false, message: 'jobright CLI not found' }
+  const cli = cliEntrypoint('jobright')
+  if (!fs.existsSync(cli)) return { ok: false, message: 'jobright CLI not installed' }
   const bun = resolveBun()
   try {
     const { stdout } = await execFileAsync(
       bun,
-      ['run', JOBRIGHT_CLI, 'recommend', '-n', '1', '--format', 'json'],
+      ['run', cli, 'recommend', '-n', '1', '--format', 'json'],
       { cwd: REPO_ROOT, timeout: 45_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true }
     )
     const parsed = JSON.parse(stdout) as { results?: unknown[]; meta?: { fetched?: number } }

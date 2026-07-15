@@ -3,6 +3,7 @@ import path from 'node:path'
 import type { ProfileFile } from '@shared/profile'
 import { emptyProfile } from '@shared/profile'
 import { APP_DIR, MASTER_DIR, REPO_ROOT, resolveBun, resolveLatex, toAbs, todayISO, todayMMDD } from '../paths'
+import { boardsAvailabilityNote } from '../boards/boardsBridge'
 import { loadConfig } from '../appConfig'
 import { pickExampleFolder } from '../fsops/FolderScanner'
 import {
@@ -165,6 +166,7 @@ export function buildScoutPrompt(s: ScoutSlots, profile: ProfileFile | null): st
       : profile?.searchConfig.targetRoles.length
         ? profile.searchConfig.targetRoles.map((r) => `"${r.title}"`).join(', ')
         : 'the target roles listed in the criteria above'
+  const availability = boardsAvailabilityNote()
   const replacements: Record<string, string> = {
     REPO_ROOT: REPO_ROOT,
     TODAY_ISO: todayISO(),
@@ -174,6 +176,7 @@ export function buildScoutPrompt(s: ScoutSlots, profile: ProfileFile | null): st
     OUTPUT_PATH: s.outputPath,
     SEARCH_CRITERIA_MD: criteria,
     LINKEDIN_QUERIES: linkedinQueries,
+    BOARDS_NOTE: availability ? `\n> **Availability:** ${availability}\n` : '',
     INSTRUCTIONS: s.instructions.trim() || '(none — run the standard sweep)'
   }
   return fill(out, replacements)

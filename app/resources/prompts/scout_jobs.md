@@ -8,6 +8,7 @@ Your job: search the job boards, filter HARD against the candidate's criteria, j
 
 ## STEP 2 — Search the boards (bun CLIs, zero-auth except jobright)
 Run these with the Bash tool from the repo root (bun at `{{BUN}}`). All support `--format json`.
+{{BOARDS_NOTE}}
 
 1. **jobright (primary — personalized fit scores):**
    `"{{BUN}}" run ".agents/skills/jobright-search/cli/src/cli.ts" recommend --min-size 51 --maxage 14 -n 40 --format json`

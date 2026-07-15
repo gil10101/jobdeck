@@ -13,6 +13,7 @@ import {
   todayMMDD,
   uniqueSlug
 } from '../paths'
+import { assertScoutable } from '../boards/boardsBridge'
 import { parseReport, validateReport } from '../parsers/report'
 import { validateProfile } from '../profile/profileSchema'
 import { loadProfile } from '../profile/profileStore'
@@ -87,6 +88,9 @@ export class AgentRunner {
 
   start(input: RunInput): RunMeta {
     const kind: RunKind = input.kind ?? 'build'
+    // Fail scout runs before anything is queued when no board CLI can run at
+    // all — the error carries the fix (Settings → Job boards) to the caller.
+    if (kind === 'scout') assertScoutable()
     let slug: string
     if (kind === 'scout') {
       const now = new Date()

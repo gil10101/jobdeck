@@ -1,6 +1,7 @@
 import { BrowserWindow, app, dialog, ipcMain } from 'electron'
 import fs from 'node:fs'
 import { loadConfig, saveConfig } from './appConfig'
+import { installAllBoards } from './boards/boardsBridge'
 import { resolveLatex } from './paths'
 
 /**
@@ -53,6 +54,8 @@ export function registerCoreIpc(deps: {
   handle('workspace:create', async ({ dir }: { dir: string }) => {
     if (!dir) throw new Error('no folder chosen')
     fs.mkdirSync(dir, { recursive: true })
+    // Scaffold the bundled job-board CLIs so scout runs work out of the box.
+    installAllBoards(dir)
     saveConfig({ workspacePath: dir })
     await deps.completeSetup(dir)
     return { workspacePath: dir }

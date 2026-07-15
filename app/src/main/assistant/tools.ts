@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { Store } from '../store/Store'
 import type { TrackerRepo } from '../store/trackerRepo'
 import type { RunStore } from '../agent/runStore'
+import { getBoardsStatus, installBoard } from '../boards/boardsBridge'
 import { loadProfile, saveProfile } from '../profile/profileStore'
 import { validateProfile } from '../profile/profileSchema'
 import { readMemory, appendMemory } from './conversationStore'
@@ -12,9 +13,9 @@ import { emptyProfile } from '@shared/profile'
 
 // In-process MCP server ("app" namespace) exposing the app's state to the
 // assistant agent. READ tools (get_profile, list_applications, …) run freely.
-// Of the ACTION tools, add_profile_entry and start_scout gate through
-// `requestApproval`; `remember` appends to long-term memory without approval
-// by design.
+// Of the ACTION tools, add_profile_entry, install_job_board, and start_scout
+// gate through `requestApproval`; `remember` appends to long-term memory
+// without approval by design.
 
 export interface AssistantToolDeps {
   store: Store
@@ -201,6 +202,35 @@ export function buildAssistantMcp(deps: AssistantToolDeps): ReturnType<typeof cr
     }
   )
 
+  const checkJobBoards = tool(
+    'check_job_boards',
+    'Check whether the job-board search CLIs (jobright, linkedin, freehire) and the bun runtime are installed and configured — use this to diagnose scout failures.',
+    {},
+    async () => {
+      const status = getBoardsStatus()
+      return json({
+        ...status,
+        guidance: status.bunOk
+          ? 'Missing CLIs can be installed with the install_job_board tool or from Settings → Job boards; jobright additionally needs credentials saved there.'
+          : 'The bun runtime is missing, so no board CLI can run. The user must install it themselves from https://bun.sh — the app cannot do that.'
+      })
+    }
+  )
+
+  const installJobBoard = tool(
+    'install_job_board',
+    "Install one job-board search CLI (bundled with the app) into the user's workspace. Fixes 'CLI not installed' scout failures. Requires the user's approval.",
+    { board: z.enum(['jobright', 'linkedin', 'freehire']) },
+    async ({ board }) => {
+      const ok = await deps.requestApproval(
+        'install_job_board',
+        `Copy the bundled ${board} search CLI into .agents/skills/${board}-search in the workspace`
+      )
+      if (!ok) return json({ denied: true })
+      return json(installBoard(board))
+    }
+  )
+
   const startScout = tool(
     'start_scout',
     "Start a scout run that searches the job boards for matching postings. Requires the user's approval before running.",
@@ -237,7 +267,9 @@ export function buildAssistantMcp(deps: AssistantToolDeps): ReturnType<typeof cr
       getSettings,
       whereIsSetting,
       recallMemory,
+      checkJobBoards,
       addProfileEntry,
+      installJobBoard,
       startScout,
       remember
     ]

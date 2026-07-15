@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { AppSettings } from '@shared/types'
+import type { AppSettings, BoardId, BoardsStatus } from '@shared/types'
 import { call } from '../api'
 import { modelOptionsWith } from '../lib/models'
 import { useApp } from '../store'
@@ -54,7 +54,8 @@ export default function SettingsView(): JSX.Element {
   const [info, setInfo] = useState<{ repoRoot: string; appDataDir: string } | null>(null)
   const [jobrightEmail, setJobrightEmail] = useState('')
   const [jobrightPassword, setJobrightPassword] = useState('')
-  const [boardStatus, setBoardStatus] = useState<string>('checking…')
+  const [boards, setBoards] = useState<BoardsStatus | null>(null)
+  const [installing, setInstalling] = useState<BoardId | null>(null)
   const [testing, setTesting] = useState(false)
   const [modelDraft, setModelDraft] = useState('')
   const [maxTurnsDraft, setMaxTurnsDraft] = useState('')
@@ -64,12 +65,11 @@ export default function SettingsView(): JSX.Element {
     void call('app:info', undefined).then(setInfo).catch(() => undefined)
     void call('boards:getStatus', undefined)
       .then((s) => {
-        setBoardStatus(
-          s.jobright.configured ? `configured (${s.jobright.email})` : 'not configured'
-        )
-        if (s.jobright.email) setJobrightEmail(s.jobright.email)
+        setBoards(s)
+        const email = s.boards.find((b) => b.id === 'jobright')?.email
+        if (email) setJobrightEmail(email)
       })
-      .catch(() => setBoardStatus('unknown'))
+      .catch(() => setBoards(null))
   }, [])
 
   useEffect(() => {
@@ -91,10 +91,22 @@ export default function SettingsView(): JSX.Element {
     try {
       await call('boards:setCreds', { email: jobrightEmail, password: jobrightPassword })
       setJobrightPassword('')
-      setBoardStatus(`configured (${jobrightEmail})`)
+      setBoards(await call('boards:getStatus', undefined))
       toast('jobright credentials saved (session reset — next call logs in fresh)', 'success')
     } catch (err) {
       toast(String(err), 'error')
+    }
+  }
+
+  const install = async (board: BoardId): Promise<void> => {
+    setInstalling(board)
+    try {
+      setBoards(await call('boards:install', { board }))
+      toast(`${board} CLI installed into the workspace`, 'success')
+    } catch (err) {
+      toast(String(err), 'error')
+    } finally {
+      setInstalling(null)
     }
   }
 
@@ -242,42 +254,77 @@ export default function SettingsView(): JSX.Element {
           <div className="pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
             Job boards
           </div>
-          <Row label="jobright.ai" hint={`Status: ${boardStatus}. Credentials live in a gitignored file; saving clears the cached session.`}>
-            <div className="flex flex-col items-end gap-1.5">
-              <input
-                className="input w-56"
-                placeholder="email"
-                value={jobrightEmail}
-                onChange={(e) => setJobrightEmail(e.target.value)}
-              />
-              <input
-                className="input w-56"
-                type="password"
-                placeholder="password"
-                value={jobrightPassword}
-                onChange={(e) => setJobrightPassword(e.target.value)}
-              />
-              <div className="flex gap-1.5">
-                <button
-                  className="btn btn-primary px-2 py-1 text-[10px]"
-                  disabled={!jobrightEmail || !jobrightPassword}
-                  onClick={saveCreds}
-                >
-                  Save
-                </button>
-                <button
-                  className="btn px-2 py-1 text-[10px]"
-                  disabled={testing}
-                  onClick={testBoard}
-                >
-                  {testing ? 'Testing…' : 'Test connection'}
-                </button>
-              </div>
+          {boards && !boards.bunOk && (
+            <div className="mt-2 rounded-md border border-amber-700 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-300">
+              The bun runtime (runs the board CLIs) was not found. Install it from{' '}
+              <span className="font-semibold">bun.sh</span>, then reopen Settings.
             </div>
-          </Row>
-          <Row label="LinkedIn / freehire" hint="Public APIs — no credentials needed.">
-            <span className="chip border-green-800 text-green-300">ready</span>
-          </Row>
+          )}
+          {(boards?.boards ?? []).map((b) => {
+            const jr = b.id === 'jobright'
+            const hint = b.installed
+              ? jr
+                ? `${b.configured ? `Configured (${b.email})` : 'Installed — add credentials to enable it'}. Credentials live in a gitignored file; saving clears the cached session.`
+                : 'Public API — no credentials needed.'
+              : `Not installed. Install copies the bundled search CLI into ${b.path} inside your workspace (no network access needed).`
+            return (
+              <Row key={b.id} label={jr ? 'jobright.ai' : b.id} hint={hint}>
+                <div className="flex flex-col items-end gap-1.5">
+                  {b.installed && boards?.bunOk ? (
+                    <span className="chip border-green-800 text-green-300">
+                      ✓ {jr && !b.configured ? 'installed' : 'ready'}
+                    </span>
+                  ) : (
+                    <button
+                      className="btn btn-primary px-2 py-1 text-[10px]"
+                      disabled={installing !== null || b.installed}
+                      onClick={() => void install(b.id)}
+                    >
+                      {installing === b.id ? 'Installing…' : b.installed ? 'Installed' : 'Install CLI'}
+                    </button>
+                  )}
+                  {jr && b.installed && (
+                    <>
+                      <input
+                        className="input w-56"
+                        placeholder="email"
+                        value={jobrightEmail}
+                        onChange={(e) => setJobrightEmail(e.target.value)}
+                      />
+                      <input
+                        className="input w-56"
+                        type="password"
+                        placeholder="password"
+                        value={jobrightPassword}
+                        onChange={(e) => setJobrightPassword(e.target.value)}
+                      />
+                      <div className="flex gap-1.5">
+                        <button
+                          className="btn btn-primary px-2 py-1 text-[10px]"
+                          disabled={!jobrightEmail || !jobrightPassword}
+                          onClick={saveCreds}
+                        >
+                          Save
+                        </button>
+                        <button
+                          className="btn px-2 py-1 text-[10px]"
+                          disabled={testing}
+                          onClick={testBoard}
+                        >
+                          {testing ? 'Testing…' : 'Test connection'}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </Row>
+            )
+          })}
+          {!boards && (
+            <Row label="Boards" hint="Could not read board status.">
+              <span className="chip">unknown</span>
+            </Row>
+          )}
           <Row
             label="Glassdoor ratings"
             hint="Look up and cache a Glassdoor rating for every company across your tracker, intake, and scout candidates."

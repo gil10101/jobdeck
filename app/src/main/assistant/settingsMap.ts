@@ -12,7 +12,7 @@ export const SETTINGS_MAP: SettingEntry[] = [
   {
     topic: 'job boards',
     location: 'Settings → Job boards',
-    note: 'add jobright email/password; LinkedIn/freehire need no auth'
+    note: 'shows install status per board CLI with an Install button; add jobright email/password there (LinkedIn/freehire need no auth)'
   },
   {
     topic: 'max turns per run',
