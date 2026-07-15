@@ -12,7 +12,7 @@ import { exportToXlsx } from './xlsx/exportXlsx'
 import { INTAKE_IMAGES_DIR, UPLOADS_DIR, toAbs, toRel } from './paths'
 import { listLibrary, readLibraryFile } from './fsops/library'
 import { recompileDoc } from './latex/recompile'
-import { getBoardsStatus, installBoard, setJobrightCreds, testJobright } from './boards/boardsBridge'
+import { getBoardsStatus, installBoard, installBun, setJobrightCreds, testJobright } from './boards/boardsBridge'
 import { APP_DATA_DIR, REPO_ROOT } from './paths'
 import { validateProfile } from './profile/profileSchema'
 import { loadProfile, saveProfile } from './profile/profileStore'
@@ -338,6 +338,7 @@ export function registerIpc(services: Services): void {
   // ---- job-board credentials ----
   handle('boards:getStatus', () => getBoardsStatus())
   handle('boards:install', ({ board }) => installBoard(board))
+  handle('boards:installBun', () => installBun())
   handle('boards:setCreds', ({ email, password }) => {
     setJobrightCreds(email, password)
   })

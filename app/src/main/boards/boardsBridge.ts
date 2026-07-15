@@ -124,7 +124,7 @@ export function assertScoutable(): void {
   const status = getBoardsStatus()
   if (!status.bunOk) {
     throw new Error(
-      'Cannot scout: the bun runtime (runs the job-board CLIs) was not found. Install it from https://bun.sh, then retry.'
+      'Cannot scout: the bun runtime (runs the job-board CLIs) was not found. Install it from Settings → Job boards (or bun.sh), then retry.'
     )
   }
   if (status.boards.every((b) => !b.installed)) {
@@ -132,6 +132,38 @@ export function assertScoutable(): void {
       'Cannot scout: no job-board CLIs are installed in this workspace. Install them from Settings → Job boards, then retry.'
     )
   }
+}
+
+/** Run the official bun installer (bun.sh). The command is a fixed string —
+ *  no caller-controlled input reaches the shell — and the installer targets
+ *  ~/.bun, the first location resolveBun() probes. */
+export async function installBun(): Promise<{ ok: boolean; message: string; status: BoardsStatus }> {
+  const [cmd, args] =
+    process.platform === 'win32'
+      ? ['powershell', ['-NoProfile', '-Command', 'irm bun.sh/install.ps1 | iex']]
+      : ['/bin/bash', ['-c', 'curl -fsSL https://bun.sh/install | bash']]
+  try {
+    await execFileAsync(cmd, args, {
+      timeout: 180_000,
+      maxBuffer: 8 * 1024 * 1024,
+      windowsHide: true
+    })
+  } catch (err) {
+    const e = err as { stderr?: string; message?: string }
+    return {
+      ok: false,
+      message: `bun installer failed: ${(e.stderr || e.message || String(err)).slice(0, 400)}`,
+      status: getBoardsStatus()
+    }
+  }
+  const status = getBoardsStatus()
+  return status.bunOk
+    ? { ok: true, message: `bun installed at ${status.bunPath}`, status }
+    : {
+        ok: false,
+        message: 'The installer completed but bun was still not found — install manually from bun.sh.',
+        status
+      }
 }
 
 /** Write jobright credentials (gitignored file) and clear the cached session. */

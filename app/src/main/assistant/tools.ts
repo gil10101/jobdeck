@@ -3,7 +3,7 @@ import { z } from 'zod'
 import type { Store } from '../store/Store'
 import type { TrackerRepo } from '../store/trackerRepo'
 import type { RunStore } from '../agent/runStore'
-import { getBoardsStatus, installBoard } from '../boards/boardsBridge'
+import { getBoardsStatus, installBoard, installBun } from '../boards/boardsBridge'
 import { loadProfile, saveProfile } from '../profile/profileStore'
 import { validateProfile } from '../profile/profileSchema'
 import { readMemory, appendMemory } from './conversationStore'
@@ -212,8 +212,22 @@ export function buildAssistantMcp(deps: AssistantToolDeps): ReturnType<typeof cr
         ...status,
         guidance: status.bunOk
           ? 'Missing CLIs can be installed with the install_job_board tool or from Settings → Job boards; jobright additionally needs credentials saved there.'
-          : 'The bun runtime is missing, so no board CLI can run. The user must install it themselves from https://bun.sh — the app cannot do that.'
+          : 'The bun runtime is missing, so no board CLI can run. Offer to install it with the install_bun tool (runs the official bun.sh installer, needs the user to approve), or point at the Install button in Settings → Job boards.'
       })
+    }
+  )
+
+  const installBunTool = tool(
+    'install_bun',
+    "Install the bun runtime by running the official bun.sh installer (into ~/.bun). Fixes 'bun not found' board failures. Requires the user's approval.",
+    {},
+    async () => {
+      const ok = await deps.requestApproval(
+        'install_bun',
+        'Download and run the official bun installer from https://bun.sh (installs into ~/.bun in the home directory)'
+      )
+      if (!ok) return json({ denied: true })
+      return json(await installBun())
     }
   )
 
@@ -270,6 +284,7 @@ export function buildAssistantMcp(deps: AssistantToolDeps): ReturnType<typeof cr
       checkJobBoards,
       addProfileEntry,
       installJobBoard,
+      installBunTool,
       startScout,
       remember
     ]

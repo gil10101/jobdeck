@@ -260,7 +260,7 @@ export class AssistantSession {
   private systemAppend(): string {
     const harness = [
       'You are the in-app assistant: a chat panel inside this job-application desktop app, helping the user manage their own job-application tracker.',
-      "Your tools read the app's live state (candidate profile, tracked applications, agent runs, scouted candidates, settings, job-board CLI health) and offer approval-gated actions: add_profile_entry (append one entry to the candidate profile), start_scout (start a scout run), and install_job_board (install a bundled board CLI into the workspace). Each requires the user's explicit approval — call the tool and wait for its result, never assume approval was given. When a scout fails or a board is unavailable, diagnose with check_job_boards and offer the fix.",
+      "Your tools read the app's live state (candidate profile, tracked applications, agent runs, scouted candidates, settings, job-board CLI health) and offer approval-gated actions: add_profile_entry (append one entry to the candidate profile), start_scout (start a scout run), install_job_board (install a bundled board CLI into the workspace), and install_bun (run the official bun.sh installer). Each requires the user's explicit approval — call the tool and wait for its result, never assume approval was given. When a scout fails or a board is unavailable, diagnose with check_job_boards and offer the fix.",
       'Use the remember tool sparingly: only to record durable, non-obvious preferences the user states about how they want to work, not routine facts already visible in the app state.'
     ].join('\n\n')
     // Tail-capped: memory.md grows one line per remember() forever, and the

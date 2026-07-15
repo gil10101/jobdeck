@@ -56,6 +56,7 @@ export default function SettingsView(): JSX.Element {
   const [jobrightPassword, setJobrightPassword] = useState('')
   const [boards, setBoards] = useState<BoardsStatus | null>(null)
   const [installing, setInstalling] = useState<BoardId | null>(null)
+  const [bunInstalling, setBunInstalling] = useState(false)
   const [testing, setTesting] = useState(false)
   const [modelDraft, setModelDraft] = useState('')
   const [maxTurnsDraft, setMaxTurnsDraft] = useState('')
@@ -107,6 +108,19 @@ export default function SettingsView(): JSX.Element {
       toast(String(err), 'error')
     } finally {
       setInstalling(null)
+    }
+  }
+
+  const installBunNow = async (): Promise<void> => {
+    setBunInstalling(true)
+    try {
+      const res = await call('boards:installBun', undefined)
+      setBoards(res.status)
+      toast(res.message, res.ok ? 'success' : 'error')
+    } catch (err) {
+      toast(String(err), 'error')
+    } finally {
+      setBunInstalling(false)
     }
   }
 
@@ -255,9 +269,18 @@ export default function SettingsView(): JSX.Element {
             Job boards
           </div>
           {boards && !boards.bunOk && (
-            <div className="mt-2 rounded-md border border-amber-700 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-300">
-              The bun runtime (runs the board CLIs) was not found. Install it from{' '}
-              <span className="font-semibold">bun.sh</span>, then reopen Settings.
+            <div className="mt-2 flex items-center justify-between gap-3 rounded-md border border-amber-700 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-300">
+              <span>
+                The bun runtime (runs the board CLIs) was not found. Install runs the official{' '}
+                <span className="font-semibold">bun.sh</span> installer into ~/.bun.
+              </span>
+              <button
+                className="btn btn-primary shrink-0 px-2 py-1 text-[10px]"
+                disabled={bunInstalling}
+                onClick={() => void installBunNow()}
+              >
+                {bunInstalling ? 'Installing…' : 'Install bun'}
+              </button>
             </div>
           )}
           {(boards?.boards ?? []).map((b) => {

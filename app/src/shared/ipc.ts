@@ -72,6 +72,7 @@ export interface IpcInvokeContract {
   'interview:start': { req: { rowId: string }; res: RunMeta }
   'boards:getStatus': { req: void; res: BoardsStatus }
   'boards:install': { req: { board: BoardId }; res: BoardsStatus }
+  'boards:installBun': { req: void; res: { ok: boolean; message: string; status: BoardsStatus } }
   'boards:setCreds': { req: { email: string; password: string }; res: void }
   'boards:test': { req: void; res: { ok: boolean; message: string } }
   'app:info': { req: void; res: { repoRoot: string; appDataDir: string } }
@@ -183,6 +184,7 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'interview:start',
   'boards:getStatus',
   'boards:install',
+  'boards:installBun',
   'boards:setCreds',
   'boards:test',
   'app:info',

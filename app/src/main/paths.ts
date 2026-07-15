@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -132,8 +133,9 @@ export function resolveLatex(): LatexEngine | null {
 }
 
 /** Resolve the `bun` runtime (runs the job-board search CLIs): the standard
- *  per-user install, then common system locations, else the bare command so
- *  execFile falls back to PATH. Never hardcodes a specific machine/user. */
+ *  per-user install, common system locations, then a PATH lookup (catches
+ *  version-manager installs like nvm/mise), else the bare command so execFile
+ *  falls back to PATH. Never hardcodes a specific machine/user. */
 export function resolveBun(): string {
   const home = os.homedir()
   const exe = process.platform === 'win32' ? 'bun.exe' : 'bun'
@@ -145,6 +147,15 @@ export function resolveBun(): string {
   ]
   for (const c of candidates) {
     if (fs.existsSync(c)) return c
+  }
+  try {
+    const lookup = process.platform === 'win32' ? 'where' : 'which'
+    const hit = execFileSync(lookup, ['bun'], { encoding: 'utf-8', timeout: 3000 })
+      .trim()
+      .split(/\r?\n/)[0]
+    if (hit && fs.existsSync(hit)) return hit
+  } catch {
+    /* not on PATH either */
   }
   return 'bun'
 }
