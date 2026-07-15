@@ -61,6 +61,8 @@ interface ActiveRun {
   totalTokens?: number
   /** Scout runs: app-prefetched jobright feed handed to the agent as a file. */
   jobrightFeed?: { relPath: string; count: number } | null
+  /** Scout runs: why the prefetch failed (agent must skip jobright then). */
+  jobrightUnavailable?: string | null
 }
 
 type SendFn = (channel: 'push:runEvent' | 'push:runChanged', payload: unknown) => void
@@ -275,7 +277,8 @@ export class AgentRunner {
           instructions: run.input.instructions ?? '',
           excludeList: this.excludeList(),
           outputPath: path.join(SCOUT_DIR, `${run.meta.id}.candidates.json`),
-          jobrightFeed: run.jobrightFeed ?? null
+          jobrightFeed: run.jobrightFeed ?? null,
+          jobrightUnavailable: run.jobrightUnavailable ?? null
         },
         profile
       )
@@ -317,8 +320,10 @@ export class AgentRunner {
       const feed = await prefetchJobrightFeed(feedFile)
       if (feed.ok) {
         run.jobrightFeed = { relPath: toRel(feedFile), count: feed.count }
+        run.jobrightUnavailable = null
       } else {
         run.jobrightFeed = null
+        run.jobrightUnavailable = feed.message
         console.warn('[runner] jobright feed prefetch skipped:', feed.message)
       }
     }

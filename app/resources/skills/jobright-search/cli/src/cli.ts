@@ -53,6 +53,20 @@ function fail(error: string, code: string): never {
   process.exit(1)
 }
 
+// Server-side account flags (e.g. "Account Restricted" after burst traffic)
+// masquerade as auth failures; retrying or re-logging-in makes them WORSE by
+// adding abuse signal. Detect and stop hard.
+function failIfRestricted(errorMsg: unknown): void {
+  if (typeof errorMsg === "string" && /restrict|suspend|banned|abuse/i.test(errorMsg)) {
+    fail(
+      `Jobright has restricted this account server-side ("${errorMsg}"). Do NOT retry or re-login — ` +
+        "every attempt adds abuse signal. Log in to jobright.ai in a BROWSER with this account, " +
+        "complete any verification it shows, then wait a few hours before using the CLI again.",
+      "ACCOUNT_RESTRICTED",
+    )
+  }
+}
+
 // ---------- credentials + session ----------
 
 interface Creds {
@@ -135,6 +149,7 @@ async function login(creds: Creds): Promise<string> {
   }
   if (!res.ok || !body?.success) {
     const msg = body?.errorMsg || `HTTP ${res.status}`
+    failIfRestricted(msg)
     fail(`Jobright login failed: ${msg}`, "LOGIN_FAILED")
   }
   const sid = extractSessionId(setCookies)
@@ -163,6 +178,9 @@ async function authGet(
   }
   const unauth = !res.ok || json?.success === false
   if (unauth) {
+    // A restricted account also answers success=false — that is NOT a stale
+    // session, and re-logging-in would only add abuse signal.
+    failIfRestricted(json?.errorMsg)
     // session likely expired — log in fresh and retry once
     const fresh = await login(creds ?? requireCreds("expired"))
     res = await doGet(fresh)
@@ -172,6 +190,7 @@ async function authGet(
       json = null
     }
     if (!res.ok || json?.success === false) {
+      failIfRestricted(json?.errorMsg)
       fail(`Jobright request failed after re-login: ${json?.errorMsg || `HTTP ${res.status}`}`, "REQUEST_FAILED")
     }
     return { json, sessionId: fresh }

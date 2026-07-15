@@ -148,8 +148,10 @@ export interface ScoutSlots {
   instructions: string
   excludeList: string[]
   outputPath: string
-  /** App-prefetched jobright feed file; null = prefetch unavailable, fall back to careful CLI use. */
+  /** App-prefetched jobright feed file; null when unavailable (see jobrightUnavailable). */
   jobrightFeed: { relPath: string; count: number } | null
+  /** Why the prefetch failed — the agent must then skip jobright, not retry it. */
+  jobrightUnavailable: string | null
 }
 
 /** Scout prompt — the search criteria come from the profile. */
@@ -175,10 +177,8 @@ export function buildScoutPrompt(s: ScoutSlots, profile: ProfileFile | null): st
     ? `1. **jobright (primary — personalized fit scores):** the app already fetched your personalized feed for this run.
    Read \`${s.jobrightFeed.relPath}\` (${s.jobrightFeed.count} jobs, JSON: \`{ fetchedAt, results, meta }\`). Judge EVERY target role from this one file — the feed is personalized, not query-driven. Do NOT run the jobright CLI in this run.
    ${structuredNote}`
-    : `1. **jobright (primary — personalized fit scores):**
-   \`"${resolveBun()}" run ".agents/skills/jobright-search/cli/src/cli.ts" recommend --min-size 51 --maxage 14 -n 60 --format json\`
-   Run this ONCE. The feed is personalized to the candidate — it is NOT query-driven — so a single \`recommend\` covers every target role; judge each returned job against all the target roles yourself. Do NOT run one jobright command per role, do NOT use \`search -q\` to slice the feed by keyword (its term filter silently drops relevant jobs whose text phrases things differently), and NEVER run jobright commands in parallel — burst traffic gets the session revoked mid-run. If a call returns SESSION_EXPIRED, skip jobright for the rest of this run and report that re-running the scout restores the session automatically.
-   ${structuredNote}`
+    : `1. **jobright: UNAVAILABLE this run** — the app-side feed fetch failed: ${s.jobrightUnavailable ?? 'unknown reason'}.
+   Do NOT run the jobright CLI (it will fail the same way, and retries make account restrictions worse). Skip jobright entirely, cover the other boards below, and include one problems line quoting the reason above.`
   const replacements: Record<string, string> = {
     REPO_ROOT: REPO_ROOT,
     TODAY_ISO: todayISO(),
