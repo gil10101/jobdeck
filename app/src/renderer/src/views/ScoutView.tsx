@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { CandidateJob } from '@shared/types'
 import { call } from '../api'
 import { useApp, companyKey } from '../store'
-import { candidateSections } from '../lib/postingSections'
+import { candidateSections, leadingProse } from '../lib/postingSections'
 import RatingBadge from '../components/RatingBadge'
 
 function scoreColor(score: number | null): string {
@@ -164,9 +164,12 @@ function PostingPanel({
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <FitPill score={c.fitScore} />
-                <span className="truncate text-sm font-semibold text-gray-100">
-                  {c.position} <span className="text-gray-500">@</span> {c.company}
-                </span>
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold leading-snug text-gray-100">
+                    {c.position}
+                  </div>
+                  <div className="text-xs text-gray-400">{c.company}</div>
+                </div>
               </div>
               <div className="mt-2">
                 <CandidateChips c={c} />
@@ -217,6 +220,16 @@ function PostingPanel({
               </div>
             )}
 
+            {hasStructure && leadingProse(c.postingText) && (
+              <div className="mb-3">
+                <div className="text-[10px] font-bold uppercase tracking-wide text-muted">
+                  About the role
+                </div>
+                <p className="mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-gray-300">
+                  {leadingProse(c.postingText)}
+                </p>
+              </div>
+            )}
             <Section title="Skills" items={sections.skills} chips />
             <Section title="Minimum requirements" items={sections.minimum} />
             <Section title="Preferred requirements" items={sections.preferred} />

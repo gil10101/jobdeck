@@ -105,6 +105,25 @@ export function parsePostingSections(text: string): PostingSections {
   return out
 }
 
+/** Leading prose of a posting — everything before the first recognized section
+ *  heading — for an "About the role" blurb. Capped; '' when nothing usable. */
+export function leadingProse(text: string, maxChars = 600): string {
+  const lines: string[] = []
+  for (const rawLine of (text || '').split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line) {
+      if (lines.length) lines.push('')
+      continue
+    }
+    if (headingBucket(line)) break
+    lines.push(line)
+    if (lines.join(' ').length > maxChars) break
+  }
+  const prose = lines.join('\n').replace(/\n{2,}/g, '\n\n').trim()
+  if (prose.length <= maxChars) return prose
+  return `${prose.slice(0, maxChars).replace(/\s+\S*$/, '')}…`
+}
+
 /** Prefer the scout's structured extraction; fall back to text parsing. */
 export function candidateSections(c: CandidateJob): PostingSections {
   const has = (v: string[] | null | undefined): v is string[] => Array.isArray(v) && v.length > 0

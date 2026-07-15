@@ -190,8 +190,17 @@ interface JobRow {
   clearanceRequired: boolean
   summary: string
   skills: string[]
+  responsibilities: string[]
+  mustHave: string[]
+  preferred: string[]
+  education: string[]
+  benefits: string[]
   applyLink: string
   jobrightUrl: string
+}
+
+function strArr(v: any): string[] {
+  return Array.isArray(v) ? v.filter((s: any) => typeof s === "string" && s.trim()) : []
 }
 
 function normalize(item: any): JobRow {
@@ -221,6 +230,13 @@ function normalize(item: any): JobRow {
     skills: Array.isArray(j.jdCoreSkills)
       ? j.jdCoreSkills.map((s: any) => (typeof s === "string" ? s : (s?.skill ?? ""))).filter(Boolean)
       : [],
+    // The feed carries the structured JD sections too — surface them all, not
+    // just the prose summary.
+    responsibilities: strArr(j.coreResponsibilities),
+    mustHave: strArr(j.qualifications?.mustHave),
+    preferred: strArr(j.qualifications?.preferredHave),
+    education: strArr(j.educationSummaries),
+    benefits: strArr(j.benefitsSummaries),
     applyLink: j.applyLink || j.originalUrl || (j.jobId ? `https://jobright.ai/jobs/info/${j.jobId}` : ""),
     jobrightUrl: j.jobId ? `https://jobright.ai/jobs/info/${j.jobId}` : "",
   }
@@ -365,6 +381,17 @@ function printPlain(rows: JobRow[]): void {
         (flags.length ? `  Flags: ${flags.join(", ")}\n` : "") +
         (r.skills.length ? `  Core skills: ${r.skills.join(", ")}\n` : "") +
         (r.summary ? `  Summary: ${r.summary}\n` : "") +
+        (r.responsibilities.length
+          ? `  Responsibilities:\n${r.responsibilities.map((s) => `    - ${s}`).join("\n")}\n`
+          : "") +
+        (r.mustHave.length
+          ? `  Must have:\n${r.mustHave.map((s) => `    - ${s}`).join("\n")}\n`
+          : "") +
+        (r.preferred.length
+          ? `  Preferred:\n${r.preferred.map((s) => `    - ${s}`).join("\n")}\n`
+          : "") +
+        (r.education.length ? `  Education: ${r.education.join("; ")}\n` : "") +
+        (r.benefits.length ? `  Benefits: ${r.benefits.join("; ")}\n` : "") +
         `  Jobright: ${r.jobrightUrl}\n` +
         `  Apply: ${r.applyLink}\n\n`,
     )
