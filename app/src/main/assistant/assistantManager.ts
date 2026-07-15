@@ -17,7 +17,15 @@ export class AssistantManager {
 
   constructor(private deps: SessionDeps) {}
 
-  send({ conversationId, text }: { conversationId: string | null; text: string }): { conversationId: string } {
+  send({
+    conversationId,
+    text,
+    model
+  }: {
+    conversationId: string | null
+    text: string
+    model: string | null
+  }): { conversationId: string } {
     // Reject malformed ids (empty included) before a session is mapped for
     // them — the session itself would only fail later, at its first save.
     if (conversationId !== null && !/^[A-Za-z0-9_-]+$/.test(conversationId)) {
@@ -26,7 +34,7 @@ export class AssistantManager {
     const id = conversationId ?? createConversation().id
     const session = this.sessions.get(id) ?? new AssistantSession(id, this.deps)
     this.sessions.set(id, session)
-    session.send(text)
+    session.send(text, model)
     return { conversationId: id }
   }
 

@@ -2,6 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import type { AssistantApproval, AssistantMessage, RunEvent } from '@shared/types'
 import ApprovalCard from './ApprovalCard'
 
+// MCP tool names arrive as machine ids (mcp__app__list_runs); show the bare
+// action ("list runs") — the transport prefix means nothing to the user.
+function prettyToolName(tool: string): string {
+  const name = tool.startsWith('mcp__') ? (tool.split('__')[2] ?? tool) : tool
+  return name.replace(/_/g, ' ')
+}
+
 function ToolRow({
   event,
   end
@@ -22,7 +29,7 @@ function ToolRow({
             ok === null ? 'animate-pulse bg-cyan-400' : ok ? 'bg-green-500' : 'bg-red-500'
           }`}
         />
-        <span className="shrink-0 font-semibold text-gray-300">{event.tool}</span>
+        <span className="shrink-0 font-semibold text-gray-300">{prettyToolName(event.tool)}</span>
         <span className="min-w-0 flex-1 truncate text-gray-500">{event.summary}</span>
         {end && <span className="shrink-0 text-[10px] text-gray-600">{open ? '▾' : '▸'}</span>}
       </button>

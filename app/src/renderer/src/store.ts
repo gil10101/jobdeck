@@ -50,6 +50,8 @@ export interface AssistantSlice {
   status: AssistantStatus
   pendingApproval: AssistantApproval | null
   history: ConversationMeta[]
+  /** Model override for assistant replies; '' = runtime default. Applies from the next reply. */
+  model: string
 }
 
 function initialAssistantUsage(): AssistantUsage {
@@ -72,7 +74,8 @@ function initialAssistantSlice(): AssistantSlice {
     usage: initialAssistantUsage(),
     status: 'idle',
     pendingApproval: null,
-    history: []
+    history: [],
+    model: ''
   }
 }
 
@@ -102,6 +105,7 @@ interface AppState {
   toast: (text: string, kind?: Toast['kind']) => void
   dismissToast: (id: number) => void
   toggleAssistant: (open?: boolean) => void
+  setAssistantModel: (model: string) => void
   sendAssistant: (text: string) => Promise<void>
   stopAssistant: () => void
   approveAssistant: (decision: 'allow' | 'deny') => void
@@ -223,6 +227,8 @@ export const useApp = create<AppState>((set, get) => ({
   toggleAssistant: (open) =>
     set((s) => ({ assistant: { ...s.assistant, open: open ?? !s.assistant.open } })),
 
+  setAssistantModel: (model) => set((s) => ({ assistant: { ...s.assistant, model } })),
+
   sendAssistant: async (text) => {
     try {
       // Main starts pushing for this send (user echo, 'thinking') before the
@@ -234,7 +240,7 @@ export const useApp = create<AppState>((set, get) => ({
         conversationId = (await call('assistant:newConversation', undefined)).conversationId
         set((s) => ({ assistant: { ...s.assistant, conversationId } }))
       }
-      await call('assistant:send', { conversationId, text })
+      await call('assistant:send', { conversationId, text, model: get().assistant.model || null })
     } catch (err) {
       get().toast(`Failed to send message: ${String(err)}`, 'error')
     }

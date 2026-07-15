@@ -1,12 +1,17 @@
 import { useState } from 'react'
 import type { AssistantStatus } from '@shared/types'
+import { modelOptionsWith } from '../../lib/models'
 
 export default function Composer({
   status,
+  model,
+  onModelChange,
   onSend,
   onStop
 }: {
   status: AssistantStatus
+  model: string
+  onModelChange: (model: string) => void
   onSend: (text: string) => void
   onStop: () => void
 }): JSX.Element {
@@ -37,7 +42,21 @@ export default function Composer({
           }
         }}
       />
-      <div className="mt-1.5 flex justify-end gap-2">
+      <div className="mt-1.5 flex items-center gap-2">
+        <select
+          className="input h-6 w-auto px-1.5 py-0 text-[10px] text-gray-400"
+          value={model}
+          onChange={(e) => onModelChange(e.target.value)}
+          aria-label="Model"
+          title="Model for assistant replies (applies from the next reply)"
+        >
+          {modelOptionsWith(model).map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        <div className="flex-1" />
         {status !== 'idle' && (
           <button className="btn btn-danger" onClick={onStop}>
             Stop

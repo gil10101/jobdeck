@@ -12,7 +12,9 @@ export default function AssistantPanel(): JSX.Element {
   const status = useApp((s) => s.assistant.status)
   const pendingApproval = useApp((s) => s.assistant.pendingApproval)
   const history = useApp((s) => s.assistant.history)
+  const model = useApp((s) => s.assistant.model)
   const toggleAssistant = useApp((s) => s.toggleAssistant)
+  const setAssistantModel = useApp((s) => s.setAssistantModel)
   const sendAssistant = useApp((s) => s.sendAssistant)
   const stopAssistant = useApp((s) => s.stopAssistant)
   const approveAssistant = useApp((s) => s.approveAssistant)
@@ -28,6 +30,9 @@ export default function AssistantPanel(): JSX.Element {
   // conversation file behind.
   const title = history.find((h) => h.id === conversationId)?.title ?? 'Assistant'
 
+  const iconBtn =
+    'flex h-7 w-7 items-center justify-center rounded-md text-sm text-gray-400 transition-colors hover:bg-panel2 hover:text-gray-200'
+
   return (
     <div className="flex h-full w-full flex-col">
       <div className="flex items-center gap-2 border-b border-edge px-3 py-2">
@@ -37,7 +42,7 @@ export default function AssistantPanel(): JSX.Element {
         <TokenDonut usage={usage} />
         <div className="relative">
           <button
-            className="btn px-1.5 py-1"
+            className={iconBtn}
             onClick={() => {
               const next = !historyOpen
               setHistoryOpen(next)
@@ -47,7 +52,20 @@ export default function AssistantPanel(): JSX.Element {
             aria-label="Conversation history"
             title="Conversation history"
           >
-            ▾
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 7v5l3 3" />
+            </svg>
           </button>
           {historyOpen && (
             <div className="absolute right-0 top-full z-50 mt-1 max-h-72 w-56 overflow-auto rounded-md border border-edge bg-panel2 shadow-xl">
@@ -85,20 +103,42 @@ export default function AssistantPanel(): JSX.Element {
           )}
         </div>
         <button
-          className="btn px-1.5 py-1"
+          className={iconBtn}
           onClick={() => void newAssistantChat()}
           aria-label="New chat"
           title="New chat"
         >
-          +
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            aria-hidden="true"
+          >
+            <path d="M12 5v14M5 12h14" />
+          </svg>
         </button>
         <button
-          className="btn px-1.5 py-1"
+          className={iconBtn}
           onClick={() => toggleAssistant(false)}
           aria-label="Close assistant"
           title="Close assistant"
         >
-          ✕
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            aria-hidden="true"
+          >
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
         </button>
       </div>
       <MessageList
@@ -107,7 +147,13 @@ export default function AssistantPanel(): JSX.Element {
         pendingApproval={pendingApproval}
         onDecide={approveAssistant}
       />
-      <Composer status={status} onSend={(text) => void sendAssistant(text)} onStop={stopAssistant} />
+      <Composer
+        status={status}
+        model={model}
+        onModelChange={setAssistantModel}
+        onSend={(text) => void sendAssistant(text)}
+        onStop={stopAssistant}
+      />
     </div>
   )
 }

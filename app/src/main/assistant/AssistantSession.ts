@@ -92,8 +92,13 @@ export class AssistantSession {
     }
   }
 
+  // Model requested by the renderer's picker; falls back to the app-wide
+  // setting. Applied at run start — a change lands with the next run.
+  private requestedModel: string | null = null
+
   /** Enqueue a user turn; starts a run when none is active (including reviving after stop()). */
-  send(text: string): void {
+  send(text: string, model: string | null = null): void {
+    this.requestedModel = model
     const userMessage: AssistantMessage = {
       id: randomUUID().slice(0, 8),
       role: 'user',
@@ -197,7 +202,7 @@ export class AssistantSession {
         startScout: this.deps.startScout,
         requestApproval: (tool, preview) => this.requestApproval(tool, preview)
       })
-      const model = this.deps.store.state.settings.model
+      const model = this.requestedModel || this.deps.store.state.settings.model
       const q = query({
         prompt: this.inputStream(gen),
         options: {

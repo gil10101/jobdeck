@@ -116,7 +116,10 @@ export interface IpcInvokeContract {
   'companies:get': { req: void; res: Record<string, CompanyInfo> }
   'companies:ensure': { req: { company: string }; res: CompanyInfo | null }
   'companies:backfill': { req: void; res: { fetched: number } }
-  'assistant:send': { req: { conversationId: string | null; text: string }; res: { conversationId: string } }
+  'assistant:send': {
+    req: { conversationId: string | null; text: string; model: string | null }
+    res: { conversationId: string }
+  }
   'assistant:stop': { req: { conversationId: string }; res: void }
   'assistant:approve': { req: { approvalId: string; decision: 'allow' | 'deny' }; res: void }
   'assistant:newConversation': { req: void; res: { conversationId: string } }

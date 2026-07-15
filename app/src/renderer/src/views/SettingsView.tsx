@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { AppSettings } from '@shared/types'
 import { call } from '../api'
+import { modelOptionsWith } from '../lib/models'
 import { useApp } from '../store'
 import ProfilePanel from './settings/ProfilePanel'
 
@@ -157,15 +158,22 @@ export default function SettingsView(): JSX.Element {
           </div>
           <Row
             label="Model override"
-            hint="Blank = your Claude Code default. Accepts model aliases (e.g. sonnet, opus) or full model IDs."
+            hint="Model used by agent runs. Default = your Claude Code default."
           >
-            <input
+            <select
               className="input w-44"
-              placeholder="(default)"
               value={modelDraft}
-              onChange={(e) => setModelDraft(e.target.value)}
-              onBlur={() => patch({ model: modelDraft.trim() || undefined })}
-            />
+              onChange={(e) => {
+                setModelDraft(e.target.value)
+                patch({ model: e.target.value || undefined })
+              }}
+            >
+              {modelOptionsWith(modelDraft).map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
           </Row>
           <Row label="Max turns per run" hint="Safety ceiling before a run is stopped.">
             <input
