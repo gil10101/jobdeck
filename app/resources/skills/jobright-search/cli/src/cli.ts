@@ -21,7 +21,7 @@
 // app) can run it with env credentials and then invoke every other command
 // credential-free.
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs"
+import { readFileSync, writeFileSync, existsSync, rmSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
 
@@ -30,10 +30,15 @@ const SKILL_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 const CREDS_PATH = join(SKILL_ROOT, "credentials.json")
 const SESSION_PATH = join(SKILL_ROOT, ".session.json")
 const FEED_CACHE_PATH = join(SKILL_ROOT, ".feed-cache.json")
+const FEED_LOCK_PATH = join(SKILL_ROOT, ".feed-cache.lock")
 // Repeated invocations (e.g. an agent checking several role angles) must not
 // re-hammer the API — burst traffic gets the session revoked. The feed barely
-// changes minute-to-minute, so a short-lived local cache absorbs the repeats.
+// changes minute-to-minute, so a short-lived local cache absorbs the repeats,
+// and a cold-start lock makes PARALLEL invocations wait for the first fetch
+// instead of each hitting the API.
 const FEED_CACHE_TTL_MS = 10 * 60 * 1000
+const FEED_LOCK_STALE_MS = 120 * 1000
+const FEED_LOCK_WAIT_MS = 90 * 1000
 
 const BROWSER_HEADERS: Record<string, string> = {
   Origin: "https://jobright.ai",
@@ -288,9 +293,59 @@ function saveFeedCache(sort: number, rows: JobRow[]): void {
   }
 }
 
+// Take the cold-start lock, or — when another process already holds a fresh
+// one — wait for its cache to appear so only ONE process ever fetches.
+async function acquireFeedLockOrWait(opts: FeedOpts): Promise<JobRow[] | null> {
+  try {
+    const heldSince = new Date(readFileSync(FEED_LOCK_PATH, "utf-8")).getTime()
+    if (Date.now() - heldSince < FEED_LOCK_STALE_MS) {
+      const deadline = Date.now() + FEED_LOCK_WAIT_MS
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 1000))
+        const rows = loadFeedCache(opts)
+        if (rows) return rows
+        try {
+          if (Date.now() - new Date(readFileSync(FEED_LOCK_PATH, "utf-8")).getTime() >= FEED_LOCK_STALE_MS) break
+        } catch {
+          break // lock released without a usable cache — fetch ourselves
+        }
+      }
+    }
+  } catch {
+    /* no lock */
+  }
+  try {
+    writeFileSync(FEED_LOCK_PATH, new Date().toISOString())
+    // fail() exits the process, skipping finally blocks — release on exit so
+    // an auth failure can't strand the lock for other waiting processes.
+    process.on("exit", releaseFeedLock)
+  } catch {
+    /* lock is best-effort */
+  }
+  return null
+}
+
+function releaseFeedLock(): void {
+  try {
+    rmSync(FEED_LOCK_PATH, { force: true })
+  } catch {
+    /* ignore */
+  }
+}
+
 async function fetchFeed(opts: FeedOpts): Promise<JobRow[]> {
   const cached = loadFeedCache(opts)
   if (cached) return cached
+  const cachedWhileWaiting = await acquireFeedLockOrWait(opts)
+  if (cachedWhileWaiting) return cachedWhileWaiting
+  try {
+    return await fetchFeedFromApi(opts)
+  } finally {
+    releaseFeedLock()
+  }
+}
+
+async function fetchFeedFromApi(opts: FeedOpts): Promise<JobRow[]> {
   // Session-first: credentials are touched only when there is no cached
   // session (or authGet later finds it expired).
   const creds = tryLoadCreds()
