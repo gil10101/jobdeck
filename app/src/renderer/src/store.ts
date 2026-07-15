@@ -223,10 +223,17 @@ export const useApp = create<AppState>((set, get) => ({
     set((s) => ({ assistant: { ...s.assistant, open: open ?? !s.assistant.open } })),
 
   sendAssistant: async (text) => {
-    const { conversationId: current } = get().assistant
     try {
-      const { conversationId } = await call('assistant:send', { conversationId: current, text })
-      set((s) => ({ assistant: { ...s.assistant, conversationId } }))
+      // Main starts pushing for this send (user echo, 'thinking') before the
+      // send invoke resolves, and every push handler drops payloads whose
+      // conversationId doesn't match — so the id must be known BEFORE the
+      // first send, never learned from its response.
+      let conversationId = get().assistant.conversationId
+      if (!conversationId) {
+        conversationId = (await call('assistant:newConversation', undefined)).conversationId
+        set((s) => ({ assistant: { ...s.assistant, conversationId } }))
+      }
+      await call('assistant:send', { conversationId, text })
     } catch (err) {
       get().toast(`Failed to send message: ${String(err)}`, 'error')
     }
@@ -235,6 +242,9 @@ export const useApp = create<AppState>((set, get) => ({
   stopAssistant: () => {
     const { conversationId } = get().assistant
     if (!conversationId) return
+    // Main denies pending approvals on stop without pushing a clearing event —
+    // drop ours locally so a stale card can't block the composer.
+    set((s) => ({ assistant: { ...s.assistant, pendingApproval: null } }))
     call('assistant:stop', { conversationId }).catch((err) => {
       get().toast(`Failed to stop assistant: ${String(err)}`, 'error')
     })
@@ -250,6 +260,9 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   newAssistantChat: async () => {
+    // A pending approval belongs to the conversation being left — deny it so
+    // its run isn't parked forever on an answer that can no longer arrive.
+    if (get().assistant.pendingApproval) get().approveAssistant('deny')
     try {
       const { conversationId } = await call('assistant:newConversation', undefined)
       set((s) => ({
@@ -269,6 +282,9 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   openAssistantChat: async (id) => {
+    // Same as newAssistantChat: never strand the outgoing conversation's run
+    // behind an unanswerable approval.
+    if (get().assistant.pendingApproval) get().approveAssistant('deny')
     try {
       const conversation = await call('assistant:getConversation', { id })
       if (!conversation) {
@@ -334,7 +350,15 @@ onPush('push:assistantUsage', ({ conversationId, ...usage }) => {
 
 onPush('push:assistantState', ({ conversationId, status }) => {
   if (conversationId !== useApp.getState().assistant.conversationId) return
-  useApp.setState((s) => ({ assistant: { ...s.assistant, status } }))
+  useApp.setState((s) => ({
+    assistant: {
+      ...s.assistant,
+      status,
+      // A run exit (error included) denies its approvals main-side without a
+      // clearing push — idle therefore implies no live approval.
+      pendingApproval: status === 'idle' ? null : s.assistant.pendingApproval
+    }
+  }))
 })
 
 onPush('push:assistantApproval', (approval) => {
