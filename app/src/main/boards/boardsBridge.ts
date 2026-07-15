@@ -187,6 +187,9 @@ export function setJobrightCreds(email: string, password: string): void {
   } catch {
     /* ignore */
   }
+  // The feed cache belongs to the previous account — switching accounts must
+  // never serve its personalized feed to the new one.
+  fs.rmSync(path.join(workspaceSkillDir('jobright'), '.feed-cache.json'), { force: true })
 }
 
 /** Fetch the personalized jobright feed app-side and write it to `outFile`
