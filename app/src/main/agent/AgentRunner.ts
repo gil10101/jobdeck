@@ -14,6 +14,7 @@ import {
   uniqueSlug
 } from '../paths'
 import { assertScoutable } from '../boards/boardsBridge'
+import { jobrightEnv } from '../boards/credStore'
 import { parseReport, validateReport } from '../parsers/report'
 import { validateProfile } from '../profile/profileSchema'
 import { loadProfile } from '../profile/profileStore'
@@ -328,7 +329,13 @@ export class AgentRunner {
           abortController: run.controller,
           includePartialMessages: settings.includePartialMessages,
           stderr: (data: string) => this.runStore.appendStderr(run.meta.id, data),
-          env: { ...process.env } as Record<string, string>,
+          // Scout runs get board credentials as env vars (decrypted from the
+          // OS-keychain store) so no plaintext credentials file has to exist
+          // in the workspace for the CLIs the agent invokes.
+          env: {
+            ...process.env,
+            ...(run.meta.kind === 'scout' ? jobrightEnv() : {})
+          } as Record<string, string>,
           ...(settings.model ? { model: settings.model } : {})
         }
       })

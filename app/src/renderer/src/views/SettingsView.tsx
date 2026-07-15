@@ -287,7 +287,7 @@ export default function SettingsView(): JSX.Element {
             const jr = b.id === 'jobright'
             const hint = b.installed
               ? jr
-                ? `${b.configured ? `Configured (${b.email})` : 'Installed — add credentials to enable it'}. Credentials live in a gitignored file; saving clears the cached session.`
+                ? `${b.configured ? `Configured (${b.email})` : 'Installed — add credentials to enable it'}. The password is encrypted with your OS keychain and stored in app data, never in the workspace; saving clears the cached session.`
                 : 'Public API — no credentials needed.'
               : `Not installed. Install copies the bundled search CLI into ${b.path} inside your workspace (no network access needed).`
             return (

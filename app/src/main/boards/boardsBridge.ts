@@ -4,6 +4,7 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import type { BoardId, BoardsStatus } from '@shared/types'
 import { APP_DIR, REPO_ROOT, resolveBun } from '../paths'
+import { jobrightCredEmail, jobrightEnv, setJobrightCred } from './credStore'
 
 const execFileAsync = promisify(execFile)
 
@@ -32,7 +33,7 @@ function cliEntrypoint(board: BoardId, root: string = REPO_ROOT): string {
 
 // REPO_ROOT is a live binding set by initWorkspace(), so these paths are
 // computed per call rather than cached at module load.
-function credsFile(): string {
+function legacyCredsFile(): string {
   return path.join(workspaceSkillDir('jobright'), 'credentials.json')
 }
 
@@ -40,17 +41,24 @@ function sessionFile(): string {
   return path.join(workspaceSkillDir('jobright'), '.session.json')
 }
 
-function jobrightCreds(): { configured: boolean; email: string | null } {
+/** One-way migration: a plaintext credentials.json left in the workspace by an
+ *  older version is absorbed into the encrypted store and deleted. */
+function migrateLegacyCreds(): void {
   try {
-    const file = credsFile()
-    if (fs.existsSync(file)) {
-      const creds = JSON.parse(fs.readFileSync(file, 'utf-8')) as { email?: string }
-      return { configured: !!creds.email, email: creds.email ?? null }
-    }
+    const file = legacyCredsFile()
+    if (!fs.existsSync(file)) return
+    const creds = JSON.parse(fs.readFileSync(file, 'utf-8')) as { email?: string; password?: string }
+    if (creds.email && creds.password) setJobrightCred(creds.email, creds.password)
+    fs.rmSync(file, { force: true })
   } catch {
-    /* fall through */
+    /* leave the file for manual cleanup rather than losing it */
   }
-  return { configured: false, email: null }
+}
+
+function jobrightCreds(): { configured: boolean; email: string | null } {
+  migrateLegacyCreds()
+  const email = jobrightCredEmail()
+  return { configured: !!email, email }
 }
 
 export function getBoardsStatus(): BoardsStatus {
@@ -166,11 +174,13 @@ export async function installBun(): Promise<{ ok: boolean; message: string; stat
       }
 }
 
-/** Write jobright credentials (gitignored file) and clear the cached session. */
+/** Store jobright credentials (encrypted, app-data) and clear the cached session. */
 export function setJobrightCreds(email: string, password: string): void {
   if (!email.trim() || !password) throw new Error('email and password are required')
-  fs.mkdirSync(workspaceSkillDir('jobright'), { recursive: true })
-  fs.writeFileSync(credsFile(), JSON.stringify({ email: email.trim(), password }, null, 2), 'utf-8')
+  setJobrightCred(email, password)
+  // A plaintext file from an older version must not linger once the encrypted
+  // store is authoritative.
+  fs.rmSync(legacyCredsFile(), { force: true })
   try {
     fs.unlinkSync(sessionFile()) // force fresh login with the new creds
   } catch {
@@ -187,7 +197,15 @@ export async function testJobright(): Promise<{ ok: boolean; message: string }> 
     const { stdout } = await execFileAsync(
       bun,
       ['run', cli, 'recommend', '-n', '1', '--format', 'json'],
-      { cwd: REPO_ROOT, timeout: 45_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true }
+      {
+        cwd: REPO_ROOT,
+        timeout: 45_000,
+        maxBuffer: 4 * 1024 * 1024,
+        windowsHide: true,
+        // Credentials travel as env vars for this one process, decrypted here;
+        // the CLI checks env before any credentials file.
+        env: { ...process.env, ...jobrightEnv() }
+      }
     )
     const parsed = JSON.parse(stdout) as { results?: unknown[]; meta?: { fetched?: number } }
     const n = parsed.results?.length ?? 0
