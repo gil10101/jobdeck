@@ -123,6 +123,13 @@ export interface IpcInvokeContract {
   'assistant:listConversations': { req: void; res: ConversationMeta[] }
   'assistant:getConversation': { req: { id: string }; res: AssistantConversation | null }
   'assistant:deleteConversation': { req: { id: string }; res: void }
+  // Live session state for a conversation being (re)opened — pushes only fire on
+  // transitions, so an approval/status raised while another conversation was on
+  // screen is re-fetched here instead of being lost.
+  'assistant:resync': {
+    req: { conversationId: string }
+    res: { status: AssistantStatus; pendingApproval: AssistantApproval | null }
+  }
 }
 
 export type IpcChannel = keyof IpcInvokeContract
@@ -200,7 +207,8 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'assistant:newConversation',
   'assistant:listConversations',
   'assistant:getConversation',
-  'assistant:deleteConversation'
+  'assistant:deleteConversation',
+  'assistant:resync'
 ]
 
 export const PUSH_CHANNELS: IpcPushChannel[] = [

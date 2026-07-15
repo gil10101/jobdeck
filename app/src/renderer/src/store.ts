@@ -107,6 +107,7 @@ interface AppState {
   approveAssistant: (decision: 'allow' | 'deny') => void
   newAssistantChat: () => Promise<void>
   openAssistantChat: (id: string) => Promise<void>
+  deleteAssistantChat: (id: string) => Promise<void>
   refreshAssistantHistory: () => Promise<void>
 }
 
@@ -302,8 +303,48 @@ export const useApp = create<AppState>((set, get) => ({
           status: 'idle'
         }
       }))
+      // Pushes only fire on transitions, so anything raised while this
+      // conversation was off-screen (a parked approval, a still-running turn)
+      // has to be re-fetched — the disk snapshot above knows nothing of it.
+      const live = await call('assistant:resync', { conversationId: id })
+      set((s) =>
+        s.assistant.conversationId === id
+          ? {
+              assistant: {
+                ...s.assistant,
+                status: live.status,
+                pendingApproval: live.pendingApproval
+              }
+            }
+          : s
+      )
     } catch (err) {
       get().toast(`Failed to open conversation: ${String(err)}`, 'error')
+    }
+  },
+
+  deleteAssistantChat: async (id) => {
+    try {
+      await call('assistant:deleteConversation', { id })
+      set((s) => ({
+        assistant: {
+          ...s.assistant,
+          history: s.assistant.history.filter((h) => h.id !== id),
+          // Deleting the open conversation leaves a fresh, un-persisted chat.
+          ...(s.assistant.conversationId === id
+            ? {
+                conversationId: null,
+                messages: [],
+                streaming: null,
+                usage: initialAssistantUsage(),
+                status: 'idle' as const,
+                pendingApproval: null
+              }
+            : {})
+        }
+      }))
+    } catch (err) {
+      get().toast(`Failed to delete conversation: ${String(err)}`, 'error')
     }
   },
 

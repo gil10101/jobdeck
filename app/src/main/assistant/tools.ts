@@ -10,10 +10,11 @@ import { findSetting } from './settingsMap'
 import type { ExperienceEntry, ProjectEntry, SkillCategory } from '@shared/profile'
 import { emptyProfile } from '@shared/profile'
 
-// In-process MCP server exposing the app's state to the assistant agent.
-// READ tools (get_profile, list_applications, …) run freely. Of the ACTION
-// tools, add_profile_entry and start_scout gate through `requestApproval`;
-// `remember` appends to long-term memory without approval by design.
+// In-process MCP server ("app" namespace) exposing the app's state to the
+// assistant agent. READ tools (get_profile, list_applications, …) run freely.
+// Of the ACTION tools, add_profile_entry and start_scout gate through
+// `requestApproval`; `remember` appends to long-term memory without approval
+// by design.
 
 export interface AssistantToolDeps {
   store: Store
@@ -224,7 +225,7 @@ export function buildAssistantMcp(deps: AssistantToolDeps): ReturnType<typeof cr
   )
 
   return createSdkMcpServer({
-    name: 'deck',
+    name: 'app',
     version: '1.0.0',
     tools: [
       getProfile,

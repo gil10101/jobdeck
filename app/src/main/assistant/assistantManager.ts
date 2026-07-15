@@ -1,11 +1,10 @@
-import type { AssistantConversation, ConversationMeta } from '@shared/types'
+import type { AssistantApproval, AssistantConversation, AssistantStatus, ConversationMeta } from '@shared/types'
 import { AssistantSession, type SessionDeps } from './AssistantSession'
 import {
   deleteConversation,
   listConversations,
   loadConversation,
-  newConversation as createConversation,
-  saveConversation
+  newConversation as createConversation
 } from './conversationStore'
 
 // Owns every AssistantSession for the app's lifetime, keyed by conversationId.
@@ -19,12 +18,12 @@ export class AssistantManager {
   constructor(private deps: SessionDeps) {}
 
   send({ conversationId, text }: { conversationId: string | null; text: string }): { conversationId: string } {
-    let id = conversationId
-    if (!id) {
-      const c = createConversation()
-      saveConversation(c)
-      id = c.id
+    // Reject malformed ids before a session is mapped for them — the session
+    // itself would only fail later, at its first save.
+    if (conversationId && !/^[A-Za-z0-9_-]+$/.test(conversationId)) {
+      throw new Error(`invalid conversation id: ${conversationId}`)
     }
+    const id = conversationId ?? createConversation().id
     const session = this.sessions.get(id) ?? new AssistantSession(id, this.deps)
     this.sessions.set(id, session)
     session.send(text)
@@ -40,10 +39,10 @@ export class AssistantManager {
     for (const session of this.sessions.values()) session.resolveApproval(approvalId, decision)
   }
 
+  /** Mints an id only — nothing is persisted until the first message, so an
+   *  abandoned "new chat" never leaves an empty conversation file behind. */
   newConversation(): { conversationId: string } {
-    const c = createConversation()
-    saveConversation(c)
-    return { conversationId: c.id }
+    return { conversationId: createConversation().id }
   }
 
   list(): ConversationMeta[] {
@@ -52,6 +51,16 @@ export class AssistantManager {
 
   get(id: string): AssistantConversation | null {
     return loadConversation(id)
+  }
+
+  /** Live status + parked approval for a conversation being (re)opened; pushes
+   *  only fire on transitions, so this is the renderer's catch-up path. */
+  resync({ conversationId }: { conversationId: string }): {
+    status: AssistantStatus
+    pendingApproval: AssistantApproval | null
+  } {
+    const session = this.sessions.get(conversationId)
+    return session ? session.liveState() : { status: 'idle', pendingApproval: null }
   }
 
   del(id: string): void {

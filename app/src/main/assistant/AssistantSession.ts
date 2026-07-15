@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { PermissionResult, SDKMessage, SDKResultMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
-import type { AssistantConversation, AssistantMessage, AssistantStatus } from '@shared/types'
+import type { AssistantApproval, AssistantConversation, AssistantMessage, AssistantStatus } from '@shared/types'
 import { mapMessage, stamp, type PartialRunEvent } from '../agent/eventMap'
 import type { RunStore } from '../agent/runStore'
 import { REPO_ROOT } from '../paths'
@@ -32,6 +32,10 @@ export interface SessionDeps {
 }
 
 interface PendingApproval {
+  // The pushed payload is kept so a conversation opened after the push was
+  // dropped (renderer guards pushes by the on-screen conversation) can have
+  // its approval re-delivered via resync.
+  info: AssistantApproval
   resolve: (allowed: boolean) => void
 }
 
@@ -134,6 +138,15 @@ export class AssistantSession {
     this.setState('thinking')
   }
 
+  /** Current status + any parked approval, for a renderer (re)opening this conversation. */
+  liveState(): { status: AssistantStatus; pendingApproval: AssistantApproval | null } {
+    const first = this.approvals.values().next()
+    return {
+      status: this.lastStatus,
+      pendingApproval: first.done ? null : first.value.info
+    }
+  }
+
   private wakeInput(): void {
     this.wake?.()
     this.wake = null
@@ -188,12 +201,16 @@ export class AssistantSession {
           systemPrompt: { type: 'preset', preset: 'claude_code', append: this.systemAppend() },
           settingSources: [],
           permissionMode: 'default',
-          mcpServers: { deck: mcp },
+          mcpServers: { app: mcp },
           canUseTool: (name, input, { signal }) => this.canUse(name, input, signal),
           abortController: controller,
           includePartialMessages: true,
           env: { ...process.env } as Record<string, string>,
-          ...(model ? { model } : {})
+          ...(model ? { model } : {}),
+          // Revived runs (after stop(), a died query, or an app restart) resume
+          // the SDK session so the model keeps the conversation's prior context;
+          // without this the UI shows one seamless thread the model can't see.
+          ...(this.conversation.sdkSessionId ? { resume: this.conversation.sdkSessionId } : {})
         }
       })
       this.setState('thinking')
@@ -210,6 +227,10 @@ export class AssistantSession {
         if (!controller.signal.aborted) {
           console.error('[assistant] session query failed:', err)
           this.emit({ kind: 'result', ok: false, errorText: String(err) })
+          // The failure may be an unresumable session (transcript pruned or
+          // corrupt); drop the id so the next run can start fresh instead of
+          // failing the same way forever. A fresh id is captured on success.
+          this.conversation.sdkSessionId = undefined
         }
         this.closeTurn()
       } else if (!controller.signal.aborted) {
@@ -230,16 +251,29 @@ export class AssistantSession {
   private systemAppend(): string {
     const harness = [
       'You are the in-app assistant: a chat panel inside this job-application desktop app, helping the user manage their own job-application tracker.',
-      'You have "deck" tools to read the app\'s live state (candidate profile, tracked applications, agent runs, scouted candidates, settings) and two approval-gated actions: add_profile_entry (append one entry to the candidate profile) and start_scout (start a scout run). Both require the user\'s explicit approval — call the tool and wait for its result, never assume approval was given.',
+      "Your tools read the app's live state (candidate profile, tracked applications, agent runs, scouted candidates, settings) and offer two approval-gated actions: add_profile_entry (append one entry to the candidate profile) and start_scout (start a scout run). Both require the user's explicit approval — call the tool and wait for its result, never assume approval was given.",
       'Use the remember tool sparingly: only to record durable, non-obvious preferences the user states about how they want to work, not routine facts already visible in the app state.'
     ].join('\n\n')
-    const memory = readMemory().trim()
+    // Tail-capped: memory.md grows one line per remember() forever, and the
+    // whole excerpt rides along in every system prompt.
+    const memory = readMemory().trim().slice(-4000)
     return memory ? `${harness}\n\nWhat you remember about this user:\n${memory}` : harness
   }
 
   private onMessage(msg: SDKMessage): void {
     // A turn starting after a previous result pushed 'idle' must show as live again.
     if (this.lastStatus === 'idle') this.setState('thinking')
+    if ('session_id' in msg && msg.session_id) this.conversation.sdkSessionId = msg.session_id
+    // Context size comes from per-step assistant-message usage — the result
+    // message's usage is cumulative across the whole query() and would inflate
+    // by roughly a full context per tool round-trip.
+    if (msg.type === 'assistant' && msg.message.usage) {
+      const u = msg.message.usage
+      this.conversation.usage.contextTokens =
+        (u.input_tokens ?? 0) +
+        (u.cache_read_input_tokens ?? 0) +
+        (u.cache_creation_input_tokens ?? 0)
+    }
     const mapped = mapMessage(msg)
     if (mapped.textDelta) {
       this.textBuffer += mapped.textDelta
@@ -278,8 +312,6 @@ export class AssistantSession {
     usage.inputTokens = this.usageBase.inputTokens + inputTokens
     usage.outputTokens = this.usageBase.outputTokens + (rawMsg.usage.output_tokens ?? 0)
     usage.cacheTokens = this.usageBase.cacheTokens + cacheTokens
-    // Context size: the latest result's input+cache footprint (assigned, never summed).
-    usage.contextTokens = inputTokens + cacheTokens
     usage.costUsd = this.usageBase.costUsd + (rawMsg.total_cost_usd ?? 0)
     // A result can report several models (e.g. a background small model); the
     // conversation's window is the largest one. Keep the prior value when absent.
@@ -348,28 +380,28 @@ export class AssistantSession {
     this.deps.send('push:assistantState', { conversationId: this.conversationId, status })
   }
 
-  /** Read tools + the two action tools all live under mcp__deck__* — everything else (Bash, Write, …) is denied. */
+  /** Read tools + the two action tools all live under mcp__app__* — everything else (Bash, Write, …) is denied. */
   private async canUse(
     name: string,
     _input: Record<string, unknown>,
     _signal: AbortSignal
   ): Promise<PermissionResult> {
-    if (name.startsWith('mcp__deck__')) return { behavior: 'allow' }
+    if (name.startsWith('mcp__app__')) return { behavior: 'allow' }
     return { behavior: 'deny', message: `tool not allowed in the assistant session: ${name}` }
   }
 
   /** Bridges an action tool's call into a renderer approval round-trip; resolved by resolveApproval(). */
   private requestApproval(tool: string, preview: string): Promise<boolean> {
-    const approvalId = randomUUID().slice(0, 8)
+    const info: AssistantApproval = {
+      approvalId: randomUUID().slice(0, 8),
+      conversationId: this.conversationId,
+      tool,
+      preview
+    }
     return new Promise<boolean>((resolve) => {
-      this.approvals.set(approvalId, { resolve })
+      this.approvals.set(info.approvalId, { info, resolve })
       this.setState('awaiting-approval')
-      this.deps.send('push:assistantApproval', {
-        approvalId,
-        conversationId: this.conversationId,
-        tool,
-        preview
-      })
+      this.deps.send('push:assistantApproval', info)
     })
   }
 }

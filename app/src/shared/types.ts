@@ -182,6 +182,9 @@ export interface AssistantConversation extends ConversationMeta {
   createdAt: string
   messages: AssistantMessage[]
   usage: AssistantUsage
+  // Claude Agent SDK session id — lets a later run resume with the model's
+  // full prior context instead of starting from a blank context window.
+  sdkSessionId?: string
 }
 
 export interface AssistantApproval {

@@ -404,4 +404,5 @@ export function registerIpc(services: Services): void {
   handle('assistant:listConversations', () => assistant.list())
   handle('assistant:getConversation', ({ id }) => assistant.get(id))
   handle('assistant:deleteConversation', ({ id }) => assistant.del(id))
+  handle('assistant:resync', (req) => assistant.resync(req))
 }
