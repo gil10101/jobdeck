@@ -148,6 +148,8 @@ export interface ScoutSlots {
   instructions: string
   excludeList: string[]
   outputPath: string
+  /** App-prefetched jobright feed file; null = prefetch unavailable, fall back to careful CLI use. */
+  jobrightFeed: { relPath: string; count: number } | null
 }
 
 /** Scout prompt — the search criteria come from the profile. */
@@ -167,6 +169,16 @@ export function buildScoutPrompt(s: ScoutSlots, profile: ProfileFile | null): st
         ? profile.searchConfig.targetRoles.map((r) => `"${r.title}"`).join(', ')
         : 'the target roles listed in the criteria above'
   const availability = boardsAvailabilityNote()
+  const structuredNote =
+    'Each jobright row already includes the structured JD: `responsibilities`, `mustHave`, `preferred`, `education`, `benefits`, `skills`, `summary`. Map them STRAIGHT into the output fields below (`mustHave` → `minimumQualifications`, `preferred` → `preferredQualifications`) — do not re-derive them from the summary prose.'
+  const jobrightSection = s.jobrightFeed
+    ? `1. **jobright (primary — personalized fit scores):** the app already fetched your personalized feed for this run.
+   Read \`${s.jobrightFeed.relPath}\` (${s.jobrightFeed.count} jobs, JSON: \`{ fetchedAt, results, meta }\`). Judge EVERY target role from this one file — the feed is personalized, not query-driven. Do NOT run the jobright CLI in this run.
+   ${structuredNote}`
+    : `1. **jobright (primary — personalized fit scores):**
+   \`"${resolveBun()}" run ".agents/skills/jobright-search/cli/src/cli.ts" recommend --min-size 51 --maxage 14 -n 60 --format json\`
+   Run this ONCE. The feed is personalized to the candidate — it is NOT query-driven — so a single \`recommend\` covers every target role; judge each returned job against all the target roles yourself. Do NOT run one jobright command per role, do NOT use \`search -q\` to slice the feed by keyword (its term filter silently drops relevant jobs whose text phrases things differently), and NEVER run jobright commands in parallel — burst traffic gets the session revoked mid-run. If a call returns SESSION_EXPIRED, skip jobright for the rest of this run and report that re-running the scout restores the session automatically.
+   ${structuredNote}`
   const replacements: Record<string, string> = {
     REPO_ROOT: REPO_ROOT,
     TODAY_ISO: todayISO(),
@@ -177,6 +189,7 @@ export function buildScoutPrompt(s: ScoutSlots, profile: ProfileFile | null): st
     SEARCH_CRITERIA_MD: criteria,
     LINKEDIN_QUERIES: linkedinQueries,
     BOARDS_NOTE: availability ? `\n> **Availability:** ${availability}\n` : '',
+    JOBRIGHT_SECTION: jobrightSection,
     INSTRUCTIONS: s.instructions.trim() || '(none — run the standard sweep)'
   }
   return fill(out, replacements)

@@ -4,6 +4,7 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import type { BoardId, BoardsStatus } from '@shared/types'
 import { APP_DIR, REPO_ROOT, resolveBun } from '../paths'
+import { loadProfile } from '../profile/profileStore'
 import { jobrightCredEmail, jobrightEnv, setJobrightCred } from './credStore'
 
 const execFileAsync = promisify(execFile)
@@ -185,6 +186,59 @@ export function setJobrightCreds(email: string, password: string): void {
     fs.unlinkSync(sessionFile()) // force fresh login with the new creds
   } catch {
     /* ignore */
+  }
+}
+
+/** Fetch the personalized jobright feed app-side and write it to `outFile`
+ *  for the scout agent to Read. The agent then never invokes the jobright CLI
+ *  at all: session bursts become structurally impossible, and credentials are
+ *  decrypted only into this one app-spawned process (which also self-heals an
+ *  expired session, since the CLI re-logs-in with env credentials). */
+export async function prefetchJobrightFeed(
+  outFile: string
+): Promise<{ ok: boolean; count: number; message: string }> {
+  const cli = cliEntrypoint('jobright')
+  if (!fs.existsSync(cli)) return { ok: false, count: 0, message: 'jobright CLI not installed' }
+  const env = jobrightEnv()
+  if (!env.JOBRIGHT_EMAIL) return { ok: false, count: 0, message: 'no jobright credentials saved' }
+  const board = loadProfile()?.searchConfig.boards.jobright
+  if (board && board.enabled === false) {
+    return { ok: false, count: 0, message: 'jobright disabled in the profile search config' }
+  }
+  const maxAge = loadProfile()?.searchConfig.timing.maxAgeDays ?? 14
+  const args = [
+    'run',
+    cli,
+    'recommend',
+    '-n',
+    String(Math.max(board?.limit ?? 0, 60)),
+    '--maxage',
+    String(maxAge),
+    '--refresh',
+    '--format',
+    'json'
+  ]
+  if (board?.minSize) args.push('--min-size', String(board.minSize))
+  try {
+    const { stdout } = await execFileAsync(resolveBun(), args, {
+      cwd: REPO_ROOT,
+      timeout: 120_000,
+      maxBuffer: 16 * 1024 * 1024,
+      windowsHide: true,
+      env: { ...process.env, ...env }
+    })
+    const parsed = JSON.parse(stdout) as { results?: unknown[] }
+    const count = parsed.results?.length ?? 0
+    fs.mkdirSync(path.dirname(outFile), { recursive: true })
+    fs.writeFileSync(
+      outFile,
+      JSON.stringify({ fetchedAt: new Date().toISOString(), ...parsed }, null, 2),
+      'utf-8'
+    )
+    return { ok: true, count, message: `fetched ${count} jobs` }
+  } catch (err) {
+    const e = err as { stderr?: string; message?: string }
+    return { ok: false, count: 0, message: (e.stderr || e.message || String(err)).slice(0, 400) }
   }
 }
 

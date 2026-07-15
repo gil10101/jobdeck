@@ -13,7 +13,7 @@ import {
   todayMMDD,
   uniqueSlug
 } from '../paths'
-import { assertScoutable, refreshJobrightSession } from '../boards/boardsBridge'
+import { assertScoutable, prefetchJobrightFeed } from '../boards/boardsBridge'
 import { parseReport, validateReport } from '../parsers/report'
 import { validateProfile } from '../profile/profileSchema'
 import { loadProfile } from '../profile/profileStore'
@@ -59,6 +59,8 @@ interface ActiveRun {
   contextTokens?: number
   /** Cumulative tokens for the whole run, from the result message. */
   totalTokens?: number
+  /** Scout runs: app-prefetched jobright feed handed to the agent as a file. */
+  jobrightFeed?: { relPath: string; count: number } | null
 }
 
 type SendFn = (channel: 'push:runEvent' | 'push:runChanged', payload: unknown) => void
@@ -272,7 +274,8 @@ export class AgentRunner {
         {
           instructions: run.input.instructions ?? '',
           excludeList: this.excludeList(),
-          outputPath: path.join(SCOUT_DIR, `${run.meta.id}.candidates.json`)
+          outputPath: path.join(SCOUT_DIR, `${run.meta.id}.candidates.json`),
+          jobrightFeed: run.jobrightFeed ?? null
         },
         profile
       )
@@ -306,12 +309,17 @@ export class AgentRunner {
   private async execute(run: ActiveRun): Promise<void> {
     this.setStatus(run, 'running')
     if (run.meta.kind === 'scout') {
-      // Pre-mint the jobright session so the agent's CLI calls run session-only
-      // (no credentials in the agent's env). Best-effort: on failure the CLI
-      // reports SESSION_EXPIRED / NO_CREDS and the agent relays it.
-      const refreshed = await refreshJobrightSession()
-      if (!refreshed.ok) {
-        console.warn('[runner] jobright session refresh skipped:', refreshed.message)
+      // Fetch the jobright feed app-side (credentials stay in this process)
+      // and hand the agent a file to Read — it never invokes the jobright CLI,
+      // so session bursts are structurally impossible. Best-effort: on failure
+      // the prompt falls back to careful CLI use.
+      const feedFile = path.join(SCOUT_DIR, `${run.meta.id}.feed.json`)
+      const feed = await prefetchJobrightFeed(feedFile)
+      if (feed.ok) {
+        run.jobrightFeed = { relPath: toRel(feedFile), count: feed.count }
+      } else {
+        run.jobrightFeed = null
+        console.warn('[runner] jobright feed prefetch skipped:', feed.message)
       }
     }
     if (run.meta.kind === 'onboard') {
