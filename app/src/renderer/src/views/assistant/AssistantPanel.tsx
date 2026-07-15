@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useApp } from '../../store'
 import Composer from './Composer'
 import MessageList from './MessageList'
@@ -22,12 +22,9 @@ export default function AssistantPanel(): JSX.Element {
 
   const [historyOpen, setHistoryOpen] = useState(false)
 
-  // First-open race guard: pushes are dropped unless conversationId matches the active
-  // conversation, so one must exist before the first send can be issued.
-  useEffect(() => {
-    if (conversationId === null) void newAssistantChat()
-  }, [conversationId])
-
+  // No conversation is created on open — sendAssistant creates one on the
+  // first send, so merely peeking at the panel never leaves an empty
+  // conversation file behind.
   const title = history.find((h) => h.id === conversationId)?.title ?? 'Assistant'
 
   return (
