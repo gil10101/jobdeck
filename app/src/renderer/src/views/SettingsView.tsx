@@ -270,18 +270,20 @@ export default function SettingsView(): JSX.Element {
             return (
               <Row key={b.id} label={jr ? 'jobright.ai' : b.id} hint={hint}>
                 <div className="flex flex-col items-end gap-1.5">
-                  {b.installed && boards?.bunOk ? (
+                  {!b.installed ? (
+                    <button
+                      className="btn btn-primary px-2 py-1 text-[10px]"
+                      disabled={installing !== null}
+                      onClick={() => void install(b.id)}
+                    >
+                      {installing === b.id ? 'Installing…' : 'Install CLI'}
+                    </button>
+                  ) : boards?.bunOk ? (
                     <span className="chip border-green-800 text-green-300">
                       ✓ {jr && !b.configured ? 'installed' : 'ready'}
                     </span>
                   ) : (
-                    <button
-                      className="btn btn-primary px-2 py-1 text-[10px]"
-                      disabled={installing !== null || b.installed}
-                      onClick={() => void install(b.id)}
-                    >
-                      {installing === b.id ? 'Installing…' : b.installed ? 'Installed' : 'Install CLI'}
-                    </button>
+                    <span className="chip border-amber-700 text-amber-300">needs bun</span>
                   )}
                   {jr && b.installed && (
                     <>
