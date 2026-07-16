@@ -9,7 +9,7 @@ Your job: search the job boards, filter HARD against the candidate's criteria, j
 ## STEP 2 — Search the boards (bun CLIs, zero-auth except jobright)
 Run these with the Bash tool from the repo root (bun at `{{BUN}}`). All support `--format json`.
 
-**RATE DISCIPLINE (non-negotiable).** These are third-party services that ban accounts and IPs for burst traffic — one account has already been suspended for it:
+**RATE DISCIPLINE (non-negotiable).** These are third-party services that ban accounts and IPs for burst traffic:
 - NEVER run two commands against the same board in parallel. One board = strictly sequential calls.
 - One command per query, the queries listed below and no more. Do not invent extra query permutations.
 - If a command fails, retry it at most ONCE. Auth/restriction errors (SESSION_EXPIRED, ACCOUNT_RESTRICTED, 403) are permanent for this run — skip that board immediately, never retry them.
