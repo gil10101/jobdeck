@@ -116,6 +116,14 @@ export default function SettingsView(): JSX.Element {
     }
   }
 
+  const setBoardEnabled = async (board: BoardId, enabled: boolean): Promise<void> => {
+    try {
+      setBoards(await call('boards:setEnabled', { board, enabled }))
+    } catch (err) {
+      toast(String(err), 'error')
+    }
+  }
+
   const installBunNow = async (): Promise<void> => {
     setBunInstalling(true)
     try {
@@ -290,30 +298,37 @@ export default function SettingsView(): JSX.Element {
           )}
           {(boards?.boards ?? []).map((b) => {
             const jr = b.id === 'jobright'
-            const hint = b.installed
-              ? jr
-                ? `${b.configured ? `Configured (${b.email})` : 'Installed — add credentials to enable it'}. The password is encrypted with your OS keychain and stored in app data, never in the workspace; saving clears the cached session.`
-                : 'Public API — no credentials needed.'
-              : `Not installed. Install copies the bundled search CLI into ${b.path} inside your workspace (no network access needed).`
+            const hint = !b.enabled
+              ? 'Disabled — scouts skip this board entirely (no requests are made).'
+              : b.installed
+                ? jr
+                  ? `${b.configured ? `Configured (${b.email})` : 'Installed — add credentials to enable it'}. The password is encrypted with your OS keychain and stored in app data, never in the workspace; saving clears the cached session.`
+                  : 'Public API — no credentials needed.'
+                : `Not installed. Install copies the bundled search CLI into ${b.path} inside your workspace (no network access needed).`
             return (
               <Row key={b.id} label={jr ? 'jobright.ai' : b.id} hint={hint}>
                 <div className="flex flex-col items-end gap-1.5">
-                  {!b.installed ? (
-                    <button
-                      className="btn btn-primary px-2 py-1 text-[10px]"
-                      disabled={installing !== null}
-                      onClick={() => void install(b.id)}
-                    >
-                      {installing === b.id ? 'Installing…' : 'Install CLI'}
-                    </button>
-                  ) : boards?.bunOk ? (
-                    <span className="chip border-green-800 text-green-300">
-                      ✓ {jr && !b.configured ? 'installed' : 'ready'}
-                    </span>
-                  ) : (
-                    <span className="chip border-amber-700 text-amber-300">needs bun</span>
-                  )}
-                  {jr && b.installed && (
+                  <div className="flex items-center gap-2">
+                    {!b.enabled ? (
+                      <span className="chip text-gray-500">off</span>
+                    ) : !b.installed ? (
+                      <button
+                        className="btn btn-primary px-2 py-1 text-[10px]"
+                        disabled={installing !== null}
+                        onClick={() => void install(b.id)}
+                      >
+                        {installing === b.id ? 'Installing…' : 'Install CLI'}
+                      </button>
+                    ) : boards?.bunOk ? (
+                      <span className="chip border-green-800 text-green-300">
+                        ✓ {jr && !b.configured ? 'installed' : 'ready'}
+                      </span>
+                    ) : (
+                      <span className="chip border-amber-700 text-amber-300">needs bun</span>
+                    )}
+                    <Toggle value={b.enabled} onChange={(v) => void setBoardEnabled(b.id, v)} />
+                  </div>
+                  {jr && b.enabled && b.installed && (
                     <>
                       <input
                         className="input w-56"

@@ -3,10 +3,40 @@
 // We parse both with regex (the markup is shallow and stable; a full DOM parser
 // is unnecessary and node-html-parser has known nesting bugs on LinkedIn cards).
 
+import { readFileSync, writeFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
+import { dirname, join } from "node:path"
+
 export const SEARCH_URL =
   "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
 export const DETAIL_URL =
   "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting"
+
+// Cross-process request pacing: agents may launch several CLI processes at
+// once, and burst traffic gets IPs banned. A shared timestamp file keeps the
+// AGGREGATE request rate human-ish no matter how many processes run.
+const SKILL_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
+const THROTTLE_PATH = join(SKILL_ROOT, ".throttle")
+const MIN_REQUEST_GAP_MS = 2000
+
+async function paceRequests(): Promise<void> {
+  for (;;) {
+    let last = 0
+    try {
+      last = new Date(readFileSync(THROTTLE_PATH, "utf-8")).getTime() || 0
+    } catch {
+      /* no throttle file yet */
+    }
+    const wait = last + MIN_REQUEST_GAP_MS - Date.now()
+    if (wait <= 0) break
+    await new Promise((r) => setTimeout(r, wait + Math.floor(Math.random() * 250)))
+  }
+  try {
+    writeFileSync(THROTTLE_PATH, new Date().toISOString())
+  } catch {
+    /* pacing is best-effort */
+  }
+}
 
 export function writeError(error: string, code: string): void {
   process.stderr.write(JSON.stringify({ error, code }) + "\n")
@@ -21,6 +51,7 @@ export async function htmlFetch(url: string): Promise<string> {
   const maxRetries = 6
   let delay = 500
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    await paceRequests()
     const response = await fetch(url, {
       headers: {
         "User-Agent": UA,

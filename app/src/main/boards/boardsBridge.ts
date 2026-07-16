@@ -4,7 +4,8 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import type { BoardId, BoardsStatus } from '@shared/types'
 import { APP_DIR, REPO_ROOT, resolveBun } from '../paths'
-import { loadProfile } from '../profile/profileStore'
+import { validateProfile } from '../profile/profileSchema'
+import { loadProfile, saveProfile } from '../profile/profileStore'
 import { jobrightCredEmail, jobrightEnv, setJobrightCred } from './credStore'
 
 const execFileAsync = promisify(execFile)
@@ -67,6 +68,7 @@ export function getBoardsStatus(): BoardsStatus {
   // resolveBun falls back to the bare command name when no known location
   // exists; only an absolute hit counts as "found".
   const bunOk = path.isAbsolute(bunPath) && fs.existsSync(bunPath)
+  const boardsConfig = loadProfile()?.searchConfig.boards
   return {
     bunOk,
     bunPath,
@@ -74,6 +76,7 @@ export function getBoardsStatus(): BoardsStatus {
       const creds = id === 'jobright' ? jobrightCreds() : { configured: null, email: null }
       return {
         id,
+        enabled: boardsConfig?.[id]?.enabled ?? true,
         installed: fs.existsSync(cliEntrypoint(id)),
         path: path.join('.agents', 'skills', skillDirName(id)),
         configured: creds.configured,
@@ -81,6 +84,20 @@ export function getBoardsStatus(): BoardsStatus {
       }
     })
   }
+}
+
+/** Flip a board's enabled flag in the profile search config. */
+export function setBoardEnabled(board: BoardId, enabled: boolean): BoardsStatus {
+  const profile = loadProfile()
+  if (!profile) throw new Error('no candidate profile yet — run onboarding first')
+  // Clone: loadProfile() returns the module cache by reference, and a
+  // validation failure must not leave the flag flipped in the live object.
+  const next = structuredClone(profile)
+  next.searchConfig.boards[board].enabled = enabled
+  const result = validateProfile(next)
+  if (!result.ok) throw new Error(`profile invalid after toggling ${board}: ${result.problems.join('; ')}`)
+  saveProfile(result.profile)
+  return getBoardsStatus()
 }
 
 /** Copy the bundled CLI into the workspace. Merges over an existing install
@@ -111,19 +128,22 @@ export function boardsAvailabilityNote(): string | null {
   if (!status.bunOk) {
     return 'NONE of the board CLIs can run: the bun runtime is not installed. Skip STEP 2 entirely and tell the user to install bun (https://bun.sh) and the board CLIs from Settings → Job boards.'
   }
-  const missing = status.boards.filter((b) => !b.installed)
-  if (missing.length === status.boards.length) {
-    return 'NONE of the board CLIs are installed in this workspace. Skip STEP 2 and tell the user to install them from Settings → Job boards.'
-  }
   const parts: string[] = []
-  for (const b of missing) {
-    parts.push(`The ${b.id} CLI is not installed — skip it (installable from Settings → Job boards).`)
+  for (const b of status.boards) {
+    if (!b.enabled) {
+      parts.push(`The ${b.id} board is DISABLED in Settings — skip it entirely, without comment.`)
+    } else if (!b.installed) {
+      parts.push(`The ${b.id} CLI is not installed — skip it (installable from Settings → Job boards).`)
+    }
   }
   const jr = status.boards.find((b) => b.id === 'jobright')
-  if (jr?.installed && jr.configured === false) {
+  if (jr?.enabled && jr.installed && jr.configured === false) {
     parts.push(
       'jobright has no credentials configured — skip it and note that the user can add credentials in Settings → Job boards.'
     )
+  }
+  if (status.boards.every((b) => !b.enabled || !b.installed)) {
+    parts.push('With no board CLI usable, rely on WebSearch (STEP 2 item 4) alone.')
   }
   return parts.length ? parts.join(' ') : null
 }

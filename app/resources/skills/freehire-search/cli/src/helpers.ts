@@ -4,7 +4,37 @@
 // reshape it into the portal-skill contract's result fields. The base URL is
 // swappable via FREEHIRE_API_URL for self-hosting.
 
+import { readFileSync, writeFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
+import { dirname, join } from "node:path"
+
 export const DEFAULT_BASE_URL = "https://freehire.dev"
+
+// Cross-process request pacing: agents may launch several CLI processes at
+// once, and burst traffic gets rate-limited or banned. A shared timestamp file
+// keeps the AGGREGATE request rate human-ish no matter how many processes run.
+const SKILL_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
+const THROTTLE_PATH = join(SKILL_ROOT, ".throttle")
+const MIN_REQUEST_GAP_MS = 1500
+
+async function paceRequests(): Promise<void> {
+  for (;;) {
+    let last = 0
+    try {
+      last = new Date(readFileSync(THROTTLE_PATH, "utf-8")).getTime() || 0
+    } catch {
+      /* no throttle file yet */
+    }
+    const wait = last + MIN_REQUEST_GAP_MS - Date.now()
+    if (wait <= 0) break
+    await new Promise((r) => setTimeout(r, wait + Math.floor(Math.random() * 250)))
+  }
+  try {
+    writeFileSync(THROTTLE_PATH, new Date().toISOString())
+  } catch {
+    /* pacing is best-effort */
+  }
+}
 
 /** API base URL: FREEHIRE_API_URL (for a self-hosted instance) or the default. */
 export function baseUrl(): string {
@@ -37,6 +67,7 @@ export async function apiGet<T>(path: string): Promise<Envelope<T> | null> {
   let delay = 500
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    await paceRequests()
     let response: Response
     try {
       response = await fetch(url, {

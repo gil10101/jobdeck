@@ -212,6 +212,8 @@ export type BoardId = 'jobright' | 'linkedin' | 'freehire'
 
 export interface BoardStatus {
   id: BoardId
+  /** Per-board on/off from the profile search config; scouts skip disabled boards. */
+  enabled: boolean
   /** CLI entrypoint present in the workspace. */
   installed: boolean
   /** Where the CLI lives (workspace-relative), installed or not. */

@@ -91,6 +91,7 @@ upskill/*.md
 .agents/skills/*/.session.json
 .agents/skills/*/.feed-cache.json
 .agents/skills/*/.feed-cache.lock
+.agents/skills/*/.throttle
 
 # Mission-control app (app/) build output + personal data store
 app/out/

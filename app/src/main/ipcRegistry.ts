@@ -17,6 +17,7 @@ import {
   installBoard,
   installBun,
   refreshJobrightSession,
+  setBoardEnabled,
   setJobrightCreds,
   testJobright
 } from './boards/boardsBridge'
@@ -345,6 +346,7 @@ export function registerIpc(services: Services): void {
   // ---- job-board credentials ----
   handle('boards:getStatus', () => getBoardsStatus())
   handle('boards:install', ({ board }) => installBoard(board))
+  handle('boards:setEnabled', ({ board, enabled }) => setBoardEnabled(board, enabled))
   handle('boards:installBun', () => installBun())
   handle('boards:setCreds', async ({ email, password }) => {
     setJobrightCreds(email, password)
