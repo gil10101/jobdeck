@@ -8,8 +8,6 @@
 
 A local-first desktop app that turns [Claude Code](https://claude.com/claude-code) into a full job-application pipeline: it scouts job boards against your profile, tailors a one-page résumé and cover letter per posting, verifies the compiled PDFs the way an ATS parser reads them, tracks every application, and preps you for interviews — all driven by AI agents that run on your own machine under your own Claude login.
 
-> Note: This is an independent open-source project and is not affiliated with, endorsed by, sponsored by, or maintained by Anthropic. Anthropic and Claude Code are referenced only to describe the toolchain this app uses.
-
 ## What this is
 
 An Electron + React desktop app around the [Claude Agent SDK](https://docs.anthropic.com/en/api/agent-sdk). Your career data lives in a **workspace folder you choose** — a plain directory of JSON and LaTeX files the app reads and writes. Nothing about you is baked into the app; everything comes from onboarding.
@@ -33,7 +31,7 @@ The workflow, end to end:
  workspace         review.               and adds a tracker row.  packs.
 ```
 
-Plus an **in-app AI assistant** (chat panel, bottom-right): it answers questions about your runs, applications, settings, and profile through a locked-down tool set, and takes a small number of actions — starting a scout, adding a profile entry, repairing a job-board CLI — each behind an explicit Approve/Deny card.
+Plus an **in-app AI assistant**: it answers questions about your runs, applications, settings, and profile through a locked-down tool set, and takes a small number of actions — starting a scout, adding a profile entry, repairing a job-board CLI — each behind an explicit Approve/Deny card.
 
 ## Features
 
@@ -95,8 +93,8 @@ Key design decisions:
 ## Getting started
 
 ```bash
-git clone <this repo>
-cd <repo>/app
+git clone https://github.com/gil10101/jobdeck
+cd jobdeck/app
 npm install
 npm run dev
 ```
@@ -145,9 +143,9 @@ assets/mascot/        Pip
 
 ## Acknowledgements
 
-- This project grew out of [Mads Lorentzen's ai-job-search](https://github.com/MadsLorentzen/ai-job-search) — a CLAUDE.md-driven job-application framework for Claude Code. The desktop app reimplements that workflow as a standalone application; the cover-letter class, the mascot, and the job-board CLI pattern trace back to it.
+- This project grew out of [Mads Lorentzen's ai-job-search](https://github.com/MadsLorentzen/ai-job-search) — a CLAUDE.md-driven job-application framework for Claude Code. The desktop app reimplements that workflow as a standalone application.
 - [Mikkel Krogholm](https://github.com/mikkelkrogsholm) ([skills repo](https://github.com/mikkelkrogsholm/skills)) for the original job-search CLI skill pattern.
-- Built with [Claude Code](https://claude.com/claude-code) by [Anthropic](https://anthropic.com).
+
 
 ## License
 
