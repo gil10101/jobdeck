@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/mascot/pip_flight_loop.gif" alt="Pip, the courier bird" width="200">
+  <img src="assets/mascot/cat_note_collar.gif" alt="Pip, the courier bird" width="200">
 </p>
 
 # AI Job Search
