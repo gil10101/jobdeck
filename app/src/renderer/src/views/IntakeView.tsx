@@ -191,7 +191,7 @@ export default function IntakeView(): JSX.Element {
       <div className="flex items-center gap-2 border-b border-edge bg-panel px-4 py-2.5">
         <h1 className="text-sm font-semibold text-gray-100">Intake</h1>
         <span className="text-[11px] text-muted">
-          drop .txt files into documents/applications/TODO/ or paste below
+          drop .txt files into applications/TODO/ in your workspace, or paste below
         </span>
         <button className="btn ml-auto" onClick={rescan}>
           ⟳ Rescan TODO
@@ -205,8 +205,8 @@ export default function IntakeView(): JSX.Element {
           </div>
           {todoItems.length === 0 && (
             <div className="panel p-6 text-center text-xs text-gray-600">
-              No pending files. Drop a job posting .txt into documents/applications/TODO/ and it
-              appears here automatically.
+              No pending files. Drop a job posting .txt into applications/TODO/ in your workspace
+              and it appears here automatically.
             </div>
           )}
           {todoItems.map((item) => (
@@ -280,8 +280,7 @@ export default function IntakeView(): JSX.Element {
           <div className="text-[11px] leading-relaxed text-gray-600">
             Building an application spawns a Claude agent that tailors the résumé and cover letter,
             compiles both to exactly one page, writes the answers file, and adds a tracker row.
-            Everything lands in documents/applications/&lt;slug&gt;/ exactly like the manual
-            workflow.
+            Everything lands in applications/&lt;slug&gt;/ inside your workspace.
           </div>
         </div>
       </div>

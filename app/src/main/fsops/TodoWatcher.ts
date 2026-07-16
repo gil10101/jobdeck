@@ -15,7 +15,7 @@ function detectUrl(text: string): string | null {
 }
 
 /**
- * Watches documents/applications/TODO for new posting files.
+ * Watches the workspace applications/TODO folder for new posting files.
  * fs.watch on Windows fires duplicate/unreliable events, so events only
  * trigger a debounced full-directory rescan diff.
  */

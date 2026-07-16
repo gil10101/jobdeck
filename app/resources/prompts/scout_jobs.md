@@ -70,7 +70,7 @@ Extract the structured arrays faithfully from the posting text (empty array `[]`
 {{INSTRUCTIONS}}
 
 ## DO NOT
-- Do NOT touch `applications.xlsx`, `documents/applications/` (incl. TODO/), or any tracker data.
+- Do NOT touch `applications/` (incl. TODO/) or any tracker data.
 - Do NOT apply to anything or build any documents.
 - Do NOT invent postings, salaries, or URLs — only report what a board actually returned.
 

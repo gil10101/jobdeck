@@ -38,7 +38,7 @@ function findBySuffix(names: string[], suffix: string): string | null {
   return names.find((n) => n.endsWith(suffix)) ?? null
 }
 
-/** Scan documents/applications/* and return per-folder facts. */
+/** Scan the workspace applications/* folders and return per-folder facts. */
 export function scanApplications(): FolderFacts[] {
   const facts: FolderFacts[] = []
   let entries: fs.Dirent[]
