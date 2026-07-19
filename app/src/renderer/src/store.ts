@@ -8,6 +8,7 @@ import type {
   CandidateJob,
   CompanyInfo,
   ConversationMeta,
+  IntakeFolder,
   IntakeItem,
   RunEvent,
   RunMeta,
@@ -85,6 +86,7 @@ interface AppState {
   config: AppConfigInfo | null
   rows: TrackerRow[]
   intake: IntakeItem[]
+  intakeFolders: IntakeFolder[]
   candidates: CandidateJob[]
   runs: RunMeta[]
   settings: AppSettings | null
@@ -122,6 +124,7 @@ export const useApp = create<AppState>((set, get) => ({
   config: null,
   rows: [],
   intake: [],
+  intakeFolders: [],
   candidates: [],
   runs: [],
   settings: null,
@@ -148,7 +151,11 @@ export const useApp = create<AppState>((set, get) => ({
   },
   refreshIntake: async () => {
     try {
-      set({ intake: await call('intake:list', undefined) })
+      const [intake, intakeFolders] = await Promise.all([
+        call('intake:list', undefined),
+        call('intake:listFolders', undefined)
+      ])
+      set({ intake, intakeFolders })
     } catch {
       /* ignore */
     }

@@ -12,6 +12,7 @@ import type {
   CandidateJob,
   CompanyInfo,
   ConversationMeta,
+  IntakeFolder,
   IntakeItem,
   LibraryCategory,
   RunEvent,
@@ -49,6 +50,11 @@ export interface IpcInvokeContract {
   // schema.org JobPosting JSON-LD — URL in, structured posting out.
   'intake:fromUrl': { req: { url: string }; res: IntakeItem }
   'intake:dismiss': { req: { id: string }; res: void }
+  'intake:listFolders': { req: void; res: IntakeFolder[] }
+  'intake:createFolder': { req: { name: string; icon: string }; res: IntakeFolder }
+  /** Items in the folder return to auto date grouping. */
+  'intake:deleteFolder': { req: { id: string }; res: void }
+  'intake:moveToFolder': { req: { id: string; folderId: string | null }; res: void }
   'todo:rescan': { req: void; res: IntakeItem[] }
   'runs:start': {
     req: {
@@ -176,6 +182,10 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'intake:addPasted',
   'intake:fromUrl',
   'intake:dismiss',
+  'intake:listFolders',
+  'intake:createFolder',
+  'intake:deleteFolder',
+  'intake:moveToFolder',
   'todo:rescan',
   'runs:start',
   'runs:cancel',

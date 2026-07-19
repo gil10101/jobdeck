@@ -87,6 +87,16 @@ export interface IntakeItem {
   roleHint: string
   state: 'new' | 'building' | 'built' | 'failed' | 'dismissed'
   runId: string | null
+  /** Custom intake folder the user filed this under; null = auto date grouping. */
+  folderId?: string | null
+  createdAt: string
+}
+
+export interface IntakeFolder {
+  id: string
+  name: string
+  /** Lucide icon name chosen at creation (renderer maps it to the component). */
+  icon: string
   createdAt: string
 }
 
@@ -309,6 +319,7 @@ export interface TrackerStoreFile {
   revision: number
   rows: TrackerRow[]
   intake: IntakeItem[]
+  intakeFolders: IntakeFolder[]
   candidates: CandidateJob[]
   settings: AppSettings
 }

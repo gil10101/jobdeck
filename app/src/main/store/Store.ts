@@ -15,6 +15,7 @@ function seedState(): TrackerStoreFile {
     revision: 0,
     rows: [],
     intake: [],
+    intakeFolders: [],
     candidates: [],
     settings: { ...DEFAULT_SETTINGS }
   }
@@ -49,8 +50,10 @@ export class Store extends EventEmitter {
           }
           // Migrations for fields added after first release.
           this.state_.candidates ??= []
+          this.state_.intakeFolders ??= []
           for (const item of this.state_.intake) {
             item.imagePaths ??= []
+            item.folderId ??= null
           }
         }
       }

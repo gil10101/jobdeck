@@ -181,6 +181,38 @@ export function registerIpc(services: Services): void {
       if (item) item.state = 'dismissed'
     })
   })
+  handle('intake:listFolders', () => store.state.intakeFolders)
+  handle('intake:createFolder', ({ name, icon }) => {
+    const trimmed = name.trim()
+    if (!trimmed) throw new Error('folder name is required')
+    const folder = {
+      id: randomUUID().slice(0, 8),
+      name: trimmed.slice(0, 40),
+      icon,
+      createdAt: new Date().toISOString()
+    }
+    store.mutate(['intake'], (s) => {
+      s.intakeFolders.push(folder)
+    })
+    return folder
+  })
+  handle('intake:deleteFolder', ({ id }) => {
+    store.mutate(['intake'], (s) => {
+      s.intakeFolders = s.intakeFolders.filter((f) => f.id !== id)
+      for (const item of s.intake) {
+        if (item.folderId === id) item.folderId = null
+      }
+    })
+  })
+  handle('intake:moveToFolder', ({ id, folderId }) => {
+    store.mutate(['intake'], (s) => {
+      if (folderId !== null && !s.intakeFolders.some((f) => f.id === folderId)) {
+        throw new Error('folder not found')
+      }
+      const item = s.intake.find((i) => i.id === id)
+      if (item) item.folderId = folderId
+    })
+  })
   handle('todo:rescan', () => {
     todo.rescan()
     return store.state.intake.filter((i) => i.state !== 'dismissed')
