@@ -14,10 +14,10 @@ import { initRatingService } from './companies/ratingService'
 import { registerIpc } from './ipcRegistry'
 import { createMainWindow, installWebviewHardening } from './window'
 
-// Dev isolation: distinct userData so a JobDeck dev instance never collides
+// Dev isolation: distinct userData so an ohmo dev instance never collides
 // with an installed build.
 if (!app.isPackaged) {
-  app.setPath('userData', path.join(app.getPath('appData'), 'JobDeckDev'))
+  app.setPath('userData', path.join(app.getPath('appData'), 'OhmoDev'))
 }
 
 // Single instance: a second launch focuses the existing window instead.

@@ -2,11 +2,11 @@
   <img src="assets/mascot/cat_note_collar.gif" alt="Pip, the courier bird" width="200">
 </p>
 
-# AI Job Search
+# ohmo
 
 *The job search that runs on your machine.*
 
-A local-first desktop app that turns [Claude Code](https://claude.com/claude-code) into a full job-application pipeline: it scouts job boards against your profile, tailors a one-page résumé and cover letter per posting, verifies the compiled PDFs the way an ATS parser reads them, tracks every application, and preps you for interviews — all driven by AI agents that run on your own machine under your own Claude login.
+A local-first desktop app built on [Claude Code](https://claude.com/claude-code): it scouts job boards against your profile, tailors a one-page résumé and cover letter per posting, verifies the compiled PDFs the way an ATS parser reads them, tracks every application, and preps you for interviews — all driven by AI agents that run on your own machine under your own Claude login.
 
 ## What this is
 

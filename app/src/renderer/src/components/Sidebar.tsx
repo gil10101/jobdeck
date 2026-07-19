@@ -1,12 +1,21 @@
+import {
+  FolderOpen,
+  Inbox,
+  LayoutList,
+  Moon,
+  Play,
+  Search,
+  Settings,
+  Sun
+} from 'lucide-react'
 import { useApp } from '../store'
-import { MoonIcon, SunIcon } from './icons'
 
 const NAV = [
-  { view: 'tracker', label: 'Tracker', icon: '▤' },
-  { view: 'scout', label: 'Scout', icon: '⌕' },
-  { view: 'intake', label: 'Intake', icon: '⇩' },
-  { view: 'runs', label: 'Runs', icon: '▶' },
-  { view: 'library', label: 'Library', icon: '❐' }
+  { view: 'tracker', label: 'Tracker', Icon: LayoutList },
+  { view: 'scout', label: 'Scout', Icon: Search },
+  { view: 'intake', label: 'Intake', Icon: Inbox },
+  { view: 'runs', label: 'Runs', Icon: Play },
+  { view: 'library', label: 'Library', Icon: FolderOpen }
 ] as const
 
 export default function Sidebar(): JSX.Element {
@@ -21,8 +30,7 @@ export default function Sidebar(): JSX.Element {
   return (
     <div className="flex h-full w-44 shrink-0 flex-col border-r border-edge bg-panel">
       <div className="px-4 py-4">
-        <div className="text-sm font-bold tracking-wide text-cyan-300">MISSION CONTROL</div>
-        <div className="mt-0.5 text-[10px] text-muted">job application pipeline</div>
+        <div className="text-sm font-bold tracking-wide text-cyan-300">ohmo</div>
       </div>
       <nav className="flex flex-col gap-1 px-2">
         {NAV.map((item) => {
@@ -37,7 +45,7 @@ export default function Sidebar(): JSX.Element {
                   : 'text-gray-400 hover:bg-panel2 hover:text-gray-200'
               }`}
             >
-              <span className="text-sm">{item.icon}</span>
+              <item.Icon size={15} strokeWidth={1.75} className="shrink-0" />
               {item.label}
               {item.view === 'runs' && liveRuns > 0 && (
                 <span className="ml-auto flex items-center gap-1 rounded-full bg-cyan-900/70 px-1.5 py-0.5 text-[10px] text-cyan-200">
@@ -63,7 +71,7 @@ export default function Sidebar(): JSX.Element {
               : 'text-gray-400 hover:bg-panel2 hover:text-gray-200'
           }`}
         >
-          <span className="text-sm">⚙</span>
+          <Settings size={15} strokeWidth={1.75} className="shrink-0" />
           Settings
         </button>
         <button
@@ -71,7 +79,7 @@ export default function Sidebar(): JSX.Element {
           onClick={() => void useApp.getState().toggleTheme()}
           title="Toggle light/dark theme"
         >
-          {theme === 'light' ? <MoonIcon /> : <SunIcon />}
+          {theme === 'light' ? <Moon size={13} /> : <Sun size={13} />}
           {theme === 'light' ? 'Dark' : 'Light'}
         </button>
       </div>
