@@ -70,6 +70,29 @@ export function parsePostingSections(text: string): PostingSections {
     if (out[current].length < 20) out[current].push(item)
   }
 
+  // Some sources (notably jobright-generated JDs) copy the responsibilities
+  // and qualification sentences under a "Skills" heading. Real skills are
+  // short tokens — duplicates of other sections are dropped, and sentence-like
+  // leftovers are re-bucketed so the Skills chips stay chips.
+  if (out.skills.length > 0) {
+    const norm = (s: string): string => s.trim().toLowerCase()
+    const elsewhere = new Set(
+      [...out.responsibilities, ...out.minimum, ...out.preferred, ...out.benefits].map(norm)
+    )
+    const keep: string[] = []
+    for (const item of out.skills) {
+      if (elsewhere.has(norm(item))) continue
+      if (item.length > 40 && /\b(bachelor|master|ph\.?d|degree in)\b/i.test(item)) {
+        if (out.education.length < 6) out.education.push(item)
+      } else if (item.length > 60) {
+        if (out.minimum.length < 20) out.minimum.push(item)
+      } else {
+        keep.push(item)
+      }
+    }
+    out.skills = keep
+  }
+
   // Inline fallbacks for one-paragraph summaries (jobright style):
   // "Skills: Excel, Tableau, SQL. Seniority: Entry Level. ..."
   if (out.skills.length === 0) {
