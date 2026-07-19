@@ -6,12 +6,16 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  Copy,
+  ExternalLink,
   Flag,
   Folder,
   FolderPlus,
   Globe,
   GraduationCap,
+  GripVertical,
   Heart,
+  Info,
   Play,
   Plus,
   RefreshCw,
@@ -19,13 +23,15 @@ import {
   Star,
   Target,
   Trash2,
+  X,
   Zap,
   type LucideIcon
 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { IntakeFolder, IntakeItem } from '@shared/types'
 import { localFileUrl } from '@shared/ipc'
 import { call } from '../api'
+import { parsePostingSections } from '../lib/postingSections'
 import { useApp, companyKey } from '../store'
 import RatingBadge from '../components/RatingBadge'
 
@@ -86,7 +92,13 @@ const STATE_STYLE: Record<IntakeItem['state'], string> = {
   dismissed: 'text-gray-500 border-edge bg-panel2'
 }
 
-function IntakeCard({ item }: { item: IntakeItem }): JSX.Element {
+function IntakeCard({
+  item,
+  onInfo
+}: {
+  item: IntakeItem
+  onInfo: (item: IntakeItem) => void
+}): JSX.Element {
   const [company, setCompany] = useState(item.companyHint)
   const [role, setRole] = useState(item.roleHint)
   const toast = useApp((s) => s.toast)
@@ -116,27 +128,56 @@ function IntakeCard({ item }: { item: IntakeItem }): JSX.Element {
   }
 
   return (
-    <div
-      className={`panel cursor-grab p-3 active:cursor-grabbing ${dragged ? 'opacity-40' : ''}`}
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.setData('application/x-intake-id', item.id)
-        e.dataTransfer.effectAllowed = 'move'
-        setDragged(true)
-      }}
-      onDragEnd={() => setDragged(false)}
-    >
+    <div className={`panel p-3 ${dragged ? 'opacity-40' : ''}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-1.5">
+          {/* Dragging lives on the handle only, so links, inputs, and buttons
+              inside the card keep their normal click behavior. */}
+          <span
+            className="mt-0.5 shrink-0 cursor-grab text-gray-600 hover:text-gray-400 active:cursor-grabbing"
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData('application/x-intake-id', item.id)
+              e.dataTransfer.effectAllowed = 'move'
+              setDragged(true)
+            }}
+            onDragEnd={() => setDragged(false)}
+            title="Drag into a folder"
+          >
+            <GripVertical size={14} />
+          </span>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="truncate text-sm font-semibold text-gray-100">{item.title}</span>
+              <span className={`chip ${STATE_STYLE[item.state]}`}>{item.state}</span>
+              {item.kind === 'todo-file' && <span className="chip">TODO file</span>}
+              {info && <RatingBadge rating={info.rating} url={info.url} />}
+            </div>
+            {item.applyUrl && (
+              <button
+                className="mt-1 block max-w-full truncate text-left text-[11px] text-cyan-500 hover:underline"
+                title={item.applyUrl}
+                onClick={() =>
+                  void call('app:openExternal', { url: item.applyUrl! }).catch((err) =>
+                    toast(String(err), 'error')
+                  )
+                }
+              >
+                {item.applyUrl}
+              </button>
+            )}
+          </div>
+        </div>
+        <button
+          className="shrink-0 p-1 text-gray-500 hover:text-cyan-300"
+          onClick={() => onInfo(item)}
+          title="Posting & company details"
+        >
+          <Info size={15} />
+        </button>
+      </div>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="truncate text-sm font-semibold text-gray-100">{item.title}</span>
-            <span className={`chip ${STATE_STYLE[item.state]}`}>{item.state}</span>
-            {item.kind === 'todo-file' && <span className="chip">TODO file</span>}
-            {info && <RatingBadge rating={info.rating} url={info.url} />}
-          </div>
-          {item.applyUrl && (
-            <div className="mt-1 truncate text-[11px] text-cyan-500">{item.applyUrl}</div>
-          )}
           {item.imagePaths.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-2">
               {item.imagePaths.map((p) => (
@@ -189,11 +230,148 @@ function IntakeCard({ item }: { item: IntakeItem }): JSX.Element {
   )
 }
 
+/** Slide-over overlay with the posting's parsed sections + company info.
+ *  Unlike the Scout page's docked panel, this floats above the page. */
+function PostingOverlay({
+  item,
+  onClose
+}: {
+  item: IntakeItem | null
+  onClose: () => void
+}): JSX.Element {
+  const toast = useApp((s) => s.toast)
+  const info = useApp((s) => (item ? s.companies[companyKey(item.companyHint)] : undefined))
+
+  useEffect(() => {
+    if (!item) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [item, onClose])
+
+  const sections = item ? parsePostingSections(item.postingText || '') : null
+  const list = (title: string, items2: string[], chips = false): JSX.Element | null =>
+    items2.length === 0 ? null : (
+      <div className="mb-3">
+        <div className="text-[10px] font-bold uppercase tracking-wide text-muted">{title}</div>
+        {chips ? (
+          <div className="mt-1 flex flex-wrap gap-1">
+            {items2.map((s) => (
+              <span key={s} className="chip">
+                {s}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <ul className="mt-1">
+            {items2.map((s) => (
+              <li
+                key={s}
+                className="ml-4 list-disc text-[11px] leading-relaxed text-gray-300 marker:text-gray-600"
+              >
+                {s}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    )
+
+  return (
+    <>
+      <div
+        className={`fixed inset-0 z-40 bg-black/30 transition-opacity duration-200 ${
+          item ? 'opacity-100' : 'pointer-events-none opacity-0'
+        }`}
+        onClick={onClose}
+      />
+      <div
+        className={`fixed inset-y-0 right-0 z-40 flex w-[440px] max-w-[90vw] flex-col border-l border-edge bg-panel shadow-2xl transition-transform duration-200 motion-reduce:transition-none ${
+          item ? 'translate-x-0' : 'translate-x-full'
+        }`}
+      >
+        {item && sections && (
+          <>
+            <div className="flex items-start gap-3 border-b border-edge px-4 py-3">
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold leading-snug text-gray-100">{item.title}</div>
+                <div className="mt-0.5 flex items-center gap-2 text-xs text-gray-400">
+                  {item.companyHint && <span className="truncate">{item.companyHint}</span>}
+                  {info && <RatingBadge rating={info.rating} url={info.url} />}
+                  {info?.reviewCount != null && (
+                    <span className="text-[10px] text-gray-500">
+                      {info.reviewCount.toLocaleString()} reviews
+                    </span>
+                  )}
+                </div>
+              </div>
+              <button className="btn shrink-0 px-2" onClick={onClose} title="Close (Esc)">
+                <X size={13} />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto p-4">
+              {item.applyUrl && (
+                <div className="mb-3 flex items-center gap-2 rounded-md border border-cyan-900/60 bg-cyan-950/30 px-3 py-2">
+                  <span
+                    className="min-w-0 flex-1 truncate text-[11px] text-cyan-300"
+                    title={item.applyUrl}
+                  >
+                    {item.applyUrl}
+                  </span>
+                  <button
+                    className="btn px-2 py-0.5 text-[10px]"
+                    onClick={() =>
+                      void call('app:copy', { text: item.applyUrl! }).catch((err) =>
+                        toast(String(err), 'error')
+                      )
+                    }
+                  >
+                    <Copy size={11} />
+                  </button>
+                  <button
+                    className="btn px-2 py-0.5 text-[10px]"
+                    onClick={() =>
+                      void call('app:openExternal', { url: item.applyUrl! }).catch((err) =>
+                        toast(String(err), 'error')
+                      )
+                    }
+                  >
+                    <ExternalLink size={11} />
+                  </button>
+                </div>
+              )}
+              {list('Skills', sections.skills, true)}
+              {list('Minimum requirements', sections.minimum)}
+              {list('Preferred requirements', sections.preferred)}
+              {list('Education', sections.education)}
+              {list('Responsibilities', sections.responsibilities)}
+              {list('Benefits', sections.benefits)}
+              {item.postingText.trim() && (
+                <div className="mt-1">
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-muted">
+                    Full posting
+                  </div>
+                  <pre className="mt-1 whitespace-pre-wrap font-sans text-[11px] leading-relaxed text-gray-400">
+                    {item.postingText}
+                  </pre>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </>
+  )
+}
+
 /** Collapsible group of intake cards; a drop target when onDropItem is set. */
 function FolderSection({
   title,
   Icon,
   items,
+  onInfo,
   onDropItem,
   onDelete,
   defaultOpen = true
@@ -201,6 +379,7 @@ function FolderSection({
   title: string
   Icon: LucideIcon
   items: IntakeItem[]
+  onInfo: (item: IntakeItem) => void
   onDropItem?: (itemId: string) => void
   onDelete?: () => void
   defaultOpen?: boolean
@@ -265,7 +444,7 @@ function FolderSection({
             </div>
           )}
           {items.map((item) => (
-            <IntakeCard key={item.id} item={item} />
+            <IntakeCard key={item.id} item={item} onInfo={onInfo} />
           ))}
         </div>
       )}
@@ -339,6 +518,7 @@ export default function IntakeView(): JSX.Element {
     }
   }
 
+  const [detailItem, setDetailItem] = useState<IntakeItem | null>(null)
   const [buildingAll, setBuildingAll] = useState(false)
   const buildAll = async (): Promise<void> => {
     const pending = visible.filter((i) => i.state === 'new')
@@ -493,6 +673,7 @@ export default function IntakeView(): JSX.Element {
             title="Recents"
             Icon={Clock}
             items={recents}
+            onInfo={setDetailItem}
             onDropItem={(id) => void moveToFolder(id, null)}
           />
 
@@ -502,6 +683,7 @@ export default function IntakeView(): JSX.Element {
               title={f.name}
               Icon={folderIcon(f.icon)}
               items={visible.filter((i) => i.folderId === f.id)}
+              onInfo={setDetailItem}
               onDropItem={(id) => void moveToFolder(id, f.id)}
               onDelete={() => void deleteFolder(f)}
             />
@@ -513,6 +695,7 @@ export default function IntakeView(): JSX.Element {
               title={label}
               Icon={CalendarDays}
               items={items}
+              onInfo={setDetailItem}
               onDropItem={(id) => void moveToFolder(id, null)}
               defaultOpen={false}
             />
@@ -618,6 +801,7 @@ export default function IntakeView(): JSX.Element {
           </div>
         </div>
       </div>
+      <PostingOverlay item={detailItem} onClose={() => setDetailItem(null)} />
     </div>
   )
 }
