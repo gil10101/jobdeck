@@ -45,6 +45,9 @@ export interface IpcInvokeContract {
     }
     res: IntakeItem
   }
+  // Fetches a public job-posting page and builds an intake item from its
+  // schema.org JobPosting JSON-LD — URL in, structured posting out.
+  'intake:fromUrl': { req: { url: string }; res: IntakeItem }
   'intake:dismiss': { req: { id: string }; res: void }
   'todo:rescan': { req: void; res: IntakeItem[] }
   'runs:start': {
@@ -171,6 +174,7 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'scan:run',
   'intake:list',
   'intake:addPasted',
+  'intake:fromUrl',
   'intake:dismiss',
   'todo:rescan',
   'runs:start',

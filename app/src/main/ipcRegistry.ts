@@ -5,6 +5,7 @@ import path from 'node:path'
 import type { IntakeItem } from '@shared/types'
 import type { IpcChannel, IpcInvokeContract } from '@shared/ipc'
 import { buildApplicationDetail } from './parsers/detail'
+import { fetchPostingFromUrl } from './parsers/jobPostingUrl'
 import { scanApplications } from './fsops/FolderScanner'
 import { copyText, openExternal, openFolder, showItem } from './fsops/reveal'
 import { importFromXlsx } from './xlsx/importXlsx'
@@ -108,10 +109,19 @@ export function registerIpc(services: Services): void {
 
   // ---- intake ----
   handle('intake:list', () => store.state.intake.filter((i) => i.state !== 'dismissed'))
-  handle('intake:addPasted', ({ text, url, company, role, imagesBase64 }) => {
-    if (!text.trim() && !imagesBase64?.length) {
-      throw new Error('paste posting text or at least one screenshot')
-    }
+  const createIntakeItem = ({
+    text,
+    url,
+    company,
+    role,
+    imagesBase64
+  }: {
+    text: string
+    url?: string
+    company?: string
+    role?: string
+    imagesBase64?: string[]
+  }): IntakeItem => {
     const id = randomUUID()
     // Persist pasted screenshots so the agent can Read them.
     const imagePaths: string[] = []
@@ -147,6 +157,23 @@ export function registerIpc(services: Services): void {
     seedFromText(item.companyHint, text)
     ensureRatingBg(item.companyHint)
     return item
+  }
+
+  handle('intake:addPasted', (req) => {
+    if (!req.text.trim() && !req.imagesBase64?.length) {
+      throw new Error('paste posting text or at least one screenshot')
+    }
+    return createIntakeItem(req)
+  })
+
+  handle('intake:fromUrl', async ({ url }) => {
+    const posting = await fetchPostingFromUrl(url)
+    return createIntakeItem({
+      text: posting.text,
+      url,
+      company: posting.company,
+      role: posting.role
+    })
   })
   handle('intake:dismiss', ({ id }) => {
     store.mutate(['intake'], (s) => {

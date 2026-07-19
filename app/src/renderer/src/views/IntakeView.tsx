@@ -155,6 +155,24 @@ export default function IntakeView(): JSX.Element {
     }
   }
 
+  const [fetchUrl, setFetchUrl] = useState('')
+  const [fetching, setFetching] = useState(false)
+  const addFromUrl = async (): Promise<void> => {
+    const u = fetchUrl.trim()
+    if (!u) return
+    setFetching(true)
+    try {
+      const item = await call('intake:fromUrl', { url: u })
+      setFetchUrl('')
+      toast(`Captured: ${item.title}`, 'success')
+      void useApp.getState().refreshIntake()
+    } catch (err) {
+      toast(String(err), 'error')
+    } finally {
+      setFetching(false)
+    }
+  }
+
   const addPasted = async (): Promise<void> => {
     if (!text.trim() && images.length === 0) {
       toast('Paste the job posting text or a screenshot first', 'error')
@@ -223,6 +241,35 @@ export default function IntakeView(): JSX.Element {
 
         <div className="flex flex-col gap-2">
           <div className="text-xs font-semibold uppercase tracking-wide text-muted">
+            Add by URL
+          </div>
+          <div className="panel flex flex-col gap-1.5 p-3">
+            <div className="flex gap-2">
+              <input
+                className="input flex-1"
+                placeholder="https://… job posting link"
+                value={fetchUrl}
+                onChange={(e) => setFetchUrl(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !fetching) void addFromUrl()
+                }}
+              />
+              <button
+                className="btn btn-primary shrink-0"
+                disabled={fetching || !fetchUrl.trim()}
+                onClick={() => void addFromUrl()}
+              >
+                {fetching ? 'Fetching…' : 'Fetch'}
+              </button>
+            </div>
+            <div className="text-[10px] leading-relaxed text-gray-600">
+              Reads the structured JobPosting data most job pages embed (jobright, LinkedIn,
+              Greenhouse, Lever, company sites) — no copy-paste needed. If a page has none,
+              paste the text below instead.
+            </div>
+          </div>
+
+          <div className="mt-1 text-xs font-semibold uppercase tracking-wide text-muted">
             Paste a posting
           </div>
           <div className="panel flex flex-col gap-2 p-3">
