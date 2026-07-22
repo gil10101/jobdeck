@@ -18,6 +18,8 @@ Build a complete, tailored application folder from the posting below, then write
 
 {{PROFILE_MD}}
 
+{{MASTER_CONTEXT_MD}}
+{{USER_NOTES_MD}}
 {{TAILORING_RULES_MD}}
 
 ## STEP 1 — Learn the document pattern

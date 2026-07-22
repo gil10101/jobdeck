@@ -14,6 +14,7 @@ import {
   uniqueSlug
 } from '../paths'
 import { assertScoutable, prefetchJobrightFeed } from '../boards/boardsBridge'
+import { scanApplications } from '../fsops/FolderScanner'
 import { parseReport, validateReport } from '../parsers/report'
 import { validateProfile } from '../profile/profileSchema'
 import { loadProfile } from '../profile/profileStore'
@@ -33,6 +34,8 @@ export interface RunInput {
   applyUrl?: string
   companyHint?: string
   roleHint?: string
+  /** Build runs: user notes for this specific application. */
+  notes?: string
   /** Scout runs: optional extra instructions from the user. */
   instructions?: string
   /** Interview runs: the tracker row being prepped (folder + position/company). */
@@ -296,6 +299,13 @@ export class AgentRunner {
         profile
       )
     }
+    // Notes fall back to the intake item's stored notes so every build path
+    // (single build, build-all, retries) picks them up without re-plumbing.
+    const notes =
+      run.input.notes ??
+      (run.input.intakeId
+        ? (this.store.state.intake.find((i) => i.id === run.input.intakeId)?.notes ?? null)
+        : null)
     return buildPrompt(
       {
         slug: run.meta.slug,
@@ -303,7 +313,8 @@ export class AgentRunner {
         imagePaths: run.input.imagePaths ?? [],
         applyUrl: run.input.applyUrl ?? null,
         companyHint: run.input.companyHint ?? '',
-        roleHint: run.input.roleHint ?? ''
+        roleHint: run.input.roleHint ?? '',
+        notes
       },
       profile
     )
@@ -609,7 +620,32 @@ export class AgentRunner {
   private finish(run: ActiveRun, status: RunStatus, errorText?: string): void {
     if (status === 'failed' || status === 'cancelled') {
       this.setIntakeState(run.meta.intakeId, status === 'failed' ? 'failed' : 'new')
+      this.salvageBuildFolder(run)
     }
     this.setStatus(run, status, errorText)
+  }
+
+  /**
+   * A build that dies mid-run (crash, cancel, missing/invalid report.json) may
+   * still have written real documents. Fold whatever is on disk into the
+   * tracker so a folder with a built résumé/cover letter is never invisible —
+   * the row comes from scan facts (posting metadata, doc paths), same as the
+   * manual "Rescan folders" action. Folders with no built documents are left
+   * alone: a run that produced nothing has nothing to track.
+   */
+  private salvageBuildFolder(run: ActiveRun): void {
+    if (run.meta.kind !== 'build') return
+    try {
+      const folderAbs = path.join(APPLICATIONS_DIR, run.meta.slug)
+      if (!fs.existsSync(folderAbs)) return
+      const names = fs.readdirSync(folderAbs)
+      const hasDocs = names.some((n) => /_Resume\.(pdf|tex)$|_Cover_Letter\.(pdf|tex)$/.test(n))
+      if (!hasDocs) return
+      this.tracker.applyScan(scanApplications())
+      const row = this.tracker.findBySlug(run.meta.slug)
+      if (row?.folderPath) run.meta.folderPath = row.folderPath
+    } catch (err) {
+      console.error('[runner] salvage scan after failed build errored:', err)
+    }
   }
 }

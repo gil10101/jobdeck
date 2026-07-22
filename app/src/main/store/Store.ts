@@ -54,6 +54,10 @@ export class Store extends EventEmitter {
           for (const item of this.state_.intake) {
             item.imagePaths ??= []
             item.folderId ??= null
+            item.notes ??= null
+          }
+          for (const c of this.state_.candidates) {
+            c.notes ??= null
           }
         }
       }

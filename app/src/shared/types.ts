@@ -89,6 +89,8 @@ export interface IntakeItem {
   runId: string | null
   /** Custom intake folder the user filed this under; null = auto date grouping. */
   folderId?: string | null
+  /** User notes handed to the build agent as authoritative extra context. */
+  notes?: string | null
   createdAt: string
 }
 
@@ -155,6 +157,8 @@ export interface CandidateJob {
   state: 'new' | 'accepted' | 'rejected'
   scoutRunId: string
   buildRunId: string | null
+  /** User notes handed to the build agent as authoritative extra context. */
+  notes?: string | null
   createdAt: string
 }
 
@@ -295,7 +299,10 @@ export interface ScanResult {
 }
 
 export interface AppSettings {
-  maxConcurrentRuns: 1 | 2
+  /** Parallel agent runs. Builds are independent (separate folders, separate
+   *  LaTeX processes; store writes are serialized in the main process), so
+   *  the real limits are API throughput and how many you want to watch. */
+  maxConcurrentRuns: 1 | 2 | 3 | 4
   renameFolderOnSubmit: boolean
   model?: string
   maxTurns: number

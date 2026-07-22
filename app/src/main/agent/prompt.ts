@@ -38,6 +38,25 @@ export interface PromptSlots {
   applyUrl: string | null
   companyHint: string
   roleHint: string
+  /** Per-application user notes; rendered as authoritative context. */
+  notes: string | null
+}
+
+/** Free-form profile-supplementing context from Settings (master/context.md). */
+function masterContextSection(): string {
+  try {
+    const text = fs.readFileSync(path.join(MASTER_DIR, 'context.md'), 'utf-8').trim()
+    if (!text) return ''
+    return `## Additional candidate context (from the user — treat as part of the profile)\n${text}\n`
+  } catch {
+    return ''
+  }
+}
+
+function userNotesSection(notes: string | null): string {
+  const text = (notes ?? '').trim()
+  if (!text) return ''
+  return `## Notes from the candidate for THIS application (authoritative — follow them)\n${text}\n`
 }
 
 function imagesSection(imagePaths: string[]): string {
@@ -86,11 +105,16 @@ function latexLine(): string {
   }
   if (eng.kind === 'tectonic') {
     return [
-      `Compile with tectonic: \`"${eng.path}" <file.tex>\` run ONCE per document (tectonic auto-runs`,
-      'enough passes). tectonic is XeTeX-based, so any pdfTeX-only ATS line such as',
+      `Compile with tectonic: \`"${eng.path}" --keep-logs <file.tex>\` run ONCE per document (tectonic`,
+      'auto-runs enough passes). tectonic is XeTeX-based, so any pdfTeX-only ATS line such as',
       '`\\input glyphtounicode` / `\\pdfgentounicode=1` MUST be wrapped in',
       '`\\ifdefined\\pdfgentounicode ... \\fi` so it is skipped under tectonic (XeTeX already',
-      'embeds a real Unicode text layer). Confirm each PDF is exactly 1 page from the tectonic output.'
+      'embeds a real Unicode text layer).',
+      'PAGE COUNT: read it from the engine log, nowhere else —',
+      '`grep "Output written" <file>.log` prints `(N pages`/`(1 page` after every compile.',
+      'Do NOT use `mdls` (Spotlight indexes new files asynchronously, so it returns null or',
+      'stale counts) and do NOT grep the PDF bytes for `/Type /Page` or `/Count` (tectonic',
+      'writes compressed object streams, so both find nothing).'
     ].join(' ')
   }
   return `Compile with ${eng.kind}: \`"${eng.path}" -interaction=nonstopmode <file.tex>\` run TWICE per document (hyperref). Confirm the log says \`(1 page\`.`
@@ -103,6 +127,8 @@ export function buildPrompt(slots: PromptSlots, profile: ProfileFile): string {
     CANDIDATE_NAME: profile.identity.fullName,
     FILE_BASENAME: profile.documents.fileBasename,
     PROFILE_MD: renderProfileMd(profile),
+    MASTER_CONTEXT_MD: masterContextSection(),
+    USER_NOTES_MD: userNotesSection(slots.notes),
     TAILORING_RULES_MD: renderTailoringRulesMd(profile),
     ANSWERS_INFO_MD: renderAnswersInfoMd(profile),
     COVER_LETTER_STORIES_MD: renderStoriesMd(profile, 'cover_letter'),

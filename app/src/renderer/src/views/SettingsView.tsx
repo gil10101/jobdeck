@@ -61,8 +61,13 @@ export default function SettingsView(): JSX.Element {
   const [modelDraft, setModelDraft] = useState('')
   const [maxTurnsDraft, setMaxTurnsDraft] = useState('')
   const [backfillBusy, setBackfillBusy] = useState(false)
+  const [masterContext, setMasterContext] = useState('')
+  const [masterContextSaved, setMasterContextSaved] = useState(true)
 
   useEffect(() => {
+    void call('master:getContext', undefined)
+      .then(({ text }) => setMasterContext(text))
+      .catch(() => undefined)
     void call('app:info', undefined).then(setInfo).catch(() => undefined)
     void call('boards:getStatus', undefined)
       .then((s) => {
@@ -124,6 +129,16 @@ export default function SettingsView(): JSX.Element {
     }
   }
 
+  const saveMasterContext = async (): Promise<void> => {
+    try {
+      await call('master:setContext', { text: masterContext })
+      setMasterContextSaved(true)
+      toast('Master context saved', 'success')
+    } catch (err) {
+      toast(String(err), 'error')
+    }
+  }
+
   const installBunNow = async (): Promise<void> => {
     setBunInstalling(true)
     try {
@@ -168,6 +183,38 @@ export default function SettingsView(): JSX.Element {
         <h1 className="text-sm font-semibold text-gray-100">Settings</h1>
 
         <ProfilePanel />
+
+        <div className="panel mt-4 px-4 py-3">
+          <div className="text-[10px] font-bold uppercase tracking-wide text-muted">
+            Master résumé context
+          </div>
+          <div className="mt-1 text-[11px] leading-relaxed text-gray-500">
+            Free-form context added to every build alongside your profile — extra skills, certs,
+            projects, or standing guidance the agent should always know. For one specific
+            application, use the notes field on its intake card or scout panel instead.
+          </div>
+          <textarea
+            className="input mt-2 min-h-[7rem] w-full resize-y font-mono text-[11px] leading-relaxed"
+            placeholder={'e.g.\n- AWS Solutions Architect Associate (in progress, exam Aug 2026)\n- Side project: warehouse cost dashboard in dbt + Metabase\n- Prefer "data practitioner" framing over "engineer" for analyst roles'}
+            value={masterContext}
+            onChange={(e) => {
+              setMasterContext(e.target.value)
+              setMasterContextSaved(false)
+            }}
+          />
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              className="btn btn-primary px-2 py-1 text-[10px]"
+              disabled={masterContextSaved}
+              onClick={() => void saveMasterContext()}
+            >
+              {masterContextSaved ? 'Saved' : 'Save'}
+            </button>
+            <span className="text-[10px] text-gray-600">
+              Stored at master/context.md in your workspace.
+            </span>
+          </div>
+        </div>
 
         <div className="panel mt-4 px-4 py-1">
           <div className="pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
@@ -228,10 +275,10 @@ export default function SettingsView(): JSX.Element {
           </Row>
           <Row
             label="Concurrent runs"
-            hint="1 is safest (pdflatex + repo writes). 2 works since builds use separate folders."
+            hint="Builds are independent (separate folders + LaTeX processes) — higher values mainly cost API throughput."
           >
             <div className="flex gap-1">
-              {([1, 2] as const).map((n) => (
+              {([1, 2, 3, 4] as const).map((n) => (
                 <button
                   key={n}
                   className={`chip ${settings.maxConcurrentRuns === n ? 'border-cyan-700 bg-cyan-950/60 text-cyan-200' : ''}`}

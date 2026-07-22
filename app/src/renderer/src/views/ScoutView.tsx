@@ -135,10 +135,19 @@ function PostingPanel({
 }): JSX.Element {
   const toast = useApp((s) => s.toast)
   const [rawOpen, setRawOpen] = useState(false)
+  const [notes, setNotes] = useState('')
 
   useEffect(() => {
     setRawOpen(false)
+    setNotes(c?.notes ?? '')
   }, [c?.id])
+
+  const saveNotes = (): void => {
+    if (!c || (c.notes ?? '') === notes.trim()) return
+    void call('candidates:setNotes', { id: c.id, notes })
+      .then(() => useApp.getState().refreshCandidates())
+      .catch((err) => toast(String(err), 'error'))
+  }
 
   useEffect(() => {
     if (!c) return
@@ -251,7 +260,16 @@ function PostingPanel({
             )}
           </div>
 
-          <div className="flex items-center gap-2 border-t border-edge px-4 py-3">
+          <div className="border-t border-edge px-4 pt-2">
+            <textarea
+              className="input min-h-[3.5rem] w-full resize-y text-[11px]"
+              placeholder="Notes for the agent if this gets built — extra skills or certs to include, framing to use, things to emphasize…"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              onBlur={saveNotes}
+            />
+          </div>
+          <div className="flex items-center gap-2 px-4 py-3">
             <ActionButtons c={c} actions={actions} />
           </div>
         </div>

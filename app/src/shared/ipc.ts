@@ -55,6 +55,12 @@ export interface IpcInvokeContract {
   /** Items in the folder return to auto date grouping. */
   'intake:deleteFolder': { req: { id: string }; res: void }
   'intake:moveToFolder': { req: { id: string; folderId: string | null }; res: void }
+  'intake:setNotes': { req: { id: string; notes: string }; res: void }
+  'candidates:setNotes': { req: { id: string; notes: string }; res: void }
+  // Free-form context appended to every build prompt alongside the profile
+  // (extra skills/certs/projects); lives at <workspace>/master/context.md.
+  'master:getContext': { req: void; res: { text: string } }
+  'master:setContext': { req: { text: string }; res: void }
   'todo:rescan': { req: void; res: IntakeItem[] }
   'runs:start': {
     req: {
@@ -186,6 +192,10 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'intake:createFolder',
   'intake:deleteFolder',
   'intake:moveToFolder',
+  'intake:setNotes',
+  'candidates:setNotes',
+  'master:getContext',
+  'master:setContext',
   'todo:rescan',
   'runs:start',
   'runs:cancel',

@@ -21,6 +21,7 @@ import {
   RefreshCw,
   Rocket,
   Star,
+  StickyNote,
   Target,
   Trash2,
   X,
@@ -105,6 +106,15 @@ function IntakeCard({
   const navigate = useApp((s) => s.navigate)
   const info = useApp((s) => s.companies[companyKey(item.companyHint)])
   const [dragged, setDragged] = useState(false)
+  const [notes, setNotes] = useState(item.notes ?? '')
+  const [notesOpen, setNotesOpen] = useState(!!item.notes)
+
+  const saveNotes = (): void => {
+    if ((item.notes ?? '') === notes.trim()) return
+    void call('intake:setNotes', { id: item.id, notes })
+      .then(() => useApp.getState().refreshIntake())
+      .catch((err) => toast(String(err), 'error'))
+  }
 
   const build = async (): Promise<void> => {
     try {
@@ -210,6 +220,13 @@ function IntakeCard({
           value={role}
           onChange={(e) => setRole(e.target.value)}
         />
+        <button
+          className={`btn shrink-0 px-2 ${notes.trim() ? 'text-amber-300' : 'text-gray-500'}`}
+          onClick={() => setNotesOpen((v) => !v)}
+          title="Notes for the agent (extra skills, framing, context)"
+        >
+          <StickyNote size={13} />
+        </button>
         {item.state === 'new' || item.state === 'failed' ? (
           <button className="btn btn-primary shrink-0" onClick={build}>
             ▶ Build
@@ -226,6 +243,15 @@ function IntakeCard({
           Dismiss
         </button>
       </div>
+      {notesOpen && (
+        <textarea
+          className="input mt-2 min-h-[3.5rem] w-full resize-y text-[11px]"
+          placeholder="Notes for the agent building this application — extra skills or certs to include, framing to use, things to emphasize or avoid…"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          onBlur={saveNotes}
+        />
+      )}
     </div>
   )
 }

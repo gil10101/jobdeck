@@ -10,7 +10,7 @@ import { scanApplications } from './fsops/FolderScanner'
 import { copyText, openExternal, openFolder, showItem } from './fsops/reveal'
 import { importFromXlsx } from './xlsx/importXlsx'
 import { exportToXlsx } from './xlsx/exportXlsx'
-import { INTAKE_IMAGES_DIR, UPLOADS_DIR, toAbs, toRel } from './paths'
+import { INTAKE_IMAGES_DIR, MASTER_DIR, UPLOADS_DIR, toAbs, toRel } from './paths'
 import { listLibrary, readLibraryFile } from './fsops/library'
 import { recompileDoc } from './latex/recompile'
 import {
@@ -213,6 +213,29 @@ export function registerIpc(services: Services): void {
       if (item) item.folderId = folderId
     })
   })
+  handle('intake:setNotes', ({ id, notes }) => {
+    store.mutate(['intake'], (s) => {
+      const item = s.intake.find((i) => i.id === id)
+      if (item) item.notes = notes.trim() || null
+    })
+  })
+  handle('candidates:setNotes', ({ id, notes }) => {
+    store.mutate(['candidates'], (s) => {
+      const c = s.candidates.find((x) => x.id === id)
+      if (c) c.notes = notes.trim() || null
+    })
+  })
+  handle('master:getContext', () => {
+    try {
+      return { text: fs.readFileSync(path.join(MASTER_DIR, 'context.md'), 'utf-8') }
+    } catch {
+      return { text: '' }
+    }
+  })
+  handle('master:setContext', ({ text }) => {
+    fs.mkdirSync(MASTER_DIR, { recursive: true })
+    fs.writeFileSync(path.join(MASTER_DIR, 'context.md'), text, 'utf-8')
+  })
   handle('todo:rescan', () => {
     todo.rescan()
     return store.state.intake.filter((i) => i.state !== 'dismissed')
@@ -269,7 +292,8 @@ export function registerIpc(services: Services): void {
       postingText: candidate.postingText,
       applyUrl: candidate.applyUrl || undefined,
       companyHint: candidate.company,
-      roleHint: candidate.position
+      roleHint: candidate.position,
+      notes: candidate.notes ?? undefined
     })
     tracker.upsertRow({
       slug: run.slug,
