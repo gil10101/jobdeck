@@ -47,7 +47,9 @@ function masterContextSection(): string {
   try {
     const text = fs.readFileSync(path.join(MASTER_DIR, 'context.md'), 'utf-8').trim()
     if (!text) return ''
-    return `## Additional candidate context (from the user — treat as part of the profile)\n${text}\n`
+    return `## Additional candidate context (from the user)
+Treat as part of the profile, with one distinction: entries marked as background/context-only (e.g. "never include on the résumé") are for YOUR understanding — use them to judge fit, answer questions, and frame documents, but NEVER list them in the résumé or cover letter. Inclusion/exclusion rules stated here are binding.
+${text}\n`
   } catch {
     return ''
   }

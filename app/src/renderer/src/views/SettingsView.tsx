@@ -195,7 +195,7 @@ export default function SettingsView(): JSX.Element {
           </div>
           <textarea
             className="input mt-2 min-h-[7rem] w-full resize-y font-mono text-[11px] leading-relaxed"
-            placeholder={'e.g.\n- AWS Solutions Architect Associate (in progress, exam Aug 2026)\n- Side project: warehouse cost dashboard in dbt + Metabase\n- Prefer "data practitioner" framing over "engineer" for analyst roles'}
+            placeholder={'e.g.\n- AWS Solutions Architect Associate (in progress, exam Aug 2026)\n- Coursework (context only — NEVER list on résumé or cover letter): Databases, Distributed Systems, Statistical Learning\n- Prefer "data practitioner" framing over "engineer" for analyst roles'}
             value={masterContext}
             onChange={(e) => {
               setMasterContext(e.target.value)
