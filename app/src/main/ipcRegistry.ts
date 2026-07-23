@@ -238,6 +238,68 @@ export function registerIpc(services: Services): void {
     fs.mkdirSync(MASTER_DIR, { recursive: true })
     fs.writeFileSync(path.join(MASTER_DIR, 'context.md'), text, 'utf-8')
   })
+
+  // ---- knowledge base: background-only notes + attached files ----
+  const knowledgeDir = (): string => path.join(MASTER_DIR, 'knowledge')
+  const knowledgeFileName = (name: string): string => {
+    // Names come back from the renderer for removal — never let them traverse.
+    if (!name || name !== path.basename(name) || name.startsWith('.')) {
+      throw new Error(`invalid file name: ${name}`)
+    }
+    return path.join(knowledgeDir(), name)
+  }
+  handle('knowledge:get', () => {
+    let notes = ''
+    try {
+      notes = fs.readFileSync(path.join(knowledgeDir(), 'notes.md'), 'utf-8')
+    } catch {
+      /* none yet */
+    }
+    let files: { name: string; sizeKb: number }[] = []
+    try {
+      files = fs
+        .readdirSync(knowledgeDir())
+        .filter((f) => !f.startsWith('.') && f !== 'notes.md')
+        .map((f) => ({
+          name: f,
+          sizeKb: Math.max(1, Math.round(fs.statSync(path.join(knowledgeDir(), f)).size / 1024))
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name))
+    } catch {
+      /* empty */
+    }
+    return { notes, files }
+  })
+  handle('knowledge:setNotes', ({ text }) => {
+    fs.mkdirSync(knowledgeDir(), { recursive: true })
+    fs.writeFileSync(path.join(knowledgeDir(), 'notes.md'), text, 'utf-8')
+  })
+  handle('knowledge:addFiles', async () => {
+    const win = services.getWindow()
+    const result = await dialog.showOpenDialog(win ?? new BrowserWindow({ show: false }), {
+      title: 'Add knowledge-base files',
+      properties: ['openFile', 'multiSelections']
+    })
+    if (result.canceled) return { added: 0 }
+    fs.mkdirSync(knowledgeDir(), { recursive: true })
+    let added = 0
+    for (const src of result.filePaths) {
+      const base = path.basename(src)
+      // Keep both files on a name collision rather than overwriting.
+      let dest = path.join(knowledgeDir(), base)
+      let n = 1
+      while (fs.existsSync(dest)) {
+        const ext = path.extname(base)
+        dest = path.join(knowledgeDir(), `${path.basename(base, ext)}-${++n}${ext}`)
+      }
+      fs.copyFileSync(src, dest)
+      added++
+    }
+    return { added }
+  })
+  handle('knowledge:removeFile', ({ name }) => {
+    fs.rmSync(knowledgeFileName(name), { force: true })
+  })
   handle('todo:rescan', () => {
     todo.rescan()
     return store.state.intake.filter((i) => i.state !== 'dismissed')

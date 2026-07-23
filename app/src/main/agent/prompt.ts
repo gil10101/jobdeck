@@ -55,6 +55,38 @@ ${text}\n`
   }
 }
 
+/** Background-only knowledge base (master/knowledge): notes inline, files by
+ *  path for the agent to Read on demand. Never document material. */
+function knowledgeSection(): string {
+  const dir = path.join(MASTER_DIR, 'knowledge')
+  let notes = ''
+  try {
+    notes = fs.readFileSync(path.join(dir, 'notes.md'), 'utf-8').trim()
+  } catch {
+    /* none */
+  }
+  let files: string[] = []
+  try {
+    files = fs.readdirSync(dir).filter((f) => !f.startsWith('.') && f !== 'notes.md')
+  } catch {
+    /* none */
+  }
+  if (!notes && files.length === 0) return ''
+  const lines = [
+    '## Knowledge base (BACKGROUND ONLY — binding rule)',
+    'Everything in this section is context for your judgment: use it to evaluate fit, answer application questions, and frame documents. NEVER list, quote, or copy any of it onto the résumé or cover letter.'
+  ]
+  if (notes) lines.push('', notes)
+  if (files.length) {
+    lines.push(
+      '',
+      'Attached reference files (Read any that look relevant — images and PDFs are readable directly):',
+      ...files.map((f) => `- master/knowledge/${f}`)
+    )
+  }
+  return lines.join('\n') + '\n'
+}
+
 function userNotesSection(notes: string | null): string {
   const text = (notes ?? '').trim()
   if (!text) return ''
@@ -130,6 +162,7 @@ export function buildPrompt(slots: PromptSlots, profile: ProfileFile): string {
     FILE_BASENAME: profile.documents.fileBasename,
     PROFILE_MD: renderProfileMd(profile),
     MASTER_CONTEXT_MD: masterContextSection(),
+    KNOWLEDGE_MD: knowledgeSection(),
     USER_NOTES_MD: userNotesSection(slots.notes),
     TAILORING_RULES_MD: renderTailoringRulesMd(profile),
     ANSWERS_INFO_MD: renderAnswersInfoMd(profile),

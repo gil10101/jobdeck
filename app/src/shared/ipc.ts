@@ -61,6 +61,17 @@ export interface IpcInvokeContract {
   // (extra skills/certs/projects); lives at <workspace>/master/context.md.
   'master:getContext': { req: void; res: { text: string } }
   'master:setContext': { req: { text: string }; res: void }
+  // Knowledge base: background-only material (notes + attached files) agents
+  // may consult but never copy onto generated documents. Lives at
+  // <workspace>/master/knowledge/.
+  'knowledge:get': {
+    req: void
+    res: { notes: string; files: { name: string; sizeKb: number }[] }
+  }
+  'knowledge:setNotes': { req: { text: string }; res: void }
+  /** Opens a file picker and copies the chosen files into the knowledge folder. */
+  'knowledge:addFiles': { req: void; res: { added: number } }
+  'knowledge:removeFile': { req: { name: string }; res: void }
   'todo:rescan': { req: void; res: IntakeItem[] }
   'runs:start': {
     req: {
@@ -203,6 +214,10 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'candidates:setNotes',
   'master:getContext',
   'master:setContext',
+  'knowledge:get',
+  'knowledge:setNotes',
+  'knowledge:addFiles',
+  'knowledge:removeFile',
   'todo:rescan',
   'runs:start',
   'runs:cancel',

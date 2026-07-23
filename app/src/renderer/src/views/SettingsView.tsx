@@ -63,10 +63,19 @@ export default function SettingsView(): JSX.Element {
   const [backfillBusy, setBackfillBusy] = useState(false)
   const [masterContext, setMasterContext] = useState('')
   const [masterContextSaved, setMasterContextSaved] = useState(true)
+  const [kbNotes, setKbNotes] = useState('')
+  const [kbNotesSaved, setKbNotesSaved] = useState(true)
+  const [kbFiles, setKbFiles] = useState<{ name: string; sizeKb: number }[]>([])
 
   useEffect(() => {
     void call('master:getContext', undefined)
       .then(({ text }) => setMasterContext(text))
+      .catch(() => undefined)
+    void call('knowledge:get', undefined)
+      .then(({ notes, files }) => {
+        setKbNotes(notes)
+        setKbFiles(files)
+      })
       .catch(() => undefined)
     void call('app:info', undefined).then(setInfo).catch(() => undefined)
     void call('boards:getStatus', undefined)
@@ -124,6 +133,39 @@ export default function SettingsView(): JSX.Element {
   const setBoardEnabled = async (board: BoardId, enabled: boolean): Promise<void> => {
     try {
       setBoards(await call('boards:setEnabled', { board, enabled }))
+    } catch (err) {
+      toast(String(err), 'error')
+    }
+  }
+
+  const saveKbNotes = async (): Promise<void> => {
+    try {
+      await call('knowledge:setNotes', { text: kbNotes })
+      setKbNotesSaved(true)
+      toast('Knowledge base saved', 'success')
+    } catch (err) {
+      toast(String(err), 'error')
+    }
+  }
+
+  const addKbFiles = async (): Promise<void> => {
+    try {
+      const { added } = await call('knowledge:addFiles', undefined)
+      if (added > 0) {
+        const { notes, files } = await call('knowledge:get', undefined)
+        setKbNotes(notes)
+        setKbFiles(files)
+        toast(`Added ${added} file${added === 1 ? '' : 's'}`, 'success')
+      }
+    } catch (err) {
+      toast(String(err), 'error')
+    }
+  }
+
+  const removeKbFile = async (name: string): Promise<void> => {
+    try {
+      await call('knowledge:removeFile', { name })
+      setKbFiles((prev) => prev.filter((f) => f.name !== name))
     } catch (err) {
       toast(String(err), 'error')
     }
@@ -214,6 +256,61 @@ export default function SettingsView(): JSX.Element {
               Stored at master/context.md in your workspace.
             </span>
           </div>
+        </div>
+
+        <div className="panel mt-4 px-4 py-3">
+          <div className="text-[10px] font-bold uppercase tracking-wide text-muted">
+            Knowledge base — background only, never on documents
+          </div>
+          <div className="mt-1 text-[11px] leading-relaxed text-gray-500">
+            Notes and files (transcripts, syllabi, portfolios, old résumés — images and PDFs are
+            readable by agents) that inform fit judgment, application answers, and framing. Nothing
+            here is ever listed on a résumé or cover letter.
+          </div>
+          <textarea
+            className="input mt-2 min-h-[5rem] w-full resize-y font-mono text-[11px] leading-relaxed"
+            placeholder={'e.g.\n- Coursework: Databases, Distributed Systems, Statistical Learning\n- Left retail job off the résumé; fine to mention in "other experience" questions'}
+            value={kbNotes}
+            onChange={(e) => {
+              setKbNotes(e.target.value)
+              setKbNotesSaved(false)
+            }}
+          />
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              className="btn btn-primary px-2 py-1 text-[10px]"
+              disabled={kbNotesSaved}
+              onClick={() => void saveKbNotes()}
+            >
+              {kbNotesSaved ? 'Saved' : 'Save notes'}
+            </button>
+            <button className="btn px-2 py-1 text-[10px]" onClick={() => void addKbFiles()}>
+              + Add files
+            </button>
+            <span className="text-[10px] text-gray-600">
+              Stored in master/knowledge/ in your workspace.
+            </span>
+          </div>
+          {kbFiles.length > 0 && (
+            <div className="mt-2 flex flex-col gap-1">
+              {kbFiles.map((f) => (
+                <div
+                  key={f.name}
+                  className="group flex items-center gap-2 rounded-md border border-edge px-2 py-1 text-[11px]"
+                >
+                  <span className="min-w-0 flex-1 truncate text-gray-300">{f.name}</span>
+                  <span className="shrink-0 text-[10px] text-gray-600">{f.sizeKb} KB</span>
+                  <button
+                    className="invisible shrink-0 text-gray-500 hover:text-red-400 group-hover:visible"
+                    onClick={() => void removeKbFile(f.name)}
+                    title="Remove from knowledge base"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="panel mt-4 px-4 py-1">

@@ -70,6 +70,19 @@ export class DetailChatManager {
     // Glob patterns and Grep glob filters can themselves traverse ('../**').
     const patternSafe = (v: unknown): boolean =>
       v === undefined || v === null || (typeof v === 'string' && !v.includes('..'))
+    // The knowledge base is readable (never writable) from this chat too.
+    const knowledgeAbs = path.join(MASTER_DIR, 'knowledge')
+    const insideKnowledge = (p: unknown): boolean => {
+      if (typeof p !== 'string' || !p) return false
+      try {
+        const realKnowledge = fs.realpathSync(knowledgeAbs)
+        const abs = path.resolve(realKnowledge, p)
+        if (!abs.startsWith(realKnowledge + path.sep)) return false
+        return fs.realpathSync(abs).startsWith(realKnowledge + path.sep)
+      } catch {
+        return false
+      }
+    }
     return {
       cwd: folderAbs,
       systemAppend: () => this.systemAppend(row, folderAbs),
@@ -82,6 +95,7 @@ export class DetailChatManager {
         // Read/Edit/Write file_path) must stay inside the application folder.
         const target = input.file_path ?? input.path ?? input.notebook_path
         if (target === undefined || target === null) return name === 'Glob' || name === 'Grep'
+        if (name === 'Read' && insideKnowledge(target)) return true
         return insideFolder(target)
       },
       mcpServers: () => ({
@@ -126,6 +140,19 @@ export class DetailChatManager {
     } catch {
       /* none */
     }
+    let knowledgeNotes = ''
+    let knowledgeFiles: string[] = []
+    try {
+      const kdir = path.join(MASTER_DIR, 'knowledge')
+      try {
+        knowledgeNotes = fs.readFileSync(path.join(kdir, 'notes.md'), 'utf-8').trim()
+      } catch {
+        /* none */
+      }
+      knowledgeFiles = fs.readdirSync(kdir).filter((f) => !f.startsWith('.') && f !== 'notes.md')
+    } catch {
+      /* none */
+    }
     const parts = [
       `You are the revision assistant for ONE job application: ${row.position} at ${row.company}. You work directly inside its folder (your cwd). The user reviews the generated résumé, cover letter, and answers beside this chat and asks for changes.`,
       `Folder contents: ${files.join(', ') || '(empty)'}. Apply URL: ${row.applyUrl || 'unknown'}.`,
@@ -148,6 +175,20 @@ export class DetailChatManager {
     }
     if (masterContext) {
       parts.push('', 'Additional candidate context (from Settings):', masterContext)
+    }
+    if (knowledgeNotes || knowledgeFiles.length) {
+      parts.push(
+        '',
+        'KNOWLEDGE BASE (background only — use for judgment and answers, NEVER copy onto the résumé or cover letter):'
+      )
+      if (knowledgeNotes) parts.push(knowledgeNotes)
+      if (knowledgeFiles.length) {
+        parts.push(
+          `Reference files you may Read (absolute paths): ${knowledgeFiles
+            .map((f) => path.join(MASTER_DIR, 'knowledge', f))
+            .join(', ')}`
+        )
+      }
     }
     if (posting) {
       parts.push('', 'THE POSTING (job_posting.md):', posting)
