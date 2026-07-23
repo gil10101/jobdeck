@@ -80,6 +80,13 @@ export interface IpcInvokeContract {
   'scout:start': { req: { instructions?: string }; res: RunMeta }
   'library:list': { req: void; res: LibraryCategory[] }
   'library:read': { req: { relPath: string }; res: { content: string; truncated: boolean } }
+  /** Restart a dead (failed/cancelled) build with its original input. */
+  'runs:rebuild': { req: { runId: string }; res: RunMeta }
+  // Per-application revision chat (detail view Chat tab). Streams over the
+  // assistant push channels with conversationId `row_<rowId>`.
+  'detailChat:send': { req: { rowId: string; text: string }; res: { conversationId: string } }
+  'detailChat:stop': { req: { rowId: string }; res: void }
+  'detailChat:get': { req: { rowId: string }; res: AssistantConversation | null }
   'detail:recompile': {
     req: { rowId: string; doc: 'resume' | 'cover' }
     res: { pages: number | null; logTail: string }
@@ -199,6 +206,10 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'todo:rescan',
   'runs:start',
   'runs:cancel',
+  'runs:rebuild',
+  'detailChat:send',
+  'detailChat:stop',
+  'detailChat:get',
   'runs:list',
   'runs:get',
   'detail:get',

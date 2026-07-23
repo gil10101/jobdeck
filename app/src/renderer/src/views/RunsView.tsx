@@ -190,6 +190,23 @@ export default function RunsView({ runId }: { runId?: string }): JSX.Element {
                   ■ Cancel
                 </button>
               )}
+              {meta.kind === 'build' &&
+                (meta.status === 'failed' || meta.status === 'cancelled') && (
+                  <button
+                    className="btn btn-primary ml-auto"
+                    title="Restart this build with its original input"
+                    onClick={() =>
+                      void call('runs:rebuild', { runId: meta.id })
+                        .then((m) => {
+                          setSelected(m.id)
+                          navigate({ view: 'runs', runId: m.id })
+                        })
+                        .catch((err) => useApp.getState().toast(String(err), 'error'))
+                    }
+                  >
+                    ⟳ Rebuild
+                  </button>
+                )}
             </div>
             <Timeline events={events} />
             {meta.kind === 'scout' && meta.status === 'succeeded' ? (

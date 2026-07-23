@@ -141,6 +141,7 @@ export class AgentRunner {
       flushTimer: null
     }
     this.runStore.saveMeta(meta)
+    this.runStore.saveInput(meta.id, input)
     this.setIntakeState(input.intakeId, 'building', meta.id)
     this.queue.push(run)
     this.send('push:runChanged', meta)

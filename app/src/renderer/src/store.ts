@@ -55,6 +55,15 @@ export interface AssistantSlice {
   model: string
 }
 
+/** Per-application revision chat (detail view Chat tab); one conversation per row. */
+export interface DetailChatSlice {
+  rowId: string | null
+  conversationId: string | null
+  messages: AssistantMessage[]
+  streaming: { text: string; events: RunEvent[] } | null
+  status: AssistantStatus
+}
+
 function initialAssistantUsage(): AssistantUsage {
   return {
     inputTokens: 0,
@@ -93,6 +102,7 @@ interface AppState {
   companies: Record<string, CompanyInfo>
   toasts: Toast[]
   assistant: AssistantSlice
+  detailChat: DetailChatSlice
   navigate: (route: Route) => void
   refreshConfig: () => Promise<void>
   refreshRows: () => Promise<void>
@@ -115,6 +125,9 @@ interface AppState {
   openAssistantChat: (id: string) => Promise<void>
   deleteAssistantChat: (id: string) => Promise<void>
   refreshAssistantHistory: () => Promise<void>
+  openDetailChat: (rowId: string) => Promise<void>
+  sendDetailChat: (text: string) => Promise<void>
+  stopDetailChat: () => void
 }
 
 let toastSeq = 1
@@ -131,6 +144,7 @@ export const useApp = create<AppState>((set, get) => ({
   companies: {},
   toasts: [],
   assistant: initialAssistantSlice(),
+  detailChat: { rowId: null, conversationId: null, messages: [], streaming: null, status: 'idle' },
 
   navigate: (route) => set({ route }),
 
@@ -361,6 +375,48 @@ export const useApp = create<AppState>((set, get) => ({
     }
   },
 
+  openDetailChat: async (rowId) => {
+    // conversationId is deterministic (row_<id>), so the push guards match
+    // from the very first send — no create round-trip needed.
+    set({
+      detailChat: {
+        rowId,
+        conversationId: `row_${rowId}`,
+        messages: [],
+        streaming: null,
+        status: 'idle'
+      }
+    })
+    try {
+      const conversation = await call('detailChat:get', { rowId })
+      if (conversation && get().detailChat.rowId === rowId) {
+        set((s) => ({
+          detailChat: { ...s.detailChat, messages: conversation.messages }
+        }))
+      }
+    } catch {
+      /* fresh chat */
+    }
+  },
+
+  sendDetailChat: async (text) => {
+    const { rowId } = get().detailChat
+    if (!rowId) return
+    try {
+      await call('detailChat:send', { rowId, text })
+    } catch (err) {
+      get().toast(`Failed to send: ${String(err)}`, 'error')
+    }
+  },
+
+  stopDetailChat: () => {
+    const { rowId } = get().detailChat
+    if (!rowId) return
+    void call('detailChat:stop', { rowId }).catch((err) => {
+      get().toast(`Failed to stop: ${String(err)}`, 'error')
+    })
+  },
+
   refreshAssistantHistory: async () => {
     try {
       const history = await call('assistant:listConversations', undefined)
@@ -418,4 +474,31 @@ onPush('push:assistantState', ({ conversationId, status }) => {
 onPush('push:assistantApproval', (approval) => {
   if (approval.conversationId !== useApp.getState().assistant.conversationId) return
   useApp.setState((s) => ({ assistant: { ...s.assistant, pendingApproval: approval } }))
+})
+
+// Detail-chat mirrors of the assistant push handlers: same channels, guarded on
+// the detailChat conversation (row_<id>), so each push matches exactly one slice.
+onPush('push:assistantMessage', ({ conversationId, message }) => {
+  if (conversationId !== useApp.getState().detailChat.conversationId) return
+  useApp.setState((s) => ({
+    detailChat: {
+      ...s.detailChat,
+      messages: [...s.detailChat.messages, message],
+      streaming: message.role === 'assistant' ? null : s.detailChat.streaming
+    }
+  }))
+})
+
+onPush('push:assistantEvent', ({ conversationId, event }) => {
+  if (conversationId !== useApp.getState().detailChat.conversationId) return
+  useApp.setState((s) => {
+    const prev = s.detailChat.streaming ?? { text: '', events: [] }
+    const text = event.kind === 'text' ? event.text : prev.text
+    return { detailChat: { ...s.detailChat, streaming: { text, events: [...prev.events, event] } } }
+  })
+})
+
+onPush('push:assistantState', ({ conversationId, status }) => {
+  if (conversationId !== useApp.getState().detailChat.conversationId) return
+  useApp.setState((s) => ({ detailChat: { ...s.detailChat, status } }))
 })

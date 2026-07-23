@@ -11,7 +11,14 @@ interface Tab {
   markdown?: string | null
 }
 
-export default function PdfPane({ detail }: { detail: ApplicationDetail }): JSX.Element {
+export default function PdfPane({
+  detail,
+  refreshTick = 0
+}: {
+  detail: ApplicationDetail
+  /** External bump (e.g. the revision chat edited files) forcing a reload. */
+  refreshTick?: number
+}): JSX.Element {
   const toast = useApp((s) => s.toast)
   const [nonce, setNonce] = useState(0)
   const [compiling, setCompiling] = useState(false)
@@ -91,7 +98,7 @@ export default function PdfPane({ detail }: { detail: ApplicationDetail }): JSX.
       <div className="min-h-0 flex-1 bg-panel2">
         {tab.relPath ? (
           <iframe
-            key={`${tab.relPath}-${nonce}`}
+            key={`${tab.relPath}-${nonce}-${refreshTick}`}
             src={localFileUrl(tab.relPath)}
             className="h-full w-full border-0"
             title={tab.label}

@@ -22,6 +22,7 @@ export interface AssistantToolDeps {
   tracker: TrackerRepo
   runStore: RunStore
   startScout: (instructions: string) => { id: string }
+  rebuildRun: (runId: string) => { id: string; slug: string }
   requestApproval: (tool: string, preview: string) => Promise<boolean>
 }
 
@@ -258,6 +259,28 @@ export function buildAssistantMcp(deps: AssistantToolDeps): ReturnType<typeof cr
     }
   )
 
+  const rebuildRunTool = tool(
+    'rebuild_run',
+    "Restart a failed or cancelled build run with its original input (e.g. a build interrupted by an app restart). Requires the user's approval.",
+    { runId: z.string() },
+    async ({ runId }) => {
+      if (!/^[A-Za-z0-9_-]+$/.test(runId)) return json({ error: `invalid run id: ${runId}` })
+      const meta = deps.runStore.getMeta(runId)
+      if (!meta) return json({ error: `run not found: ${runId}` })
+      const ok = await deps.requestApproval(
+        'rebuild_run',
+        `Rebuild ${meta.slug} (${meta.status}${meta.errorText ? `: ${meta.errorText}` : ''})`
+      )
+      if (!ok) return json({ denied: true })
+      try {
+        const run = deps.rebuildRun(runId)
+        return json({ started: run.id, slug: run.slug })
+      } catch (err) {
+        return json({ error: String(err) })
+      }
+    }
+  )
+
   const remember = tool(
     'remember',
     'Record a durable, non-obvious fact about the user for future conversations (e.g. a standing preference). Appends to long-term memory.',
@@ -286,6 +309,7 @@ export function buildAssistantMcp(deps: AssistantToolDeps): ReturnType<typeof cr
       installJobBoard,
       installBunTool,
       startScout,
+      rebuildRunTool,
       remember
     ]
   })

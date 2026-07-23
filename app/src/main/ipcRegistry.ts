@@ -2,8 +2,9 @@ import { BrowserWindow, dialog, ipcMain, webContents } from 'electron'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import type { IntakeItem } from '@shared/types'
+import type { IntakeItem, RunMeta } from '@shared/types'
 import type { IpcChannel, IpcInvokeContract } from '@shared/ipc'
+import type { RunInput } from './agent/AgentRunner'
 import { buildApplicationDetail } from './parsers/detail'
 import { fetchPostingFromUrl } from './parsers/jobPostingUrl'
 import { scanApplications } from './fsops/FolderScanner'
@@ -34,6 +35,7 @@ import type { Store } from './store/Store'
 import type { TrackerRepo } from './store/trackerRepo'
 import type { TodoWatcher } from './fsops/TodoWatcher'
 import { AssistantManager } from './assistant/assistantManager'
+import { DetailChatManager } from './assistant/detailChat'
 
 export interface Services {
   store: Store
@@ -406,6 +408,40 @@ export function registerIpc(services: Services): void {
     return { added, names }
   })
 
+  // ---- rebuild a dead build run with its original input ----
+  const rebuildRun = (runId: string): RunMeta => {
+    if (!/^[A-Za-z0-9_-]+$/.test(runId)) throw new Error(`invalid run id: ${runId}`)
+    const meta = runStore.getMeta(runId)
+    if (!meta) throw new Error(`run not found: ${runId}`)
+    if (meta.kind !== 'build') throw new Error('only build runs can be rebuilt')
+    if (meta.status !== 'failed' && meta.status !== 'cancelled') {
+      throw new Error(`only failed or cancelled builds can be rebuilt (this one is ${meta.status})`)
+    }
+    // Runs recorded before inputs were persisted can still rebuild from their
+    // intake item, which carries the same request.
+    let input = runStore.getInput<RunInput>(runId)
+    if (!input && meta.intakeId) {
+      const item = store.state.intake.find((i) => i.id === meta.intakeId)
+      if (item) {
+        input = {
+          kind: 'build',
+          intakeId: item.id,
+          postingText: item.postingText,
+          imagePaths: item.imagePaths,
+          applyUrl: item.applyUrl ?? undefined,
+          companyHint: item.companyHint,
+          roleHint: item.roleHint,
+          notes: item.notes ?? undefined
+        }
+      }
+    }
+    if (!input) {
+      throw new Error('this run recorded no input and has no intake item — re-add the posting instead')
+    }
+    return runner.start({ ...input, kind: 'build' })
+  }
+  handle('runs:rebuild', ({ runId }) => rebuildRun(runId))
+
   // ---- recompile (edit .tex → rebuild PDF, no agent) ----
   handle('detail:recompile', async ({ rowId, doc }) => {
     const row = tracker.getRow(rowId)
@@ -488,13 +524,19 @@ export function registerIpc(services: Services): void {
   })
 
   // ---- assistant: in-app chat, IPC channels mirror AssistantManager 1:1 ----
-  const assistant = new AssistantManager({
+  const sessionDeps = {
     store,
     tracker,
     runStore,
-    startScout: (instructions) => runner.start({ kind: 'scout', instructions }),
+    startScout: (instructions: string) => runner.start({ kind: 'scout', instructions }),
+    rebuildRun,
     send
-  })
+  }
+  const assistant = new AssistantManager(sessionDeps)
+  const detailChat = new DetailChatManager(sessionDeps)
+  handle('detailChat:send', ({ rowId, text }) => detailChat.send(rowId, text))
+  handle('detailChat:stop', ({ rowId }) => detailChat.stop(rowId))
+  handle('detailChat:get', ({ rowId }) => detailChat.get(rowId))
   handle('assistant:send', (req) => assistant.send(req))
   handle('assistant:stop', (req) => assistant.stop(req))
   handle('assistant:approve', (req) => assistant.approve(req))

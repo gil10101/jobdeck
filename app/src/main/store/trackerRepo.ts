@@ -155,6 +155,16 @@ export class TrackerRepo {
   }
 
   /** Reconcile disk scan facts with the store. */
+  /** Company placeholder from a slug when no posting metadata exists: drop the
+   *  trailing `_MM_DD` date (and any `_N` de-dupe suffix) the slug carries —
+   *  "acme_corp_data_analyst_07_18" reads as "acme corp data analyst", not
+   *  "... 07 18". */
+  private static slugCompanyGuess(slug: string): string {
+    return stripDonePrefix(slug)
+      .replace(/_\d{2}_\d{2}(_\d+)?$/, '')
+      .replace(/_/g, ' ')
+  }
+
   applyScan(facts: FolderFacts[]): ScanResult {
     let created = 0
     let updated = 0
@@ -169,7 +179,7 @@ export class TrackerRepo {
           slug: f.slug,
           folderPath: f.folderRel,
           position: f.positionGuess ?? '',
-          company: f.companyGuess ?? stripDonePrefix(f.slug).replace(/_/g, ' '),
+          company: f.companyGuess ?? TrackerRepo.slugCompanyGuess(f.slug),
           salary: f.salaryGuess ?? '',
           applyUrl: f.applyUrlGuess ?? '',
           resumePath: f.files.resumePdf ? `${f.folderRel}/${f.files.resumePdf}` : null,
@@ -202,6 +212,17 @@ export class TrackerRepo {
       if (!row.coverLetterPath && f.files.coverPdf) {
         patch.coverLetterPath = `${f.folderRel}/${f.files.coverPdf}`
         patch.coverLetter = true
+        touched = true
+      }
+      // Heal placeholders from the old slug fallback (which kept the date) and
+      // fill company/position when a later scan can finally parse the posting.
+      const legacyGuess = stripDonePrefix(f.slug).replace(/_/g, ' ')
+      if (row.company === legacyGuess) {
+        patch.company = f.companyGuess ?? TrackerRepo.slugCompanyGuess(f.slug)
+        if (patch.company !== row.company) touched = true
+      }
+      if (!row.position && f.positionGuess) {
+        patch.position = f.positionGuess
         touched = true
       }
       if (touched) {

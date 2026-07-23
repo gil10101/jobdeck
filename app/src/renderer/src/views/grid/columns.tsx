@@ -1,4 +1,5 @@
 import { createColumnHelper, type ColumnDef } from '@tanstack/react-table'
+import { ArrowUpRight } from 'lucide-react'
 import type { TrackerRow } from '@shared/types'
 import StatusBadge from '../../components/StatusBadge'
 import RatingBadge from '../../components/RatingBadge'
@@ -112,7 +113,7 @@ export function buildColumns(): ColumnDef<TrackerRow, any>[] {
     col.display({
       id: 'actions',
       header: '',
-      size: 150,
+      size: 178,
       cell: (info) => {
         const row = info.row.original
         const nav = useApp.getState().navigate
@@ -128,6 +129,19 @@ export function buildColumns(): ColumnDef<TrackerRow, any>[] {
               label="Apply"
               title="Open embedded browser at the apply link"
               onClick={() => nav({ view: 'apply', rowId: row.id })}
+            />
+            <ActionButton
+              label={<ArrowUpRight size={12} />}
+              title="Open the apply link in your browser"
+              onClick={() => {
+                if (!row.applyUrl) {
+                  toast('No apply link on this row', 'error')
+                  return
+                }
+                void call('app:openExternal', { url: row.applyUrl }).catch((err) =>
+                  toast(String(err), 'error')
+                )
+              }}
             />
             <ActionButton
               label={<FolderIcon />}

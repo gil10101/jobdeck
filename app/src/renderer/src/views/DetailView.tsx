@@ -7,6 +7,7 @@ import { call } from '../api'
 import { useApp } from '../store'
 import PdfPane from './detail/PdfPane'
 import AnswersPanel from './detail/AnswersPanel'
+import DetailChatPanel from './detail/DetailChatPanel'
 import PostingPanel from './detail/PostingPanel'
 
 export default function DetailView({ rowId }: { rowId: string }): JSX.Element {
@@ -15,8 +16,10 @@ export default function DetailView({ rowId }: { rowId: string }): JSX.Element {
   const toast = useApp((s) => s.toast)
   const [detail, setDetail] = useState<ApplicationDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [tab, setTab] = useState<'answers' | 'posting'>('answers')
+  const [tab, setTab] = useState<'answers' | 'posting' | 'chat'>('answers')
   const [confirmSubmit, setConfirmSubmit] = useState(false)
+  // Bumped when the revision chat edits files, forcing PDF iframes to reload.
+  const [chatTick, setChatTick] = useState(0)
   const row = rows.find((r) => r.id === rowId)
 
   useEffect(() => {
@@ -25,7 +28,7 @@ export default function DetailView({ rowId }: { rowId: string }): JSX.Element {
     call('detail:get', { rowId })
       .then(setDetail)
       .catch((err) => setError(String(err)))
-  }, [rowId, row?.folderPath, row?.statusKey])
+  }, [rowId, row?.folderPath, row?.statusKey, chatTick])
 
   const markSubmitted = async (): Promise<void> => {
     try {
@@ -119,7 +122,7 @@ export default function DetailView({ rowId }: { rowId: string }): JSX.Element {
       <div className="flex min-h-0 flex-1">
         <div className="min-w-0 flex-1 border-r border-edge">
           {detail ? (
-            <PdfPane detail={detail} />
+            <PdfPane detail={detail} refreshTick={chatTick} />
           ) : (
             <div className="flex h-full items-center justify-center text-sm text-gray-600">
               {error ? 'Could not load folder contents' : 'Loading…'}
@@ -140,13 +143,21 @@ export default function DetailView({ rowId }: { rowId: string }): JSX.Element {
             >
               Posting & Fit
             </button>
+            <button
+              onClick={() => setTab('chat')}
+              className={`rounded-md px-3 py-1 text-xs font-medium ${tab === 'chat' ? 'bg-cyan-950/60 text-cyan-200' : 'text-gray-400 hover:bg-panel2'}`}
+            >
+              Chat
+            </button>
           </div>
           <div className="min-h-0 flex-1 overflow-auto">
             {detail ? (
               tab === 'answers' ? (
                 <AnswersPanel detail={detail} />
-              ) : (
+              ) : tab === 'posting' ? (
                 <PostingPanel detail={detail} />
+              ) : (
+                <DetailChatPanel rowId={rowId} onActivity={() => setChatTick((t) => t + 1)} />
               )
             ) : null}
           </div>

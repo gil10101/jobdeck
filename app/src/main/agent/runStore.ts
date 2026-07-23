@@ -18,6 +18,26 @@ export class RunStore {
   private stderrPath(runId: string): string {
     return path.join(RUNS_DIR, `${runId}.stderr.log`)
   }
+  private inputPath(runId: string): string {
+    return path.join(RUNS_DIR, `${runId}.input.json`)
+  }
+
+  /** Persist the run's input so a dead run can be rebuilt with the same request. */
+  saveInput(runId: string, input: unknown): void {
+    try {
+      fs.writeFileSync(this.inputPath(runId), JSON.stringify(input, null, 2), 'utf-8')
+    } catch (err) {
+      console.error('[runs] saveInput failed:', err)
+    }
+  }
+
+  getInput<T>(runId: string): T | null {
+    try {
+      return JSON.parse(fs.readFileSync(this.inputPath(runId), 'utf-8')) as T
+    } catch {
+      return null
+    }
+  }
 
   saveMeta(meta: RunMeta): void {
     try {

@@ -8,6 +8,7 @@ import { registerCoreIpc } from './coreIpc'
 import { Store } from './store/Store'
 import { TrackerRepo } from './store/trackerRepo'
 import { TodoWatcher } from './fsops/TodoWatcher'
+import { scanApplications } from './fsops/FolderScanner'
 import { RunStore } from './agent/runStore'
 import { AgentRunner } from './agent/AgentRunner'
 import { initRatingService } from './companies/ratingService'
@@ -75,6 +76,19 @@ function bootWorkspace(workspacePath: string): void {
     send,
     getWindow: () => mainWindow
   })
+
+  // Reconcile the tracker with what's actually on disk before the renderer
+  // hydrates: any application folder gets a row even when the run that built
+  // it died before report.json. (The runner's salvage scan covers failures in
+  // a live session; this covers folders orphaned in previous sessions.)
+  try {
+    const scan = tracker.applyScan(scanApplications())
+    if (scan.created || scan.updated) {
+      console.log(`[boot] folder scan: ${scan.created} row(s) created, ${scan.updated} updated`)
+    }
+  } catch (err) {
+    console.error('[boot] folder scan failed:', err)
+  }
 
   todo.start()
   // Tell the renderer the workspace is live so it can hydrate + leave first-run.

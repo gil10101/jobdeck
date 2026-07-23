@@ -28,7 +28,22 @@ export interface SessionDeps {
   tracker: TrackerRepo
   runStore: RunStore
   startScout: (instructions: string) => { id: string }
+  rebuildRun: (runId: string) => { id: string; slug: string }
   send: (channel: string, payload: unknown) => void
+}
+
+/** Per-session overrides — defaults reproduce the global assistant. Lets other
+ *  surfaces (e.g. the per-application detail chat) reuse the streaming/run
+ *  machinery with their own prompt, tools, tool gate, and working directory. */
+export interface SessionConfig {
+  systemAppend?: () => string
+  /** MCP servers for this session; receives the approval bridge. */
+  mcpServers?: (
+    requestApproval: (tool: string, preview: string) => Promise<boolean>
+  ) => Record<string, unknown>
+  /** Boolean tool gate (name + input); default allows only mcp__app__*. */
+  canUseTool?: (name: string, input: Record<string, unknown>) => boolean
+  cwd?: string
 }
 
 interface PendingApproval {
@@ -79,7 +94,8 @@ export class AssistantSession {
 
   constructor(
     public readonly conversationId: string,
-    private deps: SessionDeps
+    private deps: SessionDeps,
+    private config: SessionConfig = {}
   ) {
     const now = new Date().toISOString()
     this.conversation = loadConversation(conversationId) ?? {
@@ -195,22 +211,32 @@ export class AssistantSession {
     this.controller = controller
     try {
       const { query } = await import('@anthropic-ai/claude-agent-sdk')
-      const mcp = buildAssistantMcp({
-        store: this.deps.store,
-        tracker: this.deps.tracker,
-        runStore: this.deps.runStore,
-        startScout: this.deps.startScout,
-        requestApproval: (tool, preview) => this.requestApproval(tool, preview)
-      })
+      const bridge = (tool: string, preview: string): Promise<boolean> =>
+        this.requestApproval(tool, preview)
+      const mcpServers =
+        this.config.mcpServers?.(bridge) ?? {
+          app: buildAssistantMcp({
+            store: this.deps.store,
+            tracker: this.deps.tracker,
+            runStore: this.deps.runStore,
+            startScout: this.deps.startScout,
+            rebuildRun: this.deps.rebuildRun,
+            requestApproval: bridge
+          })
+        }
       const model = this.requestedModel || this.deps.store.state.settings.model
       const q = query({
         prompt: this.inputStream(gen),
         options: {
-          cwd: REPO_ROOT,
-          systemPrompt: { type: 'preset', preset: 'claude_code', append: this.systemAppend() },
+          cwd: this.config.cwd ?? REPO_ROOT,
+          systemPrompt: {
+            type: 'preset',
+            preset: 'claude_code',
+            append: this.config.systemAppend?.() ?? this.systemAppend()
+          },
           settingSources: [],
           permissionMode: 'default',
-          mcpServers: { app: mcp },
+          mcpServers: mcpServers as never,
           canUseTool: (name, input, { signal }) => this.canUse(name, input, signal),
           abortController: controller,
           includePartialMessages: true,
@@ -260,7 +286,7 @@ export class AssistantSession {
   private systemAppend(): string {
     const harness = [
       'You are the in-app assistant: a chat panel inside this job-application desktop app, helping the user manage their own job-application tracker.',
-      "Your tools read the app's live state (candidate profile, tracked applications, agent runs, scouted candidates, settings, job-board CLI health) and offer approval-gated actions: add_profile_entry (append one entry to the candidate profile), start_scout (start a scout run), install_job_board (install a bundled board CLI into the workspace), and install_bun (run the official bun.sh installer). Each requires the user's explicit approval — call the tool and wait for its result, never assume approval was given. When a scout fails or a board is unavailable, diagnose with check_job_boards and offer the fix.",
+      "Your tools read the app's live state (candidate profile, tracked applications, agent runs, scouted candidates, settings, job-board CLI health) and offer approval-gated actions: add_profile_entry (append one entry to the candidate profile), start_scout (start a scout run), rebuild_run (restart a failed/cancelled build with its original input), install_job_board (install a bundled board CLI into the workspace), and install_bun (run the official bun.sh installer). Each requires the user's explicit approval — call the tool and wait for its result, never assume approval was given. When a scout fails or a board is unavailable, diagnose with check_job_boards and offer the fix.",
       'Use the remember tool sparingly: only to record durable, non-obvious preferences the user states about how they want to work, not routine facts already visible in the app state.'
     ].join('\n\n')
     // Tail-capped: memory.md grows one line per remember() forever, and the
@@ -392,11 +418,14 @@ export class AssistantSession {
   /** Read tools + the two action tools all live under mcp__app__* — everything else (Bash, Write, …) is denied. */
   private async canUse(
     name: string,
-    _input: Record<string, unknown>,
+    input: Record<string, unknown>,
     _signal: AbortSignal
   ): Promise<PermissionResult> {
-    if (name.startsWith('mcp__app__')) return { behavior: 'allow' }
-    return { behavior: 'deny', message: `tool not allowed in the assistant session: ${name}` }
+    const allowed = this.config.canUseTool
+      ? this.config.canUseTool(name, input)
+      : name.startsWith('mcp__app__')
+    if (allowed) return { behavior: 'allow' }
+    return { behavior: 'deny', message: `tool not allowed in this session: ${name}` }
   }
 
   /** Bridges an action tool's call into a renderer approval round-trip; resolved by resolveApproval(). */
