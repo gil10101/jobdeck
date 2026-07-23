@@ -660,4 +660,8 @@ async function main(): Promise<number> {
   fail(`Unknown command "${cmd}"`, "BAD_CMD")
 }
 
-main().then((code) => process.exit(code))
+// exitCode (not process.exit) so large stdout payloads flush fully before the
+// process ends — exit() can truncate a piped stdout at the 64KB buffer.
+main().then((code) => {
+  process.exitCode = code
+})

@@ -72,6 +72,13 @@ function ActionButtons({ c, actions }: { c: CandidateJob; actions: Actions }): J
   )
 }
 
+function isInternship(c: CandidateJob): boolean {
+  return (
+    /\bintern(ship)?\b/i.test(c.position) ||
+    /employment\s*type:?\s*intern/i.test(c.postingText.slice(0, 600))
+  )
+}
+
 function CandidateChips({ c }: { c: CandidateJob }): JSX.Element {
   return (
     <div className="flex flex-wrap gap-1.5">
@@ -80,6 +87,9 @@ function CandidateChips({ c }: { c: CandidateJob }): JSX.Element {
       {c.workModel !== 'unknown' && <span className="chip">{c.workModel}</span>}
       {c.datePosted && <span className="chip">posted {c.datePosted}</span>}
       <span className="chip text-muted">{c.source}</span>
+      {isInternship(c) && (
+        <span className="chip border-cyan-700 text-cyan-300">internship</span>
+      )}
     </div>
   )
 }
