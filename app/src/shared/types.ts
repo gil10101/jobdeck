@@ -343,6 +343,12 @@ export interface AppSettings {
   insertTextEnabled: boolean
   theme: 'dark' | 'light'
   repoRootOverride?: string
+  /** Gmail poll cadence in minutes; a manual Refresh syncs regardless. */
+  emailPollMinutes: number
+  /** Apply email-derived tracker status changes without asking. Off = the
+   *  Email tab shows one-click suggestions instead (status flips from
+   *  heuristic classification are too consequential to silently apply). */
+  emailAutoApply: boolean
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -351,7 +357,56 @@ export const DEFAULT_SETTINGS: AppSettings = {
   maxTurns: 120,
   includePartialMessages: true,
   insertTextEnabled: false,
-  theme: 'dark'
+  theme: 'dark',
+  emailPollMinutes: 5,
+  emailAutoApply: false
+}
+
+// ---- Gmail integration ----
+
+export type EmailClassification =
+  | 'confirmation'
+  | 'interview'
+  | 'assessment'
+  | 'offer'
+  | 'rejection'
+  | 'recruiter'
+  | 'other'
+
+/** Proposed tracker status change derived from an email's classification. */
+export interface EmailSuggestion {
+  rowId: string
+  /** Row's company at match time, for the "Mark X as Y" banner. */
+  company: string
+  suggestStatus: StatusKey
+}
+
+/** Cached Gmail message: headers + snippet only — the body is fetched live on
+ *  demand (email:getBody) and never stored. */
+export interface EmailMessage {
+  id: string
+  threadId: string
+  from: string
+  subject: string
+  /** ISO timestamp (Gmail internalDate). */
+  date: string
+  snippet: string
+  classification: EmailClassification
+  /** Matched the job-search query (vs. only the all-recent inbox sweep). */
+  jobRelated: boolean
+  suggestion: EmailSuggestion | null
+  /** null = no suggestion was ever computed for this message. */
+  suggestionState: 'open' | 'applied' | 'dismissed' | null
+}
+
+export interface EmailStatus {
+  /** A client ID is saved AND an account is signed in. */
+  configured: boolean
+  /** Saved OAuth client ID (not a secret), for the Settings form. */
+  clientId: string | null
+  email: string | null
+  polling: boolean
+  lastSyncAt: string | null
 }
 
 export interface TrackerStoreFile {

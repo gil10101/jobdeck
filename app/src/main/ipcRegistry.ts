@@ -2,7 +2,7 @@ import { BrowserWindow, dialog, ipcMain, webContents } from 'electron'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import type { IntakeItem, RunMeta, ScoutHistoryEntry } from '@shared/types'
+import type { EmailStatus, IntakeItem, RunMeta, ScoutHistoryEntry } from '@shared/types'
 import type { IpcChannel, IpcInvokeContract } from '@shared/ipc'
 import type { RunInput } from './agent/AgentRunner'
 import { buildApplicationDetail } from './parsers/detail'
@@ -37,6 +37,24 @@ import type { TrackerRepo } from './store/trackerRepo'
 import type { TodoWatcher } from './fsops/TodoWatcher'
 import { AssistantManager } from './assistant/assistantManager'
 import { DetailChatManager } from './assistant/detailChat'
+import {
+  gmailClientId,
+  gmailConfigured,
+  gmailEmail,
+  gmailSignIn,
+  gmailSignOut,
+  setGmailClientId
+} from './email/gmailAuth'
+import { getMessageBody } from './email/gmailClient'
+import {
+  clearEmailCache,
+  getCachedMessage,
+  lastSyncAt,
+  listCachedMessages,
+  openSuggestionCount,
+  setSuggestionState
+} from './email/emailStore'
+import { EmailSync } from './email/emailSync'
 
 export interface Services {
   store: Store
@@ -630,6 +648,57 @@ export function registerIpc(services: Services): void {
       ...store.state.intake.filter((i) => i.state !== 'dismissed').map((i) => i.companyHint)
     ]
     return backfillCompanies(names)
+  })
+
+  // ---- email: Gmail reader + tracker-status suggestions ----
+  const emailSync = new EmailSync({ store, tracker, send })
+  if (gmailConfigured()) emailSync.start()
+  const emailStatus = (): EmailStatus => ({
+    configured: gmailConfigured(),
+    clientId: gmailClientId(),
+    email: gmailEmail(),
+    polling: emailSync.polling(),
+    lastSyncAt: lastSyncAt()
+  })
+  handle('email:status', () => emailStatus())
+  handle('email:setClientId', ({ clientId }) => {
+    setGmailClientId(clientId)
+    return emailStatus()
+  })
+  handle('email:signIn', async () => {
+    await gmailSignIn()
+    // start() runs the first sync immediately, so the tab fills right away.
+    emailSync.start()
+    return emailStatus()
+  })
+  handle('email:signOut', () => {
+    emailSync.stop()
+    gmailSignOut()
+    clearEmailCache()
+    send('push:emailChanged', { suggestions: 0 })
+    return emailStatus()
+  })
+  handle('email:list', ({ filter }) => listCachedMessages(filter))
+  handle('email:getBody', async ({ id }) => ({ text: await getMessageBody(id) }))
+  handle('email:refresh', async () => {
+    await emailSync.syncNow()
+    return emailStatus()
+  })
+  handle('email:applySuggestion', ({ emailId }) => {
+    const msg = getCachedMessage(emailId)
+    if (!msg?.suggestion || msg.suggestionState !== 'open') {
+      throw new Error('this email has no open suggestion')
+    }
+    const row = tracker.getRow(msg.suggestion.rowId)
+    if (!row) throw new Error('the matched tracker row no longer exists')
+    if (msg.suggestion.suggestStatus === 'applied') tracker.markApplied(row.id)
+    else tracker.upsertRow({ id: row.id, statusKey: msg.suggestion.suggestStatus })
+    setSuggestionState(emailId, 'applied')
+    send('push:emailChanged', { suggestions: openSuggestionCount() })
+  })
+  handle('email:dismissSuggestion', ({ emailId }) => {
+    setSuggestionState(emailId, 'dismissed')
+    send('push:emailChanged', { suggestions: openSuggestionCount() })
   })
 
   // ---- assistant: in-app chat, IPC channels mirror AssistantManager 1:1 ----

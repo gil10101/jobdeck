@@ -12,6 +12,8 @@ import type {
   CandidateJob,
   CompanyInfo,
   ConversationMeta,
+  EmailMessage,
+  EmailStatus,
   IntakeFolder,
   IntakeItem,
   LibraryCategory,
@@ -160,6 +162,18 @@ export interface IpcInvokeContract {
   'companies:get': { req: void; res: Record<string, CompanyInfo> }
   'companies:ensure': { req: { company: string }; res: CompanyInfo | null }
   'companies:backfill': { req: void; res: { fetched: number } }
+  // ---- Gmail (read-only; BYO OAuth client ID, PKCE loopback flow) ----
+  'email:status': { req: void; res: EmailStatus }
+  'email:setClientId': { req: { clientId: string }; res: EmailStatus }
+  /** Opens the Google consent page in the browser; resolves when sign-in completes. */
+  'email:signIn': { req: void; res: EmailStatus }
+  'email:signOut': { req: void; res: EmailStatus }
+  'email:list': { req: { filter: 'job' | 'all' }; res: EmailMessage[] }
+  /** Body text fetched live from Gmail (never cached on disk). */
+  'email:getBody': { req: { id: string }; res: { text: string } }
+  'email:refresh': { req: void; res: EmailStatus }
+  'email:applySuggestion': { req: { emailId: string }; res: void }
+  'email:dismissSuggestion': { req: { emailId: string }; res: void }
   'assistant:send': {
     req: { conversationId: string | null; text: string; model: string | null }
     res: { conversationId: string }
@@ -193,6 +207,8 @@ export interface IpcPushContract {
   'push:assistantUsage': { conversationId: string } & AssistantUsage
   'push:assistantState': { conversationId: string; status: AssistantStatus }
   'push:assistantMessage': { conversationId: string; message: AssistantMessage }
+  /** After every email sync / suggestion action: open-suggestion count. */
+  'push:emailChanged': { suggestions: number }
 }
 
 export type IpcPushChannel = keyof IpcPushContract
@@ -269,6 +285,15 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'companies:get',
   'companies:ensure',
   'companies:backfill',
+  'email:status',
+  'email:setClientId',
+  'email:signIn',
+  'email:signOut',
+  'email:list',
+  'email:getBody',
+  'email:refresh',
+  'email:applySuggestion',
+  'email:dismissSuggestion',
   'assistant:send',
   'assistant:stop',
   'assistant:approve',
@@ -289,7 +314,8 @@ export const PUSH_CHANNELS: IpcPushChannel[] = [
   'push:assistantApproval',
   'push:assistantUsage',
   'push:assistantState',
-  'push:assistantMessage'
+  'push:assistantMessage',
+  'push:emailChanged'
 ]
 
 /** Build a local-file:// URL for a repo-relative path (PDF preview etc.). */
