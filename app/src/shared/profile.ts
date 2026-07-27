@@ -153,6 +153,21 @@ export interface TailoringConfig {
 
 export type EmploymentType = 'full-time' | 'part-time' | 'contract' | 'internship'
 
+/** The only ATS platforms custom boards can point at — each has a stable,
+ *  documented public API. Arbitrary career sites are declined by design. */
+export type CustomBoardAts = 'greenhouse' | 'lever' | 'ashby'
+
+export interface CustomBoard {
+  id: string
+  /** Company display name shown in Settings and scout prompts. */
+  label: string
+  ats: CustomBoardAts
+  /** The company identifier in the ATS's public API URL. */
+  slug: string
+  /** Disabled boards are never fetched (no requests are made). */
+  enabled: boolean
+}
+
 export interface SearchConfig {
   /** Ordered by priority: index 0 = highest. `priority` mirrors the 1-based position. */
   targetRoles: { title: string; priority: number }[]
@@ -175,6 +190,8 @@ export interface SearchConfig {
     linkedin: { enabled: boolean; queries: string[]; location: string; limitPerQuery: number }
     freehire: { enabled: boolean; queries: string[]; limitPerQuery: number }
   }
+  /** User-added company ATS boards, fetched app-side before every scout run. */
+  customBoards: CustomBoard[]
 }
 
 export interface DocumentPrefs {
@@ -249,7 +266,8 @@ export function emptyProfile(): ProfileFile {
         jobright: { enabled: true, minSize: null, limit: 40 },
         linkedin: { enabled: true, queries: [], location: '', limitPerQuery: 25 },
         freehire: { enabled: false, queries: [], limitPerQuery: 25 }
-      }
+      },
+      customBoards: []
     },
     documents: {
       fileBasename: 'Candidate',

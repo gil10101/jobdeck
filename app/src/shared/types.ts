@@ -1,6 +1,8 @@
 // Shared domain types — imported by main, preload, and renderer.
 // Pure types only; no runtime imports.
 
+import type { CustomBoardAts } from './profile'
+
 export type StatusKey =
   | 'not_applied'
   | 'applied'
@@ -276,6 +278,16 @@ export interface BoardsStatus {
   bunOk: boolean
   bunPath: string
   boards: BoardStatus[]
+}
+
+/** Result of detecting + live-fetching a pasted careers URL (custom boards). */
+export interface CustomBoardTest {
+  ats: CustomBoardAts
+  slug: string
+  /** Company name (ATS-reported when available, else derived from the slug). */
+  label: string
+  /** Open roles the board returned in the test fetch. */
+  sampleCount: number
 }
 
 export interface AnswersField {

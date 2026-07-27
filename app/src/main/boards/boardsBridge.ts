@@ -7,6 +7,7 @@ import { APP_DIR, REPO_ROOT, resolveBun } from '../paths'
 import { validateProfile } from '../profile/profileSchema'
 import { loadProfile, saveProfile } from '../profile/profileStore'
 import { jobrightCredEmail, jobrightEnv, setJobrightCred } from './credStore'
+import { listCustomBoards } from './customBoards'
 
 const execFileAsync = promisify(execFile)
 
@@ -122,11 +123,13 @@ export function installAllBoards(root: string): void {
   }
 }
 
-/** Human-readable availability line for the scout prompt; null when everything is usable. */
+/** Human-readable availability line for the scout prompt; null when everything is usable.
+ *  Covers the CLI boards only — custom company boards are prefetched per run,
+ *  so their failures are appended by the prompt builder, not decided here. */
 export function boardsAvailabilityNote(): string | null {
   const status = getBoardsStatus()
   if (!status.bunOk) {
-    return 'NONE of the board CLIs can run: the bun runtime is not installed. Skip STEP 2 entirely and tell the user to install bun (https://bun.sh) and the board CLIs from Settings → Job boards.'
+    return 'NONE of the board CLIs can run: the bun runtime is not installed. Skip every CLI board (jobright, LinkedIn, freehire) and tell the user to install bun (https://bun.sh) and the board CLIs from Settings → Job boards; app-prefetched company-board files and WebSearch still work.'
   }
   const parts: string[] = []
   for (const b of status.boards) {
@@ -143,20 +146,22 @@ export function boardsAvailabilityNote(): string | null {
     )
   }
   if (status.boards.every((b) => !b.enabled || !b.installed)) {
-    parts.push('With no board CLI usable, rely on WebSearch (STEP 2 item 4) alone.')
+    parts.push('With no board CLI usable, rely on the remaining STEP 2 sources (company boards when listed, WebSearch).')
   }
   return parts.length ? parts.join(' ') : null
 }
 
-/** Throws a user-actionable error when a scout run cannot search anything. */
+/** Throws a user-actionable error when a scout run cannot search anything.
+ *  Custom company boards need no bun/CLI, so any enabled one keeps scouting viable. */
 export function assertScoutable(): void {
   const status = getBoardsStatus()
-  if (!status.bunOk) {
+  const hasCustom = listCustomBoards().some((b) => b.enabled)
+  if (!status.bunOk && !hasCustom) {
     throw new Error(
       'Cannot scout: the bun runtime (runs the job-board CLIs) was not found. Install it from Settings → Job boards (or bun.sh), then retry.'
     )
   }
-  if (status.boards.every((b) => !b.installed)) {
+  if (status.boards.every((b) => !b.installed) && !hasCustom) {
     throw new Error(
       'Cannot scout: no job-board CLIs are installed in this workspace. Install them from Settings → Job boards, then retry.'
     )

@@ -12,6 +12,7 @@ import type {
   CandidateJob,
   CompanyInfo,
   ConversationMeta,
+  CustomBoardTest,
   EmailMessage,
   EmailStatus,
   IntakeFolder,
@@ -23,7 +24,7 @@ import type {
   ScoutHistoryEntry,
   TrackerRow
 } from './types'
-import type { ProfileFile } from './profile'
+import type { CustomBoard, ProfileFile } from './profile'
 
 /** invoke/handle channels: request → response (response is wrapped in IpcResult by the registry). */
 export interface IpcInvokeContract {
@@ -117,6 +118,14 @@ export interface IpcInvokeContract {
     res: { loginOk: boolean; message: string }
   }
   'boards:test': { req: void; res: { ok: boolean; message: string } }
+  // ---- custom company boards (ATS public APIs: greenhouse/lever/ashby) ----
+  /** Detect + live-fetch a pasted careers URL; the error message carries the decline reason. */
+  'boards:testCustom': { req: { url: string }; res: CustomBoardTest }
+  /** Test first, save only on success; returns the full custom-board list. */
+  'boards:addCustom': { req: { url: string }; res: CustomBoard[] }
+  'boards:removeCustom': { req: { id: string }; res: CustomBoard[] }
+  'boards:setCustomEnabled': { req: { id: string; enabled: boolean }; res: CustomBoard[] }
+  'boards:listCustom': { req: void; res: CustomBoard[] }
   'app:info': { req: void; res: { repoRoot: string; appDataDir: string } }
   'config:get': { req: void; res: { workspacePath: string | null; onboardedAt: string | null } }
   'env:check': {
@@ -262,6 +271,11 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'boards:installBun',
   'boards:setCreds',
   'boards:test',
+  'boards:testCustom',
+  'boards:addCustom',
+  'boards:removeCustom',
+  'boards:setCustomEnabled',
+  'boards:listCustom',
   'app:info',
   'config:get',
   'env:check',

@@ -24,6 +24,13 @@ import {
   setJobrightCreds,
   testJobright
 } from './boards/boardsBridge'
+import {
+  addCustomBoard,
+  listCustomBoards,
+  removeCustomBoard,
+  setCustomBoardEnabled,
+  testCustomBoard
+} from './boards/customBoards'
 import { APP_DATA_DIR, REPO_ROOT } from './paths'
 import { validateProfile } from './profile/profileSchema'
 import { loadProfile, saveProfile } from './profile/profileStore'
@@ -602,6 +609,13 @@ export function registerIpc(services: Services): void {
     return { loginOk: login.ok, message: login.message }
   })
   handle('boards:test', () => testJobright())
+
+  // ---- custom company boards (ATS public APIs) ----
+  handle('boards:testCustom', ({ url }) => testCustomBoard(url))
+  handle('boards:addCustom', ({ url }) => addCustomBoard(url))
+  handle('boards:removeCustom', ({ id }) => removeCustomBoard(id))
+  handle('boards:setCustomEnabled', ({ id, enabled }) => setCustomBoardEnabled(id, enabled))
+  handle('boards:listCustom', () => listCustomBoards())
 
   // ---- app info ----
   handle('app:info', () => ({ repoRoot: REPO_ROOT, appDataDir: APP_DATA_DIR }))

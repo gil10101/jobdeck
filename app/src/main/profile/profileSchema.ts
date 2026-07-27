@@ -1,4 +1,4 @@
-import type { ProfileFile } from '@shared/profile'
+import type { CustomBoard, ProfileFile } from '@shared/profile'
 import { PROFILE_SCHEMA_ID, emptyProfile, sanitizeBasename } from '@shared/profile'
 
 /**
@@ -37,6 +37,27 @@ export function validateProfile(
       }
     })
     .filter((r) => r.title.trim())
+
+  // customBoards passes through mergeShape element-verbatim (a missing key
+  // heals to []); every entry must be a complete {id,label,ats,slug,enabled}
+  // with a known ATS or the board fetchers break downstream — coerce what can
+  // be coerced and drop the rest.
+  merged.searchConfig.customBoards = (merged.searchConfig.customBoards as unknown[])
+    .map((b): CustomBoard | null => {
+      const o = (b ?? {}) as Partial<Record<keyof CustomBoard, unknown>>
+      if (typeof o.slug !== 'string' || !o.slug.trim()) return null
+      if (o.ats !== 'greenhouse' && o.ats !== 'lever' && o.ats !== 'ashby') return null
+      const slug = o.slug.trim()
+      return {
+        // Deterministic fallback id: dedupe is by ats+slug, so collisions are moot.
+        id: typeof o.id === 'string' && o.id.trim() ? o.id : `cb_${o.ats}_${slug}`,
+        label: typeof o.label === 'string' && o.label.trim() ? o.label.trim() : slug,
+        ats: o.ats,
+        slug,
+        enabled: typeof o.enabled === 'boolean' ? o.enabled : true
+      }
+    })
+    .filter((b): b is CustomBoard => b !== null)
 
   // Same gap for arrays NESTED inside entry objects (skeleton arrays are empty,
   // so mergeShape can't heal per-element): an extractor that omits e.g. an
