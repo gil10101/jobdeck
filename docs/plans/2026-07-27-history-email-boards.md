@@ -158,3 +158,50 @@ the Detail view; no divider drag (Scout view already has one to copy).
 - Auto-applying tracker status changes by default (suggestions instead).
 
 ## 7. Subagent completion notes (append here)
+
+### Team A — scout history (done 2026-07-27)
+
+**Shipped** (commits `8e53ddd` schema+IPC, `8af9077` view):
+- Scout output schema: `excluded` array (position/company/reason) with prompt
+  instructions to record every triage drop honestly, cap 40, off-limits-list
+  postings exempt (`app/resources/prompts/scout_jobs.md`).
+- Shared tolerant candidates-file parser `parseCandidatesFile` in
+  `parsers/report.ts` (fence-strip, array normalization, excluded coercion +
+  cap) — used by `AgentRunner.finalizeScout` (which now also counts filtered
+  drops in the run summary) and by the new IPC. The candidates file is never
+  rewritten, so `excluded` persists in `scout/<id>.candidates.json` as written.
+- IPC `scout:history` (`shared/ipc.ts`, `shared/types.ts` additive:
+  `ScoutHistoryEntry`/`ScoutKeptItem`/`ScoutExcludedItem`; handler in
+  `ipcRegistry.ts`): per scout run — instructions from `runStore.getInput`
+  (fallback `''`), kept postings (condensed, no postingText), excluded list,
+  counts, status/dates/summary; missing files and pre-excluded runs yield
+  empty lists.
+- `HistoryView.tsx`: composer (textarea + profile-sourced chips for employment
+  types and target titles (max 6), static work-model chips, min-pay input;
+  chips append phrases, text stays editable, `Run scout` → `scout:start` →
+  toast + navigate to Runs), run list (status/date/instructions
+  preview/kept·filtered counts, auto-refetch on scout run status changes),
+  detail (mono instructions block + Rerun, kept list with fit pills,
+  "Filtered out" muted list with reasons, View-run link).
+
+**Deviations from spec:** none substantive. Additions: filtered count in the
+scout run summary line; a View-run button in the detail header (mirrors
+ScoutView's run links); Run/Rerun disabled while a scout is live (mirrors
+ScoutView's guard).
+
+**Known gaps / review risks:**
+- Excluded entries are only as honest/complete as the agent's compliance; no
+  ingest-time cross-check that drops were actually recorded.
+- Kept lists come from the candidates FILE, i.e. what the run reported —
+  not the store's post-dedupe view, so a posting can show as "kept" here yet
+  have been deduped away as already-known at ingest.
+- Chip phrases are plain English appended with `; ` — clicking contradictory
+  chips (e.g. two "X only" phrases) composes contradictions the user must
+  edit out; active-state detection is exact-substring.
+- `scout:history` re-reads every candidates file per call (no cache); fine at
+  personal-use scale.
+
+**Files touched:** `app/resources/prompts/scout_jobs.md`,
+`app/src/main/parsers/report.ts`, `app/src/main/agent/AgentRunner.ts`,
+`app/src/shared/ipc.ts`, `app/src/shared/types.ts`,
+`app/src/main/ipcRegistry.ts`, `app/src/renderer/src/views/HistoryView.tsx`.
