@@ -213,6 +213,10 @@ export interface ScoutSlots {
   jobrightFeed: { relPath: string; count: number } | null
   /** Why the prefetch failed — the agent must then skip jobright, not retry it. */
   jobrightUnavailable: string | null
+  /** App-prefetched custom company boards file; null when none succeeded (or none enabled). */
+  customBoards: { relPath: string; boards: { label: string; ats: string; count: number }[] } | null
+  /** Enabled custom boards whose prefetch failed — named in the availability note. */
+  customBoardsUnavailable: string[]
 }
 
 /** Scout prompt — the search criteria come from the profile. */
@@ -240,6 +244,20 @@ export function buildScoutPrompt(s: ScoutSlots, profile: ProfileFile | null): st
    ${structuredNote}`
     : `1. **jobright: UNAVAILABLE this run** — the app-side feed fetch failed: ${s.jobrightUnavailable ?? 'unknown reason'}.
    Do NOT run the jobright CLI (it will fail the same way, and retries make account restrictions worse). Skip jobright entirely, cover the other boards below, and include one problems line quoting the reason above.`
+  // Custom company boards travel the same way as the jobright feed: one
+  // app-prefetched file the agent Reads — it has no other way to reach them.
+  const customList = (s.customBoards?.boards ?? [])
+    .map((b) => `${b.label} (${b.ats}, ${b.count} rows)`)
+    .join(', ')
+  const customBoardsSection = s.customBoards
+    ? `**Company boards the user follows (app-prefetched):** ${customList}.
+   Read \`${s.customBoards.relPath}\` — JSON \`{ fetchedAt, boards: [{ label, ats, total, rows }] }\`, each row \`{ title, location, url, postedAt, department }\` (\`rows\` is capped; \`total\` is the board's real size). These are raw company feeds, NOT personalized: judge EVERY row against the STEP 1 criteria. Rows carry no fit data — evaluate from title/location/department, and WebFetch the posting \`url\` only for finalists you intend to keep (sequentially — rate discipline applies). Use \`source: "company"\` for keepers from these boards. Do not fetch the board index itself.`
+    : ''
+  const customBoardsNotes = s.customBoardsUnavailable.map(
+    (line) =>
+      `The user's custom company board ${line} — the app-side fetch failed, so it CANNOT be searched this run; do not try, just add one problems line quoting the reason.`
+  )
+  const availabilityParts = [availability, ...customBoardsNotes].filter(Boolean)
   const replacements: Record<string, string> = {
     REPO_ROOT: REPO_ROOT,
     TODAY_ISO: todayISO(),
@@ -249,8 +267,9 @@ export function buildScoutPrompt(s: ScoutSlots, profile: ProfileFile | null): st
     OUTPUT_PATH: s.outputPath,
     SEARCH_CRITERIA_MD: criteria,
     LINKEDIN_QUERIES: linkedinQueries,
-    BOARDS_NOTE: availability ? `\n> **Availability:** ${availability}\n` : '',
+    BOARDS_NOTE: availabilityParts.length ? `\n> **Availability:** ${availabilityParts.join(' ')}\n` : '',
     JOBRIGHT_SECTION: jobrightSection,
+    CUSTOM_BOARDS_SECTION: customBoardsSection,
     INSTRUCTIONS: s.instructions.trim() || '(none — run the standard sweep)'
   }
   return fill(out, replacements)

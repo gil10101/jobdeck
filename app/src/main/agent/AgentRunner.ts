@@ -14,6 +14,7 @@ import {
   uniqueSlug
 } from '../paths'
 import { assertScoutable, prefetchJobrightFeed } from '../boards/boardsBridge'
+import { prefetchCustomBoards } from '../boards/customBoards'
 import { scanApplications } from '../fsops/FolderScanner'
 import { parseCandidatesFile, parseReport, validateReport } from '../parsers/report'
 import { validateProfile } from '../profile/profileSchema'
@@ -66,6 +67,10 @@ interface ActiveRun {
   jobrightFeed?: { relPath: string; count: number } | null
   /** Scout runs: why the prefetch failed (agent must skip jobright then). */
   jobrightUnavailable?: string | null
+  /** Scout runs: app-prefetched custom company boards handed over as one file. */
+  customBoards?: { relPath: string; boards: { label: string; ats: string; count: number }[] } | null
+  /** Scout runs: enabled custom boards whose prefetch failed (named in the prompt). */
+  customBoardsUnavailable?: string[]
 }
 
 type SendFn = (channel: 'push:runEvent' | 'push:runChanged', payload: unknown) => void
@@ -282,7 +287,9 @@ export class AgentRunner {
           excludeList: this.excludeList(),
           outputPath: path.join(SCOUT_DIR, `${run.meta.id}.candidates.json`),
           jobrightFeed: run.jobrightFeed ?? null,
-          jobrightUnavailable: run.jobrightUnavailable ?? null
+          jobrightUnavailable: run.jobrightUnavailable ?? null,
+          customBoards: run.customBoards ?? null,
+          customBoardsUnavailable: run.customBoardsUnavailable ?? []
         },
         profile
       )
@@ -337,6 +344,18 @@ export class AgentRunner {
         run.jobrightFeed = null
         run.jobrightUnavailable = feed.message
         console.warn('[runner] jobright feed prefetch skipped:', feed.message)
+      }
+      // Same pattern for the user's custom company boards: fetched app-side
+      // (sequential, per-board degradation) into one file the agent Reads —
+      // the agent never hits the ATS APIs itself.
+      const customFile = path.join(SCOUT_DIR, `${run.meta.id}.custom-boards.json`)
+      const custom = await prefetchCustomBoards(customFile)
+      run.customBoards = custom.boards.length
+        ? { relPath: toRel(customFile), boards: custom.boards }
+        : null
+      run.customBoardsUnavailable = custom.unavailable
+      if (custom.unavailable.length) {
+        console.warn('[runner] custom board prefetch failures:', custom.unavailable.join('; '))
       }
     }
     if (run.meta.kind === 'onboard') {

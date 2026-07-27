@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { AppSettings, BoardId, BoardsStatus, EmailStatus } from '@shared/types'
+import type { CustomBoard } from '@shared/profile'
 import { call } from '../api'
 import { modelOptionsWith } from '../lib/models'
 import { useApp } from '../store'
@@ -69,6 +70,10 @@ export default function SettingsView(): JSX.Element {
   const [emailStatus, setEmailStatus] = useState<EmailStatus | null>(null)
   const [clientIdDraft, setClientIdDraft] = useState('')
   const [emailBusy, setEmailBusy] = useState(false)
+  const [customBoards, setCustomBoards] = useState<CustomBoard[]>([])
+  const [customUrl, setCustomUrl] = useState('')
+  const [customTest, setCustomTest] = useState<{ ok: boolean; text: string } | null>(null)
+  const [customBusy, setCustomBusy] = useState<'test' | 'add' | null>(null)
 
   useEffect(() => {
     void call('master:getContext', undefined)
@@ -94,6 +99,9 @@ export default function SettingsView(): JSX.Element {
         if (s.clientId) setClientIdDraft(s.clientId)
       })
       .catch(() => setEmailStatus(null))
+    void call('boards:listCustom', undefined)
+      .then(setCustomBoards)
+      .catch(() => undefined)
   }, [])
 
   useEffect(() => {
@@ -212,6 +220,53 @@ export default function SettingsView(): JSX.Element {
       toast(String(err), 'error')
     } finally {
       setTesting(false)
+    }
+  }
+
+  const testCustom = async (): Promise<void> => {
+    setCustomBusy('test')
+    setCustomTest(null)
+    try {
+      const res = await call('boards:testCustom', { url: customUrl.trim() })
+      setCustomTest({
+        ok: true,
+        text: `${res.label} — ${res.ats} board “${res.slug}”, ${res.sampleCount} open role${res.sampleCount === 1 ? '' : 's'} right now`
+      })
+    } catch (err) {
+      // The message IS the product here: it names the decline reason inline.
+      setCustomTest({ ok: false, text: err instanceof Error ? err.message : String(err) })
+    } finally {
+      setCustomBusy(null)
+    }
+  }
+
+  const addCustom = async (): Promise<void> => {
+    setCustomBusy('add')
+    try {
+      setCustomBoards(await call('boards:addCustom', { url: customUrl.trim() }))
+      setCustomUrl('')
+      setCustomTest(null)
+      toast('Company board added — scouts will fetch it on every run', 'success')
+    } catch (err) {
+      setCustomTest({ ok: false, text: err instanceof Error ? err.message : String(err) })
+    } finally {
+      setCustomBusy(null)
+    }
+  }
+
+  const removeCustom = async (id: string): Promise<void> => {
+    try {
+      setCustomBoards(await call('boards:removeCustom', { id }))
+    } catch (err) {
+      toast(String(err), 'error')
+    }
+  }
+
+  const setCustomEnabled = async (id: string, enabled: boolean): Promise<void> => {
+    try {
+      setCustomBoards(await call('boards:setCustomEnabled', { id, enabled }))
+    } catch (err) {
+      toast(String(err), 'error')
     }
   }
 
@@ -557,6 +612,69 @@ export default function SettingsView(): JSX.Element {
               <span className="chip">unknown</span>
             </Row>
           )}
+          {customBoards.map((b) => (
+            <Row
+              key={b.id}
+              label={b.label}
+              hint={`Company board — ${b.ats} · ${b.slug}. ${
+                b.enabled
+                  ? 'Fetched through the ATS public API before every scout run.'
+                  : 'Disabled — scouts skip this board entirely (no requests are made).'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <Toggle value={b.enabled} onChange={(v) => void setCustomEnabled(b.id, v)} />
+                <button
+                  className="text-gray-500 hover:text-red-400"
+                  onClick={() => void removeCustom(b.id)}
+                  title="Remove this company board"
+                >
+                  ✕
+                </button>
+              </div>
+            </Row>
+          ))}
+          <Row
+            label="Add company board"
+            hint="Paste a careers page hosted on Greenhouse (boards.greenhouse.io/<company>), Lever (jobs.lever.co/<company>), or Ashby (jobs.ashbyhq.com/<company>) — Test fetches the live board through the ATS's public API. Other career sites are declined: they have no stable structure to fetch reliably; paste individual postings into Intake by URL instead."
+          >
+            <div className="flex flex-col items-end gap-1.5">
+              <input
+                className="input w-72"
+                placeholder="https://boards.greenhouse.io/yourcompany"
+                value={customUrl}
+                onChange={(e) => {
+                  setCustomUrl(e.target.value)
+                  setCustomTest(null)
+                }}
+              />
+              <div className="flex gap-1.5">
+                <button
+                  className="btn px-2 py-1 text-[10px]"
+                  disabled={!customUrl.trim() || customBusy !== null}
+                  onClick={() => void testCustom()}
+                >
+                  {customBusy === 'test' ? 'Testing…' : 'Test'}
+                </button>
+                <button
+                  className="btn btn-primary px-2 py-1 text-[10px]"
+                  disabled={!customUrl.trim() || customBusy !== null}
+                  onClick={() => void addCustom()}
+                >
+                  {customBusy === 'add' ? 'Adding…' : 'Add'}
+                </button>
+              </div>
+              {customTest && (
+                <div
+                  className={`w-72 text-left text-[11px] leading-relaxed ${
+                    customTest.ok ? 'text-green-300' : 'text-amber-300'
+                  }`}
+                >
+                  {customTest.text}
+                </div>
+              )}
+            </div>
+          </Row>
           <Row
             label="Glassdoor ratings"
             hint="Look up and cache a Glassdoor rating for every company across your tracker, intake, and scout candidates."
