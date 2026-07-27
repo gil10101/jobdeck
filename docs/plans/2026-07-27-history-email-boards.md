@@ -206,6 +206,101 @@ ScoutView's guard).
 `app/src/shared/ipc.ts`, `app/src/shared/types.ts`,
 `app/src/main/ipcRegistry.ts`, `app/src/renderer/src/views/HistoryView.tsx`.
 
+### Team C — gmail (done 2026-07-27)
+
+**Shipped** (commits `05d0d11` main+shared, `ae94e3e` renderer, `b0fa3e1`
+assistant tools):
+- `app/src/main/email/gmailAuth.ts` — BYO Desktop-client PKCE flow. Exact
+  shape: ephemeral one-shot `http.Server` on `127.0.0.1:0` (2-min timeout,
+  ignores request paths without `?code`/`?error`, e.g. favicon) →
+  `shell.openExternal` to `accounts.google.com/o/oauth2/v2/auth` with
+  `code_challenge` (S256), scope `gmail.readonly`, `access_type=offline&
+  prompt=consent` → code→token exchange at `oauth2.googleapis.com/token`
+  with the verifier (no client secret) → profile fetch for the address.
+  Refresh token safeStorage-encrypted (base64-obfuscation fallback without a
+  keyring, flagged) in `userData/gmail-auth.json` (0600, tmp+rename); access
+  token in memory only with 60s expiry slack; `invalid_grant` on refresh
+  auto-signs-out. Sign-out best-effort revokes. Changing the client ID drops
+  tokens. Tokens are never logged.
+- `gmailClient.ts` — plain-fetch REST (no googleapis): profile,
+  `listMessages(q, max, pageToken)`, metadata get (From/Subject/Date headers
+  + snippet; date from `internalDate`), full-body get (text/plain part,
+  else tag-stripped text/html; 50k char cap). Message ids validated
+  `[A-Za-z0-9_-]+` before entering URLs.
+- `emailStore.ts` — `userData/email-cache.json` (0600): headers + snippet +
+  classification + suggestion per message, `lastSyncAt`, cap 500 newest.
+  Bodies are never cached. Sign-out deletes the file.
+- `emailSync.ts` — main-process poll loop (settings `emailPollMinutes`,
+  default 5, clamp 1–120; reschedules immediately on settings change; starts
+  at registerIpc when signed in / on sign-in; stops on sign-out). Two-query
+  sync: job query `newer_than:30d subject:(application OR applied OR
+  applying OR interview OR assessment OR offer OR OA OR HackerRank OR
+  Codility OR CodeSignal OR "take-home" OR "coding challenge" OR schedule OR
+  candidacy OR recruiter)` + all-set `in:inbox newer_than:7d`, 50 ids each,
+  metadata fetched only for unseen ids (5-way concurrency).
+- **Classification rules** (deterministic, priority-ordered — most specific
+  first): assessment (OA/HackerRank/Codility/CodeSignal/coding
+  challenge/take-home in subject) → offer (offer letter/job offer/pleased to
+  extend) → rejection (unfortunately/regret/other candidates/…, subject OR
+  snippet — rejection subjects are usually generic) → interview
+  (interview/phone screen/schedule a call/availability) → confirmation
+  (application received/thank you for applying/…, subject OR snippet) →
+  recruiter (From contains recruit/talent acquisition/sourcing, or
+  opportunity/role-at subjects) → other. Deviation from the spec's
+  "subject/from only": snippet participates for rejection + confirmation
+  only; still pure regex.
+- **Suggestions**: normalized company containment (punct→space, lowercase,
+  token-aligned, ≥4 chars, longest match wins) against
+  `trackerRepo.listRows()`; mapping interview→interview, offer→offer,
+  rejection→rejected, confirmation→applied (only from `not_applied`);
+  suggestions equal to the row's current status are dropped. Open/uncomputed
+  suggestions are recomputed each sync against the live tracker;
+  applied/dismissed are final. Auto-apply only behind `emailAutoApply`
+  (default false); apply of `applied` routes through `markApplied` (date
+  stamp + [DONE] rename), others through `upsertRow`.
+- IPC (`shared/ipc.ts` + `ipcRegistry.ts`, additive): `email:status/
+  setClientId/signIn/signOut/list/getBody/refresh/applySuggestion/
+  dismissSuggestion`; push `push:emailChanged {suggestions}` after every
+  sync and suggestion action. Settings additions: `emailPollMinutes`,
+  `emailAutoApply` (defaults merge into old stores).
+- `EmailView.tsx` — header (account, Job/All toggle, Refresh, last-sync),
+  suggestion banner rows ("Mark X as Y" Apply/Dismiss), classification-
+  chipped list (interview=cyan, assessment=amber, offer=green,
+  rejection=red, confirmation=gray), reader pane fetching the body live;
+  module-level `push:emailChanged` refetch guarded by a mount-effect flag.
+  Settings section "Email (Gmail)": client ID + save, sign in/out, poll
+  interval chips (3/5/10/30), auto-apply toggle, numbered BYO-client steps.
+- Assistant: approval-free read tools `search_email` (cache first, live
+  fallback) and `get_email` (body under an `untrustedBody` key, 20k cap);
+  tool descriptions + `systemAppend` clause frame email content as
+  untrusted data; `where_is_setting` knows the section. Detail chat builds
+  its own MCP server and does NOT get the email tools (per final task
+  scope; plan §3.4 mentioned it — noted as a gap).
+
+**Known gaps / review risks:**
+- Fuzzy matching: ≥4-char token containment still confuses same-named
+  employers and agencies recruiting *for* a tracked company
+  (suggestions-only default is the mitigation); companies with short or
+  punctuation-only names (e.g. "EY", "X") never match.
+- `\bOA\b` in the job query/classifier can catch stray all-caps "OA"
+  subjects; rejection regex misses euphemistic rejections whose regret
+  sentence sits past the snippet.
+- No `historyId` incremental sync (the plan's fallback shape — two bounded
+  queries — is the only mode); >50 new matching messages between polls are
+  picked up on later syncs only if still inside the query windows.
+- `email:signIn` holds the invoke for up to 2 min while the user completes
+  consent; a second concurrent sign-in is refused, not queued.
+- Suggestion recompute uses JSON.stringify equality per message per sync
+  (fine at 500-message scale).
+- Auto-apply acts only on suggestions computed while the toggle is on;
+  pre-existing open suggestions from before enabling stay one-click.
+
+**Files touched:** `app/src/main/email/{gmailAuth,gmailClient,emailStore,
+emailSync}.ts` (new), `app/src/shared/{ipc,types}.ts`,
+`app/src/main/ipcRegistry.ts`, `app/src/main/assistant/{tools,
+AssistantSession,settingsMap}.ts`,
+`app/src/renderer/src/views/{EmailView,SettingsView}.tsx`.
+
 ### Team B — browser & panel UX (done 2026-07-27)
 
 **Shipped** (commits `25c0cfc` popup fix, `a9192f6` browser tab + panels):
