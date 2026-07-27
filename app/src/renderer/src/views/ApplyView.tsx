@@ -161,6 +161,9 @@ export default function ApplyView({ rowId }: { rowId: string }): JSX.Element {
               ref={webviewRef as React.RefObject<HTMLElement>}
               src={startUrl || 'about:blank'}
               partition="persist:apply"
+              // react-dom drops boolean-valued unknown attributes, so the value
+              // must be a string at runtime; @types/react types it as boolean.
+              allowpopups={'true' as unknown as boolean}
               className="h-full w-full"
               style={{ display: 'flex', height: '100%', width: '100%' }}
             />
