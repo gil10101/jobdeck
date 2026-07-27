@@ -1,3 +1,4 @@
+import { PanelRight } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { ApplicationDetail } from '@shared/types'
 import type { WebviewElement } from '../types.d'
@@ -43,6 +44,8 @@ function FileRow({ label, relPath }: { label: string; relPath: string }): JSX.El
   )
 }
 
+const PANEL_WIDTH_KEY = 'apply.panelWidth'
+
 export default function ApplyView({ rowId }: { rowId: string }): JSX.Element {
   const rows = useApp((s) => s.rows)
   const navigate = useApp((s) => s.navigate)
@@ -55,7 +58,34 @@ export default function ApplyView({ rowId }: { rowId: string }): JSX.Element {
   const [canFwd, setCanFwd] = useState(false)
   const [detail, setDetail] = useState<ApplicationDetail | null>(null)
   const [confirmSubmit, setConfirmSubmit] = useState(false)
+  const [panelOpen, setPanelOpen] = useState(true)
+  const [panelWidth, setPanelWidth] = useState(() => {
+    const saved = Number(localStorage.getItem(PANEL_WIDTH_KEY))
+    return saved >= 280 && saved <= 640 ? saved : 340
+  })
+  // While a divider drag is live an overlay must cover the webview, or the
+  // guest surface swallows mousemove and the drag freezes.
+  const [dragging, setDragging] = useState(false)
   const startUrl = row?.applyUrl && /^https?:/i.test(row.applyUrl) ? row.applyUrl : ''
+
+  const startDrag = (e: React.MouseEvent): void => {
+    e.preventDefault()
+    setDragging(true)
+    const onMove = (ev: MouseEvent): void => {
+      setPanelWidth(Math.min(640, Math.max(280, window.innerWidth - ev.clientX)))
+    }
+    const onUp = (): void => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      setDragging(false)
+      setPanelWidth((w) => {
+        localStorage.setItem(PANEL_WIDTH_KEY, String(w))
+        return w
+      })
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
 
   useEffect(() => {
     setUrlInput(startUrl)
@@ -152,6 +182,14 @@ export default function ApplyView({ rowId }: { rowId: string }): JSX.Element {
         >
           ↗ Browser
         </button>
+        <button
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-panel2 hover:text-gray-200"
+          aria-label={panelOpen ? 'Hide side panel' : 'Show side panel'}
+          title={panelOpen ? 'Hide side panel' : 'Show side panel'}
+          onClick={() => setPanelOpen((v) => !v)}
+        >
+          <PanelRight size={15} strokeWidth={1.75} aria-hidden="true" />
+        </button>
       </div>
 
       <div className="flex min-h-0 flex-1">
@@ -174,41 +212,52 @@ export default function ApplyView({ rowId }: { rowId: string }): JSX.Element {
           )}
         </div>
 
-        <div className="flex w-[340px] shrink-0 flex-col border-l border-edge">
-          <div className="border-b border-edge bg-panel px-3 py-2">
-            <div className="truncate text-xs font-semibold text-gray-100">
-              {row.position} <span className="text-gray-500">@</span> {row.company}
+        {panelOpen && (
+          <>
+            <div
+              className="w-1 shrink-0 cursor-col-resize bg-edge transition-colors hover:bg-cyan-500"
+              onMouseDown={startDrag}
+              title="Drag to resize"
+            />
+            <div className="flex shrink-0 flex-col" style={{ width: panelWidth }}>
+              <div className="border-b border-edge bg-panel px-3 py-2">
+                <div className="truncate text-xs font-semibold text-gray-100">
+                  {row.position} <span className="text-gray-500">@</span> {row.company}
+                </div>
+                <div className="mt-2 flex flex-col gap-1.5">
+                  {row.resumePath && (
+                    <FileRow
+                      label={row.resumePath.split('/').pop() ?? 'Resume.pdf'}
+                      relPath={row.resumePath}
+                    />
+                  )}
+                  {row.coverLetterPath && (
+                    <FileRow
+                      label={row.coverLetterPath.split('/').pop() ?? 'Cover_Letter.pdf'}
+                      relPath={row.coverLetterPath}
+                    />
+                  )}
+                </div>
+                <button
+                  className="btn btn-green mt-2 w-full justify-center"
+                  onClick={() => setConfirmSubmit(true)}
+                >
+                  ✓ Mark submitted
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-auto">
+                {detail ? (
+                  <AnswersPanel detail={detail} showInsert />
+                ) : (
+                  <div className="p-4 text-xs text-gray-600">No answers file found.</div>
+                )}
+              </div>
             </div>
-            <div className="mt-2 flex flex-col gap-1.5">
-              {row.resumePath && (
-                <FileRow
-                  label={row.resumePath.split('/').pop() ?? 'Resume.pdf'}
-                  relPath={row.resumePath}
-                />
-              )}
-              {row.coverLetterPath && (
-                <FileRow
-                  label={row.coverLetterPath.split('/').pop() ?? 'Cover_Letter.pdf'}
-                  relPath={row.coverLetterPath}
-                />
-              )}
-            </div>
-            <button
-              className="btn btn-green mt-2 w-full justify-center"
-              onClick={() => setConfirmSubmit(true)}
-            >
-              ✓ Mark submitted
-            </button>
-          </div>
-          <div className="min-h-0 flex-1 overflow-auto">
-            {detail ? (
-              <AnswersPanel detail={detail} showInsert />
-            ) : (
-              <div className="p-4 text-xs text-gray-600">No answers file found.</div>
-            )}
-          </div>
-        </div>
+          </>
+        )}
       </div>
+
+      {dragging && <div className="fixed inset-0 z-40 cursor-col-resize" />}
 
       <ConfirmDialog
         open={confirmSubmit}

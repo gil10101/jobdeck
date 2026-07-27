@@ -1,3 +1,4 @@
+import { PanelRight } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { ApplicationDetail } from '@shared/types'
 import StatusBadge from '../components/StatusBadge'
@@ -10,6 +11,8 @@ import AnswersPanel from './detail/AnswersPanel'
 import DetailChatPanel from './detail/DetailChatPanel'
 import PostingPanel from './detail/PostingPanel'
 
+const PANEL_WIDTH_KEY = 'detail.panelWidth'
+
 export default function DetailView({ rowId }: { rowId: string }): JSX.Element {
   const rows = useApp((s) => s.rows)
   const navigate = useApp((s) => s.navigate)
@@ -20,7 +23,34 @@ export default function DetailView({ rowId }: { rowId: string }): JSX.Element {
   const [confirmSubmit, setConfirmSubmit] = useState(false)
   // Bumped when the revision chat edits files, forcing PDF iframes to reload.
   const [chatTick, setChatTick] = useState(0)
+  const [panelOpen, setPanelOpen] = useState(true)
+  const [panelWidth, setPanelWidth] = useState(() => {
+    const saved = Number(localStorage.getItem(PANEL_WIDTH_KEY))
+    return saved >= 280 && saved <= 640 ? saved : 380
+  })
+  // While a divider drag is live an overlay must cover the PDF iframes, or
+  // the embedded surface swallows mousemove and the drag freezes.
+  const [dragging, setDragging] = useState(false)
   const row = rows.find((r) => r.id === rowId)
+
+  const startDrag = (e: React.MouseEvent): void => {
+    e.preventDefault()
+    setDragging(true)
+    const onMove = (ev: MouseEvent): void => {
+      setPanelWidth(Math.min(640, Math.max(280, window.innerWidth - ev.clientX)))
+    }
+    const onUp = (): void => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      setDragging(false)
+      setPanelWidth((w) => {
+        localStorage.setItem(PANEL_WIDTH_KEY, String(w))
+        return w
+      })
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
 
   useEffect(() => {
     setDetail(null)
@@ -114,13 +144,21 @@ export default function DetailView({ rowId }: { rowId: string }): JSX.Element {
           <button className="btn btn-primary" onClick={() => navigate({ view: 'apply', rowId })}>
             Apply →
           </button>
+          <button
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-panel2 hover:text-gray-200"
+            aria-label={panelOpen ? 'Hide side panel' : 'Show side panel'}
+            title={panelOpen ? 'Hide side panel' : 'Show side panel'}
+            onClick={() => setPanelOpen((v) => !v)}
+          >
+            <PanelRight size={15} strokeWidth={1.75} aria-hidden="true" />
+          </button>
         </div>
       </div>
 
       {error && <div className="border-b border-red-900 bg-red-950/40 px-4 py-2 text-xs text-red-300">{error}</div>}
 
       <div className="flex min-h-0 flex-1">
-        <div className="min-w-0 flex-1 border-r border-edge">
+        <div className="min-w-0 flex-1">
           {detail ? (
             <PdfPane detail={detail} refreshTick={chatTick} />
           ) : (
@@ -129,40 +167,51 @@ export default function DetailView({ rowId }: { rowId: string }): JSX.Element {
             </div>
           )}
         </div>
-        <div className="flex w-[380px] shrink-0 flex-col">
-          <div className="flex items-center gap-1 border-b border-edge bg-panel px-2 py-1.5">
-            <button
-              onClick={() => setTab('answers')}
-              className={`rounded-md px-3 py-1 text-xs font-medium ${tab === 'answers' ? 'bg-cyan-950/60 text-cyan-200' : 'text-gray-400 hover:bg-panel2'}`}
-            >
-              Answers
-            </button>
-            <button
-              onClick={() => setTab('posting')}
-              className={`rounded-md px-3 py-1 text-xs font-medium ${tab === 'posting' ? 'bg-cyan-950/60 text-cyan-200' : 'text-gray-400 hover:bg-panel2'}`}
-            >
-              Posting & Fit
-            </button>
-            <button
-              onClick={() => setTab('chat')}
-              className={`rounded-md px-3 py-1 text-xs font-medium ${tab === 'chat' ? 'bg-cyan-950/60 text-cyan-200' : 'text-gray-400 hover:bg-panel2'}`}
-            >
-              Chat
-            </button>
-          </div>
-          <div className="min-h-0 flex-1 overflow-auto">
-            {detail ? (
-              tab === 'answers' ? (
-                <AnswersPanel detail={detail} />
-              ) : tab === 'posting' ? (
-                <PostingPanel detail={detail} />
-              ) : (
-                <DetailChatPanel rowId={rowId} onActivity={() => setChatTick((t) => t + 1)} />
-              )
-            ) : null}
-          </div>
-        </div>
+        {panelOpen && (
+          <>
+            <div
+              className="w-1 shrink-0 cursor-col-resize bg-edge transition-colors hover:bg-cyan-500"
+              onMouseDown={startDrag}
+              title="Drag to resize"
+            />
+            <div className="flex shrink-0 flex-col" style={{ width: panelWidth }}>
+              <div className="flex items-center gap-1 border-b border-edge bg-panel px-2 py-1.5">
+                <button
+                  onClick={() => setTab('answers')}
+                  className={`rounded-md px-3 py-1 text-xs font-medium ${tab === 'answers' ? 'bg-cyan-950/60 text-cyan-200' : 'text-gray-400 hover:bg-panel2'}`}
+                >
+                  Answers
+                </button>
+                <button
+                  onClick={() => setTab('posting')}
+                  className={`rounded-md px-3 py-1 text-xs font-medium ${tab === 'posting' ? 'bg-cyan-950/60 text-cyan-200' : 'text-gray-400 hover:bg-panel2'}`}
+                >
+                  Posting & Fit
+                </button>
+                <button
+                  onClick={() => setTab('chat')}
+                  className={`rounded-md px-3 py-1 text-xs font-medium ${tab === 'chat' ? 'bg-cyan-950/60 text-cyan-200' : 'text-gray-400 hover:bg-panel2'}`}
+                >
+                  Chat
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-auto">
+                {detail ? (
+                  tab === 'answers' ? (
+                    <AnswersPanel detail={detail} />
+                  ) : tab === 'posting' ? (
+                    <PostingPanel detail={detail} />
+                  ) : (
+                    <DetailChatPanel rowId={rowId} onActivity={() => setChatTick((t) => t + 1)} />
+                  )
+                ) : null}
+              </div>
+            </div>
+          </>
+        )}
       </div>
+
+      {dragging && <div className="fixed inset-0 z-40 cursor-col-resize" />}
 
       <ConfirmDialog
         open={confirmSubmit}
