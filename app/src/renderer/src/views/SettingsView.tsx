@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { AppSettings, BoardId, BoardsStatus } from '@shared/types'
+import type { AppSettings, BoardId, BoardsStatus, EmailStatus } from '@shared/types'
 import { call } from '../api'
 import { modelOptionsWith } from '../lib/models'
 import { useApp } from '../store'
@@ -66,6 +66,9 @@ export default function SettingsView(): JSX.Element {
   const [kbNotes, setKbNotes] = useState('')
   const [kbNotesSaved, setKbNotesSaved] = useState(true)
   const [kbFiles, setKbFiles] = useState<{ name: string; sizeKb: number }[]>([])
+  const [emailStatus, setEmailStatus] = useState<EmailStatus | null>(null)
+  const [clientIdDraft, setClientIdDraft] = useState('')
+  const [emailBusy, setEmailBusy] = useState(false)
 
   useEffect(() => {
     void call('master:getContext', undefined)
@@ -85,6 +88,12 @@ export default function SettingsView(): JSX.Element {
         if (email) setJobrightEmail(email)
       })
       .catch(() => setBoards(null))
+    void call('email:status', undefined)
+      .then((s) => {
+        setEmailStatus(s)
+        if (s.clientId) setClientIdDraft(s.clientId)
+      })
+      .catch(() => setEmailStatus(null))
   }, [])
 
   useEffect(() => {
@@ -203,6 +212,40 @@ export default function SettingsView(): JSX.Element {
       toast(String(err), 'error')
     } finally {
       setTesting(false)
+    }
+  }
+
+  const saveClientId = async (): Promise<void> => {
+    try {
+      setEmailStatus(await call('email:setClientId', { clientId: clientIdDraft }))
+      toast('Gmail client ID saved', 'success')
+    } catch (err) {
+      toast(String(err), 'error')
+    }
+  }
+
+  const gmailSignIn = async (): Promise<void> => {
+    setEmailBusy(true)
+    try {
+      const s = await call('email:signIn', undefined)
+      setEmailStatus(s)
+      toast(s.email ? `Signed in as ${s.email}` : 'Signed in', 'success')
+    } catch (err) {
+      toast(String(err), 'error')
+    } finally {
+      setEmailBusy(false)
+    }
+  }
+
+  const gmailSignOut = async (): Promise<void> => {
+    setEmailBusy(true)
+    try {
+      setEmailStatus(await call('email:signOut', undefined))
+      toast('Signed out — tokens and cached mail deleted', 'success')
+    } catch (err) {
+      toast(String(err), 'error')
+    } finally {
+      setEmailBusy(false)
     }
   }
 
@@ -526,6 +569,90 @@ export default function SettingsView(): JSX.Element {
               {backfillBusy ? 'Fetching…' : 'Fetch ratings for all companies'}
             </button>
           </Row>
+        </div>
+
+        <div className="panel mt-4 px-4 py-1">
+          <div className="pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
+            Email (Gmail)
+          </div>
+          <Row
+            label="Google OAuth client ID"
+            hint="Your own Desktop-app OAuth client (read-only Gmail scope). The client ID is a public identifier, not a secret; sign-in tokens are encrypted with your OS keychain and stored in app data — never in the workspace."
+          >
+            <div className="flex flex-col items-end gap-1.5">
+              <input
+                className="input w-72"
+                placeholder="…….apps.googleusercontent.com"
+                value={clientIdDraft}
+                onChange={(e) => setClientIdDraft(e.target.value)}
+              />
+              <button
+                className="btn btn-primary px-2 py-1 text-[10px]"
+                disabled={!clientIdDraft.trim() || clientIdDraft.trim() === (emailStatus?.clientId ?? '')}
+                onClick={() => void saveClientId()}
+              >
+                Save
+              </button>
+            </div>
+          </Row>
+          <Row
+            label="Account"
+            hint={
+              emailStatus?.configured
+                ? `Signed in${emailStatus.email ? ` as ${emailStatus.email}` : ''}. Signing out revokes the token and deletes cached mail.`
+                : 'Sign in opens the Google consent page in your browser; the app only ever reads mail.'
+            }
+          >
+            {emailStatus?.configured ? (
+              <button className="btn px-2 py-1 text-[10px]" disabled={emailBusy} onClick={() => void gmailSignOut()}>
+                {emailBusy ? 'Working…' : 'Sign out'}
+              </button>
+            ) : (
+              <button
+                className="btn btn-primary px-2 py-1 text-[10px]"
+                disabled={emailBusy || !emailStatus?.clientId}
+                title={emailStatus?.clientId ? undefined : 'Save a client ID first'}
+                onClick={() => void gmailSignIn()}
+              >
+                {emailBusy ? 'Waiting for browser…' : 'Sign in with Google'}
+              </button>
+            )}
+          </Row>
+          <Row label="Poll interval" hint="How often new mail is fetched; Refresh in the Email tab syncs immediately.">
+            <div className="flex gap-1">
+              {([3, 5, 10, 30] as const).map((n) => (
+                <button
+                  key={n}
+                  className={`chip ${settings.emailPollMinutes === n ? 'border-cyan-700 bg-cyan-950/60 text-cyan-200' : ''}`}
+                  onClick={() => patch({ emailPollMinutes: n })}
+                >
+                  {n} min
+                </button>
+              ))}
+            </div>
+          </Row>
+          <Row
+            label="Auto-apply tracker suggestions"
+            hint="Default (off): classified mail proposes one-click status suggestions in the Email tab. On: matching status changes are applied to the tracker automatically."
+          >
+            <Toggle
+              value={settings.emailAutoApply}
+              onChange={(v) => patch({ emailAutoApply: v })}
+            />
+          </Row>
+          <div className="py-3">
+            <div className="text-[11px] font-medium text-gray-400">Set up your own client ID</div>
+            <ol className="mt-1 list-decimal space-y-0.5 pl-5 text-[11px] leading-relaxed text-gray-500">
+              <li>Open console.cloud.google.com and create (or select) a project.</li>
+              <li>APIs &amp; Services → Library → search “Gmail API” → Enable.</li>
+              <li>
+                OAuth consent screen → External → fill the required fields, then add your own
+                Google account under Test users.
+              </li>
+              <li>Credentials → Create credentials → OAuth client ID → Application type “Desktop app”.</li>
+              <li>Copy the Client ID (ends in .apps.googleusercontent.com) into the field above and Save.</li>
+            </ol>
+          </div>
         </div>
 
         {info && (
