@@ -4,6 +4,7 @@ import {
   History,
   Inbox,
   LayoutList,
+  Mail,
   Moon,
   Play,
   Search,
@@ -17,6 +18,7 @@ const NAV = [
   { view: 'scout', label: 'Scout', Icon: Search },
   { view: 'intake', label: 'Intake', Icon: Inbox },
   { view: 'history', label: 'History', Icon: History },
+  { view: 'email', label: 'Email', Icon: Mail },
   { view: 'runs', label: 'Runs', Icon: Play },
   { view: 'library', label: 'Library', Icon: FolderOpen },
   { view: 'browser', label: 'Browser', Icon: Globe }

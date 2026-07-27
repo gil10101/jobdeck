@@ -3,6 +3,7 @@ import ToastHost from './components/Toast'
 import ApplyView from './views/ApplyView'
 import AssistantFab from './views/assistant/AssistantFab'
 import BrowserView from './views/BrowserView'
+import EmailView from './views/EmailView'
 import HistoryView from './views/HistoryView'
 import DetailView from './views/DetailView'
 import OnboardingWizard from './views/onboarding/OnboardingWizard'
@@ -37,6 +38,7 @@ export default function App(): JSX.Element {
         {route.view === 'intake' && <IntakeView />}
         {route.view === 'history' && <HistoryView />}
         {route.view === 'browser' && <BrowserView />}
+        {route.view === 'email' && <EmailView />}
         {route.view === 'runs' && <RunsView runId={route.runId} />}
         {route.view === 'library' && <LibraryView />}
         {route.view === 'settings' && <SettingsView />}

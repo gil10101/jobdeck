@@ -27,6 +27,7 @@ export type Route =
   | { view: 'intake' }
   | { view: 'history' }
   | { view: 'browser' }
+  | { view: 'email' }
   | { view: 'runs'; runId?: string }
   | { view: 'library' }
   | { view: 'settings' }
