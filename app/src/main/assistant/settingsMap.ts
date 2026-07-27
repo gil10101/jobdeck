@@ -63,6 +63,11 @@ export const SETTINGS_MAP: SettingEntry[] = [
     topic: 'glassdoor ratings',
     location: 'Settings → Job boards → Glassdoor ratings',
     note: 'fetch ratings for all tracked companies; new companies are looked up automatically'
+  },
+  {
+    topic: 'email',
+    location: 'Settings → Email (Gmail)',
+    note: 'bring-your-own Google OAuth client ID (numbered setup steps shown there), sign in/out, poll interval, and the auto-apply toggle for tracker status suggestions (off = one-click suggestions in the Email tab)'
   }
 ]
 
