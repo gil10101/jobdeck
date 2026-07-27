@@ -162,6 +162,39 @@ export interface CandidateJob {
   createdAt: string
 }
 
+/** A posting the scout dropped at triage, with its honest one-line reason. */
+export interface ScoutExcludedItem {
+  position: string
+  company: string
+  reason: string
+}
+
+/** Condensed kept-posting row for the history view (no posting text — light payload). */
+export interface ScoutKeptItem {
+  position: string
+  company: string
+  salary: string
+  location: string
+  fitScore: number | null
+  fitNote: string
+}
+
+/** One scout run's input and outcome for the History tab. kept/excluded are
+ *  empty when the run's candidates file is missing or predates the fields. */
+export interface ScoutHistoryEntry {
+  runId: string
+  startedAt: string
+  endedAt: string | null
+  status: RunStatus
+  summary: string | null
+  /** Extra instructions the run started with; '' when none were recorded. */
+  instructions: string
+  keptCount: number
+  excludedCount: number
+  kept: ScoutKeptItem[]
+  excluded: ScoutExcludedItem[]
+}
+
 export type RunEvent =
   | { seq: number; ts: number; kind: 'status'; status: RunStatus }
   | { seq: number; ts: number; kind: 'init'; model: string; sessionId?: string }

@@ -2,16 +2,17 @@ import { BrowserWindow, dialog, ipcMain, webContents } from 'electron'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import type { IntakeItem, RunMeta } from '@shared/types'
+import type { IntakeItem, RunMeta, ScoutHistoryEntry } from '@shared/types'
 import type { IpcChannel, IpcInvokeContract } from '@shared/ipc'
 import type { RunInput } from './agent/AgentRunner'
 import { buildApplicationDetail } from './parsers/detail'
+import { parseCandidatesFile } from './parsers/report'
 import { fetchPostingFromUrl } from './parsers/jobPostingUrl'
 import { scanApplications } from './fsops/FolderScanner'
 import { copyText, openExternal, openFolder, showItem } from './fsops/reveal'
 import { importFromXlsx } from './xlsx/importXlsx'
 import { exportToXlsx } from './xlsx/exportXlsx'
-import { INTAKE_IMAGES_DIR, MASTER_DIR, UPLOADS_DIR, toAbs, toRel } from './paths'
+import { INTAKE_IMAGES_DIR, MASTER_DIR, SCOUT_DIR, UPLOADS_DIR, toAbs, toRel } from './paths'
 import { listLibrary, readLibraryFile } from './fsops/library'
 import { recompileDoc } from './latex/recompile'
 import {
@@ -385,6 +386,52 @@ export function registerIpc(services: Services): void {
       const c = s.candidates.find((x) => x.id === id)
       if (c) c.state = 'rejected'
     })
+  })
+
+  // ---- scout history: per-run instructions + kept/filtered postings ----
+  handle('scout:history', () => {
+    // runStore.list() is already newest-first.
+    return runStore
+      .list()
+      .filter((m) => m.kind === 'scout')
+      .map((meta): ScoutHistoryEntry => {
+        const input = runStore.getInput<RunInput>(meta.id)
+        let kept: ScoutHistoryEntry['kept'] = []
+        let excluded: ScoutHistoryEntry['excluded'] = []
+        // Candidates files are absent for failed/cancelled runs and may predate
+        // the excluded field — render whatever this run actually has.
+        try {
+          const raw = fs.readFileSync(path.join(SCOUT_DIR, `${meta.id}.candidates.json`), 'utf-8')
+          const parsed = parseCandidatesFile(raw)
+          if (!('error' in parsed)) {
+            kept = parsed.candidates
+              .filter((c) => (c.position ?? '').trim() || (c.company ?? '').trim())
+              .map((c) => ({
+                position: (c.position ?? '').trim(),
+                company: (c.company ?? '').trim(),
+                salary: c.salary ?? 'not listed',
+                location: c.location ?? '',
+                fitScore: typeof c.fitScore === 'number' ? c.fitScore : null,
+                fitNote: c.fitNote ?? ''
+              }))
+            excluded = parsed.excluded
+          }
+        } catch {
+          /* no candidates file for this run */
+        }
+        return {
+          runId: meta.id,
+          startedAt: meta.startedAt,
+          endedAt: meta.endedAt,
+          status: meta.status,
+          summary: meta.summary,
+          instructions: input?.instructions ?? '',
+          keptCount: kept.length,
+          excludedCount: excluded.length,
+          kept,
+          excluded
+        }
+      })
   })
 
   // ---- library: workspace reference docs, no Explorer needed ----

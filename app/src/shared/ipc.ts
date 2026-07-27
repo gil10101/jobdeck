@@ -18,6 +18,7 @@ import type {
   RunEvent,
   RunMeta,
   ScanResult,
+  ScoutHistoryEntry,
   TrackerRow
 } from './types'
 import type { ProfileFile } from './profile'
@@ -89,6 +90,8 @@ export interface IpcInvokeContract {
   'runs:get': { req: { runId: string }; res: { meta: RunMeta; events: RunEvent[] } }
   'detail:get': { req: { rowId: string }; res: ApplicationDetail }
   'scout:start': { req: { instructions?: string }; res: RunMeta }
+  /** Every scout run with its instructions and kept/filtered postings, newest first. */
+  'scout:history': { req: void; res: ScoutHistoryEntry[] }
   'library:list': { req: void; res: LibraryCategory[] }
   'library:read': { req: { relPath: string }; res: { content: string; truncated: boolean } }
   /** Restart a dead (failed/cancelled) build with its original input. */
@@ -229,6 +232,7 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'runs:get',
   'detail:get',
   'scout:start',
+  'scout:history',
   'candidates:list',
   'candidates:accept',
   'candidates:reject',

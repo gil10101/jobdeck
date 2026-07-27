@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type { ReportJson } from '@shared/types'
+import type { CandidateJob, ReportJson, ScoutExcludedItem } from '@shared/types'
 
 /** Tolerant parse: agents occasionally wrap JSON in ```json fences. */
 export function parseReport(text: string): ReportJson | { error: string } {
@@ -13,6 +13,43 @@ export function parseReport(text: string): ReportJson | { error: string } {
     return obj
   } catch (err) {
     return { error: `report.json parse failed: ${String(err)}` }
+  }
+}
+
+/** The scout prompt caps triage-drop entries at this many; enforce it on read too. */
+export const SCOUT_EXCLUDED_CAP = 40
+
+export interface CandidatesFile {
+  candidates: Partial<CandidateJob>[]
+  excluded: ScoutExcludedItem[]
+  problems: string[]
+}
+
+/** Tolerant parse of a scout candidates file: fences stripped, arrays
+ *  normalized, `excluded` entries coerced and capped (older files lack them). */
+export function parseCandidatesFile(raw: string): CandidatesFile | { error: string } {
+  let t = raw.trim()
+  const fence = t.match(/^```(?:json)?\s*([\s\S]*?)```\s*$/)
+  if (fence) t = fence[1].trim()
+  let obj: { candidates?: unknown; excluded?: unknown; problems?: unknown }
+  try {
+    obj = JSON.parse(t) as typeof obj
+  } catch (err) {
+    return { error: `candidates file is not valid JSON: ${String(err)}` }
+  }
+  if (!obj || typeof obj !== 'object') return { error: 'candidates file is not an object' }
+  const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '')
+  const excluded = (Array.isArray(obj.excluded) ? obj.excluded : [])
+    .filter((e): e is Record<string, unknown> => !!e && typeof e === 'object')
+    .map((e) => ({ position: str(e.position), company: str(e.company), reason: str(e.reason) }))
+    .filter((e) => e.position || e.company || e.reason)
+    .slice(0, SCOUT_EXCLUDED_CAP)
+  return {
+    candidates: (Array.isArray(obj.candidates) ? obj.candidates : []) as Partial<CandidateJob>[],
+    excluded,
+    problems: (Array.isArray(obj.problems) ? obj.problems : []).filter(
+      (p): p is string => typeof p === 'string' && !!p.trim()
+    )
   }
 }
 

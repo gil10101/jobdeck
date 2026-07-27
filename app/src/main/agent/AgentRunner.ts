@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import type { CandidateJob, IntakeItem, RunEvent, RunKind, RunMeta, RunStatus } from '@shared/types'
+import type { IntakeItem, RunEvent, RunKind, RunMeta, RunStatus } from '@shared/types'
 import type { ProfileFile } from '@shared/profile'
 import {
   APPLICATIONS_DIR,
@@ -15,7 +15,7 @@ import {
 } from '../paths'
 import { assertScoutable, prefetchJobrightFeed } from '../boards/boardsBridge'
 import { scanApplications } from '../fsops/FolderScanner'
-import { parseReport, validateReport } from '../parsers/report'
+import { parseCandidatesFile, parseReport, validateReport } from '../parsers/report'
 import { validateProfile } from '../profile/profileSchema'
 import { loadProfile } from '../profile/profileStore'
 import { ensureRatingBg } from '../companies/ratingService'
@@ -553,17 +553,21 @@ export class AgentRunner {
       this.finish(run, 'failed', 'scout finished but wrote no candidates file')
       return
     }
-    let parsed: { candidates?: Partial<CandidateJob>[]; problems?: string[] }
+    let raw = ''
     try {
-      let raw = fs.readFileSync(outPath, 'utf-8').trim()
-      const fence = raw.match(/^```(?:json)?\s*([\s\S]*?)```\s*$/)
-      if (fence) raw = fence[1].trim()
-      parsed = JSON.parse(raw)
+      raw = fs.readFileSync(outPath, 'utf-8')
     } catch (err) {
-      this.finish(run, 'failed', `candidates file is not valid JSON: ${String(err)}`)
+      this.finish(run, 'failed', `cannot read candidates file: ${String(err)}`)
       return
     }
-    const incoming = Array.isArray(parsed.candidates) ? parsed.candidates : []
+    // The file stays on disk exactly as the agent wrote it (excluded list
+    // included) — scout:history reads it back per run.
+    const parsed = parseCandidatesFile(raw)
+    if ('error' in parsed) {
+      this.finish(run, 'failed', parsed.error)
+      return
+    }
+    const incoming = parsed.candidates
 
     const key = (position: string, company: string): string =>
       `${position.toLowerCase().trim()}|${company.toLowerCase().trim()}`
@@ -613,8 +617,9 @@ export class AgentRunner {
     })
     for (const company of newCompanies) ensureRatingBg(company)
 
-    run.meta.summary = `${added} new candidate${added === 1 ? '' : 's'} (${incoming.length} reported)`
-    run.meta.problems = parsed.problems?.length ? parsed.problems : null
+    const filtered = parsed.excluded.length ? `, ${parsed.excluded.length} filtered out` : ''
+    run.meta.summary = `${added} new candidate${added === 1 ? '' : 's'} (${incoming.length} reported${filtered})`
+    run.meta.problems = parsed.problems.length ? parsed.problems : null
     this.finish(run, 'succeeded')
   }
 

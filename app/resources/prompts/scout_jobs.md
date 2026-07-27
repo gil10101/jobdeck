@@ -33,6 +33,7 @@ If a CLI errors (auth/session), note it in `problems` and continue with the othe
 {{EXCLUDE_LIST}}
 - For each keeper, judge **fitScore 0-100** against the candidate's actual profile (skills, seniority level, team preference) and write a one-line **honest fitNote** naming any genuine gap (never inflate).
 - For strong keepers (fitScore ≥ 70), get the fullest posting text you can (LinkedIn `detail`, or the jobright summary if that's all there is).
+- Record EVERY posting you drop at triage in the output's `excluded` array — position, company, and ONE honest line naming the criterion that failed (e.g. "posted max $120k > $90k ceiling", "onsite only, outside acceptable locations", "fit ~40: requires clinical trials background"). Never soften the reason. Postings on the off-limits list above get no entry (they were never in play). Cap `excluded` at the 40 most useful entries, closest calls first.
 - Target: the best 5-15 candidates, quality over quantity.
 
 ## STEP 4 — Write the output file (REQUIRED)
@@ -59,6 +60,13 @@ Write `{{OUTPUT_PATH}}` as VALID JSON (no fences, no comments):
       "education": ["<degree requirements, e.g. Bachelor's in CS/Stats or equivalent>"],
       "responsibilities": ["<each key responsibility, short>"],
       "benefits": ["<benefits/perks if listed>"]
+    }
+  ],
+  "excluded": [
+    {
+      "position": "<exact title>",
+      "company": "<company>",
+      "reason": "<one line: which criterion failed and how>"
     }
   ],
   "problems": []
