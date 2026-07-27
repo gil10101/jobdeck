@@ -205,3 +205,71 @@ ScoutView's guard).
 `app/src/main/parsers/report.ts`, `app/src/main/agent/AgentRunner.ts`,
 `app/src/shared/ipc.ts`, `app/src/shared/types.ts`,
 `app/src/main/ipcRegistry.ts`, `app/src/renderer/src/views/HistoryView.tsx`.
+
+### Team B — browser & panel UX (done 2026-07-27)
+
+**Shipped** (commits `25c0cfc` popup fix, `a9192f6` browser tab + panels):
+- Popup fix: webview `setWindowOpenHandler` now returns `{action: 'allow'}`
+  with hardened `overrideBrowserWindowOptions` instead of denying and loading
+  in place (which broke OAuth and destroyed the page being applied on). Both
+  webview surfaces carry `allowpopups`. Chained popups (SSO account pickers)
+  are adopted recursively via `did-create-window`: same handler, same plain
+  Chrome UA.
+- `BrowserView.tsx`: nav bar in ApplyView's style (back/forward/reload, URL
+  bar with Enter-to-navigate, ↗ system-browser button), webview on the same
+  `persist:apply` partition so logins are shared; last visited URL kept in
+  `sessionStorage` (`browser.lastUrl`), centered type-a-URL hint when blank;
+  no right sidebar.
+- Panel toggles: borderless lucide `PanelRight` ghost button (assistant-panel
+  style) right of "↗ Browser" in ApplyView and right of "Apply →" in
+  DetailView; each toggles its right panel (local state, default visible).
+- Draggable dividers (ScoutView pattern) for both right panels, clamps
+  280–640px, widths persisted (`apply.panelWidth` / `detail.panelWidth`);
+  divider replaces the old fixed border between panes.
+
+**Popup-fix safety (verified):** child windows are created only through
+`overrideBrowserWindowOptions.webPreferences = {contextIsolation: true,
+nodeIntegration: false, sandbox: true}` plus `autoHideMenuBar: true`; no
+`preload` is passed, and the app preload is only ever attached in
+`createMainWindow`, so popups never see it. Electron merges override prefs
+with inherited ones taking the stricter value, and the opener webview itself
+has no node access. Only `https?:`/`about:blank` popup URLs are allowed. The
+`web-contents-created` hardening early-returns for non-webview contents, so
+popup windows (type `'window'`) are never re-denied and there is no handler
+recursion. The app window's own window-open handler (renderer links →
+`shell.openExternal`, deny) is untouched. Boot-smoke: the live `--watch` dev
+session rebuilt `out/main/index.js` with the final handler (grep-verified)
+and Electron restarted and stayed up.
+
+**Deviations from spec:**
+- `allowpopups` is passed as `{'true' as unknown as boolean}`: react-dom 18
+  drops boolean-valued unknown attributes (`shouldRemoveAttributeWithWarning`),
+  so the runtime value must be a string, while `@types/react`'s webview
+  intrinsic types it as boolean. The repo's global JSX webview augmentation in
+  `types.d.ts` is inert under `react-jsx` (types.d.ts is outside Team B's
+  file set — cleanup suggested).
+- Added a session-level UA override for webview sessions so a popup's first
+  request predates the per-contents UA and never carries the Electron token.
+- Added a full-window transparent overlay while a divider drag is live —
+  webview/PDF-iframe guests swallow `mousemove`, which ScoutView (plain DOM)
+  never had to handle.
+- Browser tab's ↗ button keeps the "↗ Browser" label for parity with
+  ApplyView.
+
+**Known gaps / review risks:**
+- OAuth not click-tested end to end (needs a human run against a real
+  provider); Google can still refuse embedded logins on signals other than
+  UA — the ↗ system-browser escape hatch remains.
+- Popup windows are chrome-less (no nav/URL bar) — fine for self-closing
+  OAuth, but a popup that never self-closes must be closed via its own UI or
+  the OS window button.
+- Divider drag and toggles verified by typecheck + pattern parity with
+  ScoutView; not pointer-tested in this session (no CDP port on the running
+  app).
+- Hiding the Detail right panel unmounts the active tab component; chat
+  history lives in the store and survives, but an unsent chat draft is lost.
+
+**Files touched:** `app/src/main/window.ts`,
+`app/src/renderer/src/views/ApplyView.tsx`,
+`app/src/renderer/src/views/DetailView.tsx`,
+`app/src/renderer/src/views/BrowserView.tsx`.
