@@ -368,3 +368,77 @@ and Electron restarted and stayed up.
 `app/src/renderer/src/views/ApplyView.tsx`,
 `app/src/renderer/src/views/DetailView.tsx`,
 `app/src/renderer/src/views/BrowserView.tsx`.
+
+### Team D — custom boards (done 2026-07-27)
+
+**Shipped** (commits `a853d5a` registry+detection+fetchers, `b446b13`
+settings UI + scout prefetch):
+- Profile: `searchConfig.customBoards: [{id, label, ats, slug, enabled}]`
+  (additive; `emptyProfile` default `[]`). `validateProfile` heals a missing
+  key to `[]` via the skeleton and normalizes entries element-wise (unknown
+  ATS / missing slug dropped, deterministic fallback id `cb_<ats>_<slug>`,
+  label falls back to slug, `enabled` defaults true).
+- `boards/customBoards.ts`: `detectCustomBoard` maps a pasted URL to
+  ats+slug — https only, exact host match on `boards.greenhouse.io` /
+  `job-boards.greenhouse.io` (incl. `embed/job_board?for=` form),
+  `jobs.lever.co`, `jobs.ashbyhq.com`; slug = first path segment, so board
+  front pages AND deep posting URLs both resolve. Greenhouse/lever slugs
+  lowercased; ashby keeps case/spaces (display-name slugs). Everything else
+  throws the decline reason (no stable structure, per-site scrapers rot —
+  paste postings into Intake by URL instead).
+- **Endpoints used** (plain fetch, browser UA, 15s timeout, `Accept: json`):
+  greenhouse `boards-api.greenhouse.io/v1/boards/<slug>/jobs` (list; WITHOUT
+  `content=true` — rows don't need descriptions and payloads explode with
+  them) + `/v1/boards/<slug>` (company display name, test-time best-effort);
+  lever `api.lever.co/v0/postings/<slug>?mode=json`; ashby
+  `api.ashbyhq.com/posting-api/job-board/<slug>` (unlisted jobs filtered).
+  Rows normalized to `{title, location, url, postedAt?, department?}`,
+  capped 500/board (`total` records the real size). All three normalizers
+  verified against live boards (186/286/755-row responses).
+- `testCustomBoard` = detect + live fetch + label; `addCustomBoard` saves
+  only after a successful live test (clone→validate→save like
+  `setBoardEnabled`); dedupe on ats+slug. IPC additive:
+  `boards:testCustom/addCustom/removeCustom/setCustomEnabled/listCustom`.
+- Scout: pre-flight prefetches all enabled boards (sequential, per-board
+  try/catch) into `scout/<runId>.custom-boards.json` `{fetchedAt, boards:
+  [{label, ats, total, rows}]}` — written only when ≥1 board succeeded.
+  Prompt: unnumbered CUSTOM_BOARDS_SECTION between STEP 2 items 3 and 4
+  (judge every row vs STEP 1; rows lack fit data — title/location only,
+  WebFetch posting URLs for finalists only; `source: "company"`, enum
+  updated); failed boards named in the availability note ("cannot be
+  searched this run; add one problems line"). Disabled boards are silently
+  absent (the agent has no other path to them).
+- `assertScoutable` + bun-missing availability note now treat an enabled
+  custom board as a usable source: a bun-less/CLI-less workspace can still
+  scout on custom boards + WebSearch.
+- Settings → Job boards: custom-board rows (label, ats · slug hint, enable
+  Toggle, ✕ remove) + "Add company board" row — URL input, Test (inline
+  result: "GitLab — greenhouse board "gitlab", 186 open roles" or the
+  decline/error reason in amber), Add.
+
+**Decline behavior:** non-ATS hosts, http://, and slug-less URLs never reach
+the network — `detectCustomBoard` throws first (message = the WHY, shown
+inline under the Test/Add buttons and in toasts). Unknown slugs on a real
+ATS fail at fetch with "the ATS knows no public board under that company
+identifier (HTTP 404)". Add can therefore never save an unfetchable board.
+
+**Known gaps / review risks:**
+- Greenhouse EU (`boards.eu.greenhouse.io`) and other regional hosts are not
+  recognized (spec pinned the three hosts) — declined with the generic
+  reason even though the API would work.
+- Labels aren't user-editable; lever/ashby labels are prettified slugs
+  (e.g. "Openai"), only greenhouse gets the ATS-reported company name.
+- Prefetch rows cap at 500/board — a mega-board's older postings are
+  silently absent from the file (the `total` field is the only tell).
+- Custom-board rows carry no salary/description, so hard salary filters
+  can't fire until the agent WebFetches a finalist — scouts may keep rows a
+  fuller feed would have dropped at triage.
+- `scout_jobs.md` STEP 2 heading still says "bun CLIs" though the custom
+  boards item is a file Read; harmless in practice.
+
+**Files touched:** `app/src/shared/{profile,types,ipc}.ts`,
+`app/src/main/profile/profileSchema.ts`,
+`app/src/main/boards/{customBoards (new),boardsBridge}.ts`,
+`app/src/main/ipcRegistry.ts`, `app/src/main/agent/{AgentRunner,prompt}.ts`,
+`app/resources/prompts/scout_jobs.md`,
+`app/src/renderer/src/views/SettingsView.tsx`.
