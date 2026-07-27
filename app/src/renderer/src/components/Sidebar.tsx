@@ -1,5 +1,7 @@
 import {
   FolderOpen,
+  Globe,
+  History,
   Inbox,
   LayoutList,
   Moon,
@@ -14,8 +16,10 @@ const NAV = [
   { view: 'tracker', label: 'Tracker', Icon: LayoutList },
   { view: 'scout', label: 'Scout', Icon: Search },
   { view: 'intake', label: 'Intake', Icon: Inbox },
+  { view: 'history', label: 'History', Icon: History },
   { view: 'runs', label: 'Runs', Icon: Play },
-  { view: 'library', label: 'Library', Icon: FolderOpen }
+  { view: 'library', label: 'Library', Icon: FolderOpen },
+  { view: 'browser', label: 'Browser', Icon: Globe }
 ] as const
 
 export default function Sidebar(): JSX.Element {

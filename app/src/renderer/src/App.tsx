@@ -2,6 +2,8 @@ import Sidebar from './components/Sidebar'
 import ToastHost from './components/Toast'
 import ApplyView from './views/ApplyView'
 import AssistantFab from './views/assistant/AssistantFab'
+import BrowserView from './views/BrowserView'
+import HistoryView from './views/HistoryView'
 import DetailView from './views/DetailView'
 import OnboardingWizard from './views/onboarding/OnboardingWizard'
 import IntakeView from './views/IntakeView'
@@ -33,6 +35,8 @@ export default function App(): JSX.Element {
         {route.view === 'tracker' && <TrackerView />}
         {route.view === 'scout' && <ScoutView />}
         {route.view === 'intake' && <IntakeView />}
+        {route.view === 'history' && <HistoryView />}
+        {route.view === 'browser' && <BrowserView />}
         {route.view === 'runs' && <RunsView runId={route.runId} />}
         {route.view === 'library' && <LibraryView />}
         {route.view === 'settings' && <SettingsView />}

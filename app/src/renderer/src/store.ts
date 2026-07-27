@@ -25,6 +25,8 @@ export type Route =
   | { view: 'tracker' }
   | { view: 'scout' }
   | { view: 'intake' }
+  | { view: 'history' }
+  | { view: 'browser' }
   | { view: 'runs'; runId?: string }
   | { view: 'library' }
   | { view: 'settings' }
