@@ -13,6 +13,7 @@ import RunsView from './views/RunsView'
 import SettingsView from './views/SettingsView'
 import ScoutView from './views/ScoutView'
 import TrackerView from './views/TrackerView'
+import WhoAmIView from './views/WhoAmIView'
 import { useApp } from './store'
 
 export default function App(): JSX.Element {
@@ -41,6 +42,7 @@ export default function App(): JSX.Element {
         {route.view === 'email' && <EmailView />}
         {route.view === 'runs' && <RunsView runId={route.runId} />}
         {route.view === 'library' && <LibraryView />}
+        {route.view === 'whoami' && <WhoAmIView />}
         {route.view === 'settings' && <SettingsView />}
         {route.view === 'detail' && <DetailView rowId={route.rowId} />}
         {route.view === 'apply' && <ApplyView rowId={route.rowId} />}

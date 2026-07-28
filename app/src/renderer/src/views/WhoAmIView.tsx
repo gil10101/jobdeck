@@ -1,0 +1,511 @@
+// Read-only "Who I am" page: everything the agents know about the user, in one
+// place — the full profile, the master résumé context, and the knowledge base.
+// Editing happens in Settings; this view only makes the model's inputs visible.
+
+import { useEffect, useState } from 'react'
+import { SquarePen, UserRound } from 'lucide-react'
+import type { ProfileFile } from '@shared/profile'
+import { call } from '../api'
+import { useApp } from '../store'
+
+interface KnowledgeInfo {
+  notes: string
+  files: { name: string; sizeKb: number }[]
+}
+
+/** "start – end", with an explicit Present while the end is open. */
+function formatDates(start: string, end: string): string {
+  if (!start && !end) return ''
+  if (!end) return `${start} – Present`
+  if (!start) return end
+  return `${start} – ${end}`
+}
+
+function Section({
+  title,
+  note,
+  children
+}: {
+  title: string
+  note?: string
+  children: React.ReactNode
+}): JSX.Element {
+  return (
+    <div className="panel mt-4 px-4 py-3">
+      <div className="flex flex-wrap items-baseline gap-x-2">
+        <div className="text-[10px] font-bold uppercase tracking-wide text-muted">{title}</div>
+        {note && <div className="text-[10px] text-gray-600">{note}</div>}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+/** One entry in a list section (a role, a project, a degree…). */
+function Entry({ children }: { children: React.ReactNode }): JSX.Element {
+  return <div className="border-b border-edge/50 py-3 last:border-b-0 last:pb-0">{children}</div>
+}
+
+function Chips({ items }: { items: string[] }): JSX.Element | null {
+  if (items.length === 0) return null
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-1">
+      {items.map((item, i) => (
+        <span key={`${item}-${i}`} className="chip">
+          {item}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function LabeledChips({ label, items }: { label: string; items: string[] }): JSX.Element | null {
+  if (items.length === 0) return null
+  return (
+    <div className="mt-2">
+      <div className="text-[11px] font-medium text-gray-400">{label}</div>
+      <Chips items={items} />
+    </div>
+  )
+}
+
+function Bullets({ items }: { items: string[] }): JSX.Element | null {
+  if (items.length === 0) return null
+  return (
+    <ul className="mt-1.5 list-disc space-y-0.5 pl-5 text-xs leading-relaxed text-gray-300">
+      {items.map((b, i) => (
+        <li key={i}>{b}</li>
+      ))}
+    </ul>
+  )
+}
+
+/** Muted per-entry instruction the agents follow when they use the entry. */
+function Guidance({ kind, text }: { kind: string; text: string }): JSX.Element {
+  return (
+    <div className="mt-1 flex items-baseline gap-1.5 text-[11px] leading-relaxed">
+      <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-gray-600">
+        {kind}
+      </span>
+      <span className="italic text-gray-500">{text}</span>
+    </div>
+  )
+}
+
+function ExternalLink({ url }: { url: string }): JSX.Element {
+  return (
+    <button
+      className="text-[11px] text-cyan-500 hover:underline"
+      onClick={() => void call('app:openExternal', { url }).catch(() => undefined)}
+    >
+      {url}
+    </button>
+  )
+}
+
+function PreBlock({ text }: { text: string }): JSX.Element {
+  return (
+    <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded-md border border-edge bg-bg px-3 py-2 font-mono text-[11px] leading-relaxed text-gray-300">
+      {text}
+    </pre>
+  )
+}
+
+export default function WhoAmIView(): JSX.Element {
+  const navigate = useApp((s) => s.navigate)
+  const [loading, setLoading] = useState(true)
+  const [profile, setProfile] = useState<ProfileFile | null>(null)
+  const [masterContext, setMasterContext] = useState('')
+  const [kb, setKb] = useState<KnowledgeInfo>({ notes: '', files: [] })
+
+  useEffect(() => {
+    void Promise.all([
+      call('profile:get', undefined).catch(() => null),
+      call('master:getContext', undefined).catch(() => ({ text: '' })),
+      call('knowledge:get', undefined).catch((): KnowledgeInfo => ({ notes: '', files: [] }))
+    ]).then(([p, master, knowledge]) => {
+      setProfile(p)
+      setMasterContext(master.text)
+      setKb(knowledge)
+      setLoading(false)
+    })
+  }, [])
+
+  if (loading) return <div className="p-6 text-sm text-gray-500">Loading…</div>
+
+  if (!profile) {
+    return (
+      <div className="flex h-full items-center justify-center p-6">
+        <div className="panel flex max-w-md flex-col items-center px-8 py-10 text-center">
+          <UserRound size={28} strokeWidth={1.5} className="text-gray-500" />
+          <div className="mt-3 text-sm font-semibold text-gray-100">No profile yet</div>
+          <p className="mt-1.5 text-[11px] leading-relaxed text-gray-500">
+            The agents have nothing to go on. Run onboarding to build your profile — it is the
+            source for every search, evaluation, and generated document.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  const id = profile.identity
+  const contact = [id.location, id.email, id.phone, id.linkedin, id.github, id.website].filter(
+    Boolean
+  )
+  const b = profile.behavioral
+  const behavioralEmpty =
+    b.traits.length === 0 &&
+    b.strengths.length === 0 &&
+    b.growthAreas.length === 0 &&
+    b.thrivesIn.length === 0
+  const n = profile.narrative
+  const narrativeEmpty =
+    n.whatExcites.length === 0 &&
+    n.targetSectors.length === 0 &&
+    n.dealBreakers.length === 0 &&
+    n.stories.length === 0
+  const sc = profile.searchConfig
+  const salaryBits = [
+    sc.salary.desired && `desired ${sc.salary.desired}`,
+    sc.salary.ftPostedMaxUsd !== null &&
+      `posted full-time max $${sc.salary.ftPostedMaxUsd.toLocaleString()}`,
+    sc.salary.internshipsExempt && 'internships exempt'
+  ].filter(Boolean)
+
+  return (
+    <div className="h-full overflow-auto">
+      <div className="mx-auto max-w-4xl p-6 pb-10">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-sm font-semibold text-gray-100">Who I am</h1>
+            <p className="mt-1 text-[11px] leading-relaxed text-gray-500">
+              Everything the agents know about you — sourced from your profile, master context, and
+              knowledge base.
+            </p>
+          </div>
+          <button className="btn shrink-0" onClick={() => navigate({ view: 'settings' })}>
+            <SquarePen size={13} />
+            Edit
+          </button>
+        </div>
+
+        <Section title="Identity">
+          <div className="mt-2 text-lg font-semibold leading-tight text-gray-100">
+            {id.fullName || 'Unnamed'}
+          </div>
+          {contact.length > 0 && (
+            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-gray-400">
+              {contact.map((c) => (
+                <span key={c}>{c}</span>
+              ))}
+            </div>
+          )}
+          {(id.workAuth || id.status || id.languages.length > 0) && (
+            <div className="mt-2 flex flex-col gap-0.5 text-[11px]">
+              {id.workAuth && (
+                <div>
+                  <span className="text-gray-500">Work authorization: </span>
+                  <span className="text-gray-300">{id.workAuth}</span>
+                </div>
+              )}
+              {id.status && (
+                <div>
+                  <span className="text-gray-500">Status: </span>
+                  <span className="text-gray-300">{id.status}</span>
+                </div>
+              )}
+              {id.languages.length > 0 && (
+                <div>
+                  <span className="text-gray-500">Languages: </span>
+                  <span className="text-gray-300">
+                    {id.languages.map((l) => `${l.name} (${l.proficiency})`).join(', ')}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+        </Section>
+
+        {profile.education.length > 0 && (
+          <Section title="Education">
+            {profile.education.map((e, i) => (
+              <Entry key={i}>
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                  <div className="text-xs font-semibold text-gray-100">
+                    {e.degree} <span className="font-normal text-gray-400">· {e.institution}</span>
+                  </div>
+                  <div className="text-[11px] text-gray-500">
+                    {[formatDates(e.startDate, e.endDate), e.location].filter(Boolean).join(' · ')}
+                  </div>
+                </div>
+                {e.gpa && <div className="mt-1 text-[11px] text-gray-400">GPA {e.gpa}</div>}
+                {e.thesis && <div className="mt-1 text-[11px] text-gray-400">Thesis: {e.thesis}</div>}
+                <Chips items={e.coursework} />
+                {e.notes && <Guidance kind="notes" text={e.notes} />}
+              </Entry>
+            ))}
+          </Section>
+        )}
+
+        {profile.experience.length > 0 && (
+          <Section title="Experience">
+            {profile.experience.map((e, i) => (
+              <Entry key={i}>
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                  <div className="text-xs font-semibold text-gray-100">
+                    {e.title} <span className="font-normal text-gray-400">@ {e.company}</span>
+                  </div>
+                  <div className="text-[11px] text-gray-500">
+                    {[formatDates(e.startDate, e.endDate), e.location].filter(Boolean).join(' · ')}
+                  </div>
+                </div>
+                <Bullets items={e.bullets} />
+                <Chips items={e.technologies} />
+                {e.inclusionRule && <Guidance kind="inclusion rule" text={e.inclusionRule} />}
+                {e.framingNotes && <Guidance kind="framing" text={e.framingNotes} />}
+              </Entry>
+            ))}
+          </Section>
+        )}
+
+        {profile.projects.length > 0 && (
+          <Section title="Projects">
+            {profile.projects.map((p, i) => (
+              <Entry key={i}>
+                <div className="flex flex-wrap items-baseline gap-x-2">
+                  <div className="text-xs font-semibold text-gray-100">{p.name}</div>
+                  {p.oneLiner && <div className="text-[11px] text-gray-400">{p.oneLiner}</div>}
+                </div>
+                {p.url && (
+                  <div className="mt-0.5">
+                    <ExternalLink url={p.url} />
+                  </div>
+                )}
+                <Bullets items={p.bullets} />
+                <Chips items={p.technologies} />
+                {p.mustKeepPhrases.length > 0 && (
+                  <Guidance
+                    kind="keep verbatim"
+                    text={p.mustKeepPhrases.map((s) => `“${s}”`).join(' · ')}
+                  />
+                )}
+                {p.framingNotes && <Guidance kind="framing" text={p.framingNotes} />}
+                {p.inclusionRule && <Guidance kind="inclusion rule" text={p.inclusionRule} />}
+              </Entry>
+            ))}
+          </Section>
+        )}
+
+        {profile.skills.length > 0 && (
+          <Section title="Skills">
+            {profile.skills.map((c) => (
+              <div
+                key={c.category}
+                className="flex items-start gap-3 border-b border-edge/50 py-2 last:border-b-0 last:pb-0"
+              >
+                <div className="w-36 shrink-0 pt-1 text-[11px] font-medium text-gray-400">
+                  {c.category}
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {c.items.map((s, i) => (
+                    <span key={`${s}-${i}`} className="chip">
+                      {s}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </Section>
+        )}
+
+        {profile.certifications.length > 0 && (
+          <Section title="Certifications">
+            {profile.certifications.map((c, i) => (
+              <Entry key={i}>
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                  <div className="text-xs font-medium text-gray-100">
+                    {c.title}
+                    {c.issuer && <span className="font-normal text-gray-400"> · {c.issuer}</span>}
+                  </div>
+                  {c.date && <div className="text-[11px] text-gray-500">{c.date}</div>}
+                </div>
+                {c.inclusionRule && <Guidance kind="inclusion rule" text={c.inclusionRule} />}
+              </Entry>
+            ))}
+          </Section>
+        )}
+
+        {profile.publications.length > 0 && (
+          <Section title="Publications">
+            {profile.publications.map((p, i) => (
+              <Entry key={i}>
+                <div className="text-[11px] leading-relaxed text-gray-300">{p.citation}</div>
+                {p.url && (
+                  <div className="mt-0.5">
+                    <ExternalLink url={p.url} />
+                  </div>
+                )}
+              </Entry>
+            ))}
+          </Section>
+        )}
+
+        {profile.awards.length > 0 && (
+          <Section title="Awards">
+            {profile.awards.map((a, i) => (
+              <Entry key={i}>
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                  <div className="text-xs font-medium text-gray-100">
+                    {a.title}
+                    {a.issuer && <span className="font-normal text-gray-400"> · {a.issuer}</span>}
+                  </div>
+                  {a.date && <div className="text-[11px] text-gray-500">{a.date}</div>}
+                </div>
+                {a.note && <div className="mt-1 text-[11px] text-gray-400">{a.note}</div>}
+              </Entry>
+            ))}
+          </Section>
+        )}
+
+        {!behavioralEmpty && (
+          <Section title="Behavioral profile" note="how the agents read your working style">
+            <LabeledChips label="Traits" items={b.traits} />
+            <LabeledChips label="Strengths" items={b.strengths} />
+            <LabeledChips label="Growth areas" items={b.growthAreas} />
+            <LabeledChips label="Thrives in" items={b.thrivesIn} />
+            {b.assessmentSource && (
+              <div className="mt-2 text-[10px] text-gray-600">Source: {b.assessmentSource}</div>
+            )}
+          </Section>
+        )}
+
+        {!narrativeEmpty && (
+          <Section title="Narrative">
+            {n.whatExcites.length > 0 && (
+              <div className="mt-2">
+                <div className="text-[11px] font-medium text-gray-400">What excites me</div>
+                <Bullets items={n.whatExcites} />
+              </div>
+            )}
+            <LabeledChips label="Target sectors" items={n.targetSectors} />
+            {n.dealBreakers.length > 0 && (
+              <div className="mt-2">
+                <div className="text-[11px] font-medium text-gray-400">Deal-breakers</div>
+                <Bullets items={n.dealBreakers} />
+              </div>
+            )}
+            {n.stories.length > 0 && (
+              <div className="mt-2">
+                <div className="text-[11px] font-medium text-gray-400">Stories</div>
+                {n.stories.map((s) => (
+                  <div key={s.id} className="mt-1.5 rounded-md border border-edge bg-bg px-3 py-2">
+                    <div className="flex flex-wrap items-baseline gap-x-2">
+                      <div className="text-[11px] font-medium text-gray-200">{s.title}</div>
+                      <div className="text-[10px] text-gray-600">
+                        {s.use.map((u) => u.replace('_', ' ')).join(' · ')}
+                      </div>
+                    </div>
+                    <div className="mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-gray-400">
+                      {s.text}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Section>
+        )}
+
+        <Section title="Search config" note="what the scouts hunt for">
+          {sc.targetRoles.length > 0 && (
+            <div className="mt-2">
+              <div className="text-[11px] font-medium text-gray-400">
+                Target roles, highest priority first
+              </div>
+              <ol className="mt-1 list-decimal space-y-0.5 pl-5 text-xs text-gray-300">
+                {[...sc.targetRoles]
+                  .sort((x, y) => x.priority - y.priority)
+                  .map((r) => (
+                    <li key={r.title}>{r.title}</li>
+                  ))}
+              </ol>
+            </div>
+          )}
+          {salaryBits.length > 0 && (
+            <div className="mt-2 text-[11px]">
+              <span className="text-gray-500">Salary: </span>
+              <span className="text-gray-300">{salaryBits.join(' · ')}</span>
+            </div>
+          )}
+          {sc.locationTiers.length > 0 && (
+            <div className="mt-2">
+              <div className="text-[11px] font-medium text-gray-400">Locations</div>
+              <div className="mt-1 flex flex-col gap-0.5 text-[11px]">
+                {sc.locationTiers.map((t, i) => (
+                  <div key={i}>
+                    <span className="text-gray-500">{t.tier}: </span>
+                    <span className="text-gray-300">{t.description}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <LabeledChips label="Employment types" items={sc.employmentTypes} />
+          <LabeledChips label="Work models" items={sc.workModels} />
+        </Section>
+
+        <Section title="Master résumé context" note="may be listed on documents">
+          {masterContext.trim() ? (
+            <PreBlock text={masterContext} />
+          ) : (
+            <div className="mt-2 text-[11px] text-gray-500">
+              Empty — the agents work from the profile above alone.
+            </div>
+          )}
+        </Section>
+
+        <Section title="Knowledge base" note="background only — never on documents">
+          {kb.notes.trim() ? (
+            <PreBlock text={kb.notes} />
+          ) : (
+            <div className="mt-2 text-[11px] text-gray-500">No notes.</div>
+          )}
+          {kb.files.length > 0 && (
+            <div className="mt-2 flex flex-col gap-1">
+              {kb.files.map((f) => (
+                <div
+                  key={f.name}
+                  className="flex items-center gap-2 rounded-md border border-edge px-2 py-1 text-[11px]"
+                >
+                  <span className="min-w-0 flex-1 truncate text-gray-300">{f.name}</span>
+                  <span className="shrink-0 text-[10px] text-gray-600">{f.sizeKb} KB</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Section>
+
+        {(profile.tailoring.hardRules.length > 0 || profile.customRules.length > 0) && (
+          <Section title="Tailoring hard rules" note="enforced on every generated document">
+            {profile.tailoring.hardRules.length > 0 && (
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-[11px] leading-relaxed text-gray-300">
+                {profile.tailoring.hardRules.map((r, i) => (
+                  <li key={i}>{r}</li>
+                ))}
+              </ul>
+            )}
+            {profile.customRules.length > 0 && (
+              <>
+                <div className="mt-3 text-[11px] font-medium text-gray-400">Your custom rules</div>
+                <ul className="mt-1 list-disc space-y-1 pl-5 text-[11px] leading-relaxed text-gray-300">
+                  {profile.customRules.map((r, i) => (
+                    <li key={i}>{r}</li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </Section>
+        )}
+      </div>
+    </div>
+  )
+}

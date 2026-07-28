@@ -30,6 +30,7 @@ export type Route =
   | { view: 'email' }
   | { view: 'runs'; runId?: string }
   | { view: 'library' }
+  | { view: 'whoami' }
   | { view: 'settings' }
   | { view: 'detail'; rowId: string }
   | { view: 'apply'; rowId: string }

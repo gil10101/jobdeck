@@ -9,7 +9,8 @@ import {
   Play,
   Search,
   Settings,
-  Sun
+  Sun,
+  UserRound
 } from 'lucide-react'
 import { useApp } from '../store'
 
@@ -69,6 +70,17 @@ export default function Sidebar(): JSX.Element {
         })}
       </nav>
       <div className="mt-auto flex flex-col gap-1 px-2 py-3">
+        <button
+          onClick={() => navigate({ view: 'whoami' })}
+          className={`flex items-center gap-2.5 rounded-md px-3 py-2 text-left text-xs font-medium transition-colors ${
+            route.view === 'whoami'
+              ? 'bg-cyan-950/60 text-cyan-200'
+              : 'text-gray-400 hover:bg-panel2 hover:text-gray-200'
+          }`}
+        >
+          <UserRound size={15} strokeWidth={1.75} className="shrink-0" />
+          Who I am
+        </button>
         <button
           onClick={() => navigate({ view: 'settings' })}
           className={`flex items-center gap-2.5 rounded-md px-3 py-2 text-left text-xs font-medium transition-colors ${
