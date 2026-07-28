@@ -175,7 +175,7 @@ export function CheckField(props: {
   )
 }
 
-/** One input row per item, add/remove. */
+/** One auto-growing textarea row per item, add + hover-revealed remove. */
 export function StringList(props: {
   label?: string
   items: string[]
@@ -194,15 +194,17 @@ export function StringList(props: {
         <div className="text-[10px] uppercase tracking-wide text-gray-500">{props.label}</div>
       )}
       {items.map((item, i) => (
-        <div key={i} className="mt-1 flex items-center gap-1">
-          <input
-            className="input w-full text-[11px]"
+        <div key={i} className="group/row relative mt-1">
+          <textarea
+            className="input block min-h-[2.25rem] w-full resize-none whitespace-pre-wrap break-words pr-8 text-[11px] [field-sizing:content]"
+            rows={1}
             value={item}
             onChange={(e) => set(i, e.target.value)}
           />
           <button
             type="button"
-            className="btn px-1.5 py-0.5 text-[10px] text-gray-500"
+            className="invisible absolute right-1 top-1/2 -translate-y-1/2 p-1 text-[11px] leading-none text-gray-500 hover:text-red-400 group-focus-within/row:visible group-hover/row:visible"
+            title="Remove"
             onClick={() => props.onChange(items.filter((_, j) => j !== i))}
           >
             ✕
@@ -232,7 +234,9 @@ export function CommaList(props: {
     if (draft === null) return
     props.onChange(
       draft
-        .split(',')
+        // Newlines separate too, so Enter in the textarea can't embed one
+        // inside an item.
+        .split(/[,\n]/)
         .map((s) => s.trim())
         .filter(Boolean)
     )
@@ -243,8 +247,9 @@ export function CommaList(props: {
       <span className="text-[10px] uppercase tracking-wide text-gray-500">
         {props.label} <span className="normal-case text-gray-600">(comma-separated)</span>
       </span>
-      <input
-        className="input mt-0.5 w-full text-[11px]"
+      <textarea
+        className="input mt-0.5 block min-h-[2.25rem] w-full resize-none whitespace-pre-wrap break-words text-[11px] [field-sizing:content]"
+        rows={1}
         value={draft ?? items.join(', ')}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
@@ -304,14 +309,14 @@ export function EntryList<T>(props: {
   return (
     <div>
       {items.map((item, i) => (
-        <div key={i} className="mt-2 rounded-lg bg-panel2/50 p-3">
+        <div key={i} className="group/entry mt-2 rounded-lg bg-panel2/50 p-3">
           <div className="flex items-center">
             <span className="text-[11px] font-medium text-gray-300">
               {props.title(item, i) || `#${i + 1}`}
             </span>
             <button
               type="button"
-              className="btn ml-auto px-1.5 py-0.5 text-[10px] text-gray-500"
+              className="btn invisible ml-auto px-1.5 py-0.5 text-[10px] text-gray-500 group-focus-within/entry:visible group-hover/entry:visible"
               onClick={() => props.onChange(items.filter((_, j) => j !== i))}
             >
               ✕ remove

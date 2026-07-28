@@ -37,7 +37,10 @@ export default function SkillsChipEditor(props: {
   return (
     <div>
       {skills.map((c, i) => (
-        <div key={i} className="flex items-start gap-3 border-b border-edge/50 py-2 last:border-b-0">
+        <div
+          key={i}
+          className="group/cat flex items-start gap-3 border-b border-edge/50 py-2 last:border-b-0"
+        >
           <input
             className="input w-36 shrink-0 text-[11px]"
             value={c.category}
@@ -90,7 +93,7 @@ export default function SkillsChipEditor(props: {
           </div>
           <button
             type="button"
-            className="btn shrink-0 px-1.5 py-0.5 text-[10px] text-gray-500"
+            className="btn invisible shrink-0 px-1.5 py-0.5 text-[10px] text-gray-500 group-focus-within/cat:visible group-hover/cat:visible"
             title="Remove this category"
             onClick={() => {
               if (addingAt === i) closeDraft()
