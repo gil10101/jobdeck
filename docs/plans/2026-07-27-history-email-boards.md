@@ -566,3 +566,54 @@ view of everything the agents know about the user.
 - Known limit: validation runs on a pre-approval snapshot, so a profile
   change landing while the approval card waits would be overwritten on
   approve — acceptable for a single-user desktop app.
+
+### Polish wave (2026-07-28)
+
+**Email fixes** (commit `909aa02`):
+- Primary filter between Job and All: `category:primary newer_than:7d`
+  synced as a third parallel sweep; `EmailMessage.primary` mirrors
+  `jobRelated` (sticky flag, `'job' | 'primary' | 'all'` union end to end
+  through ipc/emailStore/EmailView). Caches from before the flag existed
+  self-heal on the re-list pass (`false !== undefined` counts as changed);
+  CACHE_CAP behavior untouched.
+- Job matching broadened in BOTH the Gmail query and the classifier: new
+  subject terms (online assessment, next steps, technical screen,
+  invitation, complete your) plus from-domain matching. Assessment
+  platforms (hackerrank/codility/codesignal/karat/hirevue/testgorilla)
+  classify 'assessment' outright; ATS senders (greenhouse/lever/ashby/
+  myworkday/icims/smartrecruiters) run the subject rules first, then
+  default to 'confirmation' when the subject mentions the application,
+  else 'other' — placed before the recruiter heuristic so "Greenhouse
+  Recruiting" senders don't misread as recruiters. Domain match is
+  suffix-based on every `@host` in the From header (covers mail.*
+  subdomains). Pure regex/string matching, no new deps.
+- List rows: sender name first (truncates), classification chip to its
+  right (shrink-0), timestamp still right-aligned.
+- Reader pane linkifies bare http(s) URLs via split-with-capture — odd
+  indices are always the URL matches (no re-test, so a non-captured
+  `https://x` fragment can't drag its whole text part into a link);
+  trailing punctuation stays outside the match. Links are cyan
+  hover-underline buttons through `app:openExternal`; no other markup.
+
+**History composer fixes** (commit `1d54e7a`):
+- Send is a compact primary icon button (h-7 w-7 centered glyph, `btn
+  btn-primary p-0` so the base padding can't stretch it) pinned bottom-2
+  right-2 in the relative textarea wrapper; textarea pr-10. Disabled —
+  and Enter no-ops — while instructions are empty, mirroring the
+  assistant Composer's empty-draft rule; placeholder no longer advertises
+  "empty = standard sweep" (Rerun on a past run still reaches it).
+- FilterDropdown panels restyled to the AssistantPanel history idiom
+  (mt-1 w-56 max-h-72 overflow-auto rounded-md border-edge bg-panel2
+  shadow-xl z-50; rows px-3 py-1.5 text-xs hover:bg-panel). Triggers are
+  compact `btn px-2 py-1`, flipping to `btn-primary` while any option is
+  checked. Verified no ancestor of the panels clips (composer div and
+  filter row set no overflow), so nothing needed unclipping.
+- MIN PAY spinner → salary range: `$ [Min] – [Max] /yr` number inputs
+  (w-24, native spinners killed via appearance-none + the two
+  ::-webkit-*-spin-button variants; arrow keys still step 1000).
+  Composes `salary $MIN–$MAX` / `salary ≥ $MIN` / `salary ≤ $MAX` live
+  into the instructions on every keystroke, removing the previous phrase
+  first (same appendPhrase/removePhrase healing as the dropdowns).
+  Known limit: hand-editing the salary phrase in the textarea breaks the
+  next swap's exact-match removal — same drift class the checkbox
+  filters already accept.
