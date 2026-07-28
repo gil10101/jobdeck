@@ -416,6 +416,8 @@ export interface EmailStatus {
   configured: boolean
   /** Saved OAuth client ID (not a secret), for the Settings form. */
   clientId: string | null
+  /** A client secret is stored; the value itself is never sent to the renderer. */
+  hasClientSecret: boolean
   email: string | null
   polling: boolean
   lastSyncAt: string | null

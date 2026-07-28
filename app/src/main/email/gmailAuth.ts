@@ -5,11 +5,14 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { AddressInfo } from 'node:net'
 
-// Gmail OAuth for a BYO Desktop-type client: PKCE loopback flow, no client
-// secret (Desktop client IDs are public identifiers). The refresh token is the
-// only secret here — encrypted with the OS keychain via safeStorage and kept
-// in the app-data dir (0600), never in the workspace, never logged. Scope is
-// read-only; the app can never send or modify mail.
+// Gmail OAuth for a BYO Desktop-type client: PKCE loopback flow. Google
+// REQUIRES the client secret in Desktop-app token exchanges even with PKCE
+// (installed-app secrets are non-confidential to Google, but omitting one
+// fails with invalid_request), so an optional secret is stored beside the
+// client ID. The refresh token and the client secret are encrypted with the
+// OS keychain via safeStorage and kept in the app-data dir (0600), never in
+// the workspace, never logged. Scope is read-only; the app can never send
+// or modify mail.
 
 const SCOPE = 'https://www.googleapis.com/auth/gmail.readonly'
 const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
@@ -25,6 +28,9 @@ interface GmailAuthFile {
   /** base64; ciphertext when `encrypted`, plain bytes otherwise (no-keyring fallback). */
   refreshTokenEnc?: string
   encrypted?: boolean
+  /** base64; ciphertext when `clientSecretEncrypted`, plain bytes otherwise. */
+  clientSecretEnc?: string
+  clientSecretEncrypted?: boolean
 }
 
 function authFile(): string {
@@ -46,22 +52,22 @@ function writeAuth(data: GmailAuthFile): void {
   fs.renameSync(tmp, file)
 }
 
-function encryptToken(token: string): { enc: string; encrypted: boolean } {
+function encryptSecret(value: string): { enc: string; encrypted: boolean } {
   // Without an OS keyring safeStorage can't encrypt; base64 is obfuscation
-  // only, but still beats a plaintext token in a file agents could be pointed at.
+  // only, but still beats a plaintext secret in a file agents could be pointed at.
   if (safeStorage.isEncryptionAvailable()) {
-    return { enc: safeStorage.encryptString(token).toString('base64'), encrypted: true }
+    return { enc: safeStorage.encryptString(value).toString('base64'), encrypted: true }
   }
-  return { enc: Buffer.from(token, 'utf-8').toString('base64'), encrypted: false }
+  return { enc: Buffer.from(value, 'utf-8').toString('base64'), encrypted: false }
 }
 
-function decryptToken(data: GmailAuthFile): string | null {
-  if (!data.refreshTokenEnc) return null
+function decryptSecret(enc: string | undefined, encrypted: boolean | undefined): string | null {
+  if (!enc) return null
   try {
-    const buf = Buffer.from(data.refreshTokenEnc, 'base64')
-    return data.encrypted ? safeStorage.decryptString(buf) : buf.toString('utf-8')
+    const buf = Buffer.from(enc, 'base64')
+    return encrypted ? safeStorage.decryptString(buf) : buf.toString('utf-8')
   } catch (err) {
-    console.error('[email] failed to decrypt the stored refresh token:', err)
+    console.error('[email] failed to decrypt a stored Gmail credential:', err)
     return null
   }
 }
@@ -74,6 +80,11 @@ export function gmailClientId(): string | null {
   return readAuth().clientId ?? null
 }
 
+/** Whether a client secret is stored — the value itself never leaves this module. */
+export function gmailHasClientSecret(): boolean {
+  return !!readAuth().clientSecretEnc
+}
+
 export function gmailEmail(): string | null {
   return readAuth().email ?? null
 }
@@ -84,25 +95,36 @@ export function gmailConfigured(): boolean {
   return !!data.clientId && !!data.refreshTokenEnc
 }
 
-export function setGmailClientId(clientId: string): void {
+/** Save the client ID and, when given, the client secret (encrypted at rest).
+ *  An omitted secret keeps the stored one: the value is never echoed to the
+ *  renderer, so an ID-only save must not wipe it. */
+export function setGmailClientId(clientId: string, clientSecret?: string): void {
   const trimmed = clientId.trim()
   const data = readAuth()
-  // Tokens are minted per client — switching IDs invalidates them.
+  // Tokens and the secret belong to one client — switching IDs invalidates them.
   if (data.clientId && data.clientId !== trimmed) {
     delete data.refreshTokenEnc
     delete data.encrypted
     delete data.email
+    delete data.clientSecretEnc
+    delete data.clientSecretEncrypted
     accessCache = null
   }
   if (trimmed) data.clientId = trimmed
   else delete data.clientId
+  const secret = clientSecret?.trim()
+  if (secret) {
+    const { enc, encrypted } = encryptSecret(secret)
+    data.clientSecretEnc = enc
+    data.clientSecretEncrypted = encrypted
+  }
   writeAuth(data)
 }
 
-/** Drop stored tokens (keeps the client ID) and best-effort revoke with Google. */
+/** Drop stored tokens (keeps the client ID and secret) and best-effort revoke with Google. */
 export function gmailSignOut(): void {
   const data = readAuth()
-  const refreshToken = decryptToken(data)
+  const refreshToken = decryptSecret(data.refreshTokenEnc, data.encrypted)
   if (refreshToken) {
     void fetch(REVOKE_URL, {
       method: 'POST',
@@ -168,7 +190,9 @@ async function tokenRequest(params: Record<string, string>): Promise<Record<stri
 /** Run the full PKCE consent flow in the default browser; stores the refresh
  *  token (encrypted) and the account email. Rejects on timeout/denial. */
 export async function gmailSignIn(): Promise<{ email: string }> {
-  const clientId = gmailClientId()
+  const auth = readAuth()
+  const clientId = auth.clientId ?? null
+  const clientSecret = decryptSecret(auth.clientSecretEnc, auth.clientSecretEncrypted)
   if (!clientId) throw new Error('save a Google OAuth client ID first (Settings → Email)')
   if (flowActive) throw new Error('a Gmail sign-in is already in progress — finish it in the browser')
   flowActive = true
@@ -202,8 +226,11 @@ export async function gmailSignIn(): Promise<{ email: string }> {
     await shell.openExternal(consent.toString())
     const code = await redirect
 
+    // Desktop-app clients must send the secret here even with PKCE — Google
+    // answers invalid_request without it.
     const tokens = await tokenRequest({
       client_id: clientId,
+      ...(clientSecret ? { client_secret: clientSecret } : {}),
       code,
       code_verifier: verifier,
       grant_type: 'authorization_code',
@@ -222,8 +249,15 @@ export async function gmailSignIn(): Promise<{ email: string }> {
     const profile = (await profileRes.json()) as { emailAddress?: string }
     const email = profile.emailAddress ?? ''
 
-    const { enc, encrypted } = encryptToken(refreshToken)
-    writeAuth({ clientId, email, refreshTokenEnc: enc, encrypted })
+    const { enc, encrypted } = encryptSecret(refreshToken)
+    writeAuth({
+      clientId,
+      email,
+      refreshTokenEnc: enc,
+      encrypted,
+      clientSecretEnc: auth.clientSecretEnc,
+      clientSecretEncrypted: auth.clientSecretEncrypted
+    })
     const expiresIn = typeof tokens.expires_in === 'number' ? tokens.expires_in : 3600
     accessCache = { token: accessToken, expiresAt: Date.now() + expiresIn * 1000 }
     return { email }
@@ -238,7 +272,8 @@ export async function getAccessToken(): Promise<string> {
   // 60s slack so a token can't expire mid-request.
   if (accessCache && Date.now() < accessCache.expiresAt - 60_000) return accessCache.token
   const data = readAuth()
-  const refreshToken = decryptToken(data)
+  const refreshToken = decryptSecret(data.refreshTokenEnc, data.encrypted)
+  const clientSecret = decryptSecret(data.clientSecretEnc, data.clientSecretEncrypted)
   if (!data.clientId || !refreshToken) {
     throw new Error('Gmail is not connected — sign in from Settings → Email')
   }
@@ -246,6 +281,7 @@ export async function getAccessToken(): Promise<string> {
   try {
     tokens = await tokenRequest({
       client_id: data.clientId,
+      ...(clientSecret ? { client_secret: clientSecret } : {}),
       refresh_token: refreshToken,
       grant_type: 'refresh_token'
     })

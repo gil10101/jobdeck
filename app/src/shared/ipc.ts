@@ -173,7 +173,7 @@ export interface IpcInvokeContract {
   'companies:backfill': { req: void; res: { fetched: number } }
   // ---- Gmail (read-only; BYO OAuth client ID, PKCE loopback flow) ----
   'email:status': { req: void; res: EmailStatus }
-  'email:setClientId': { req: { clientId: string }; res: EmailStatus }
+  'email:setClientId': { req: { clientId: string; clientSecret?: string }; res: EmailStatus }
   /** Opens the Google consent page in the browser; resolves when sign-in completes. */
   'email:signIn': { req: void; res: EmailStatus }
   'email:signOut': { req: void; res: EmailStatus }

@@ -69,6 +69,8 @@ export default function SettingsView(): JSX.Element {
   const [kbFiles, setKbFiles] = useState<{ name: string; sizeKb: number }[]>([])
   const [emailStatus, setEmailStatus] = useState<EmailStatus | null>(null)
   const [clientIdDraft, setClientIdDraft] = useState('')
+  // The stored secret is never echoed back; this holds only fresh input.
+  const [clientSecretDraft, setClientSecretDraft] = useState('')
   const [emailBusy, setEmailBusy] = useState(false)
   const [customBoards, setCustomBoards] = useState<CustomBoard[]>([])
   const [customUrl, setCustomUrl] = useState('')
@@ -272,8 +274,14 @@ export default function SettingsView(): JSX.Element {
 
   const saveClientId = async (): Promise<void> => {
     try {
-      setEmailStatus(await call('email:setClientId', { clientId: clientIdDraft }))
-      toast('Gmail client ID saved', 'success')
+      setEmailStatus(
+        await call('email:setClientId', {
+          clientId: clientIdDraft,
+          clientSecret: clientSecretDraft.trim() || undefined
+        })
+      )
+      setClientSecretDraft('')
+      toast('Gmail OAuth client saved', 'success')
     } catch (err) {
       toast(String(err), 'error')
     }
@@ -694,19 +702,33 @@ export default function SettingsView(): JSX.Element {
             Email (Gmail)
           </div>
           <Row
-            label="Google OAuth client ID"
-            hint="Your own Desktop-app OAuth client (read-only Gmail scope). The client ID is a public identifier, not a secret; sign-in tokens are encrypted with your OS keychain and stored in app data — never in the workspace."
+            label="Google OAuth client"
+            hint="Your own Desktop-app OAuth client (read-only Gmail scope). Google requires the client secret for Desktop-app token exchanges even with PKCE — it is not truly secret for installed apps. The secret and sign-in tokens are encrypted with your OS keychain and stored in app data — never in the workspace."
           >
             <div className="flex flex-col items-end gap-1.5">
               <input
                 className="input w-72"
-                placeholder="…….apps.googleusercontent.com"
+                placeholder="Client ID (…….apps.googleusercontent.com)"
                 value={clientIdDraft}
                 onChange={(e) => setClientIdDraft(e.target.value)}
               />
+              <input
+                className="input w-72"
+                type="password"
+                placeholder={
+                  emailStatus?.hasClientSecret
+                    ? 'Client secret (saved — type to replace)'
+                    : 'Client secret (GOCSPX-…)'
+                }
+                value={clientSecretDraft}
+                onChange={(e) => setClientSecretDraft(e.target.value)}
+              />
               <button
                 className="btn btn-primary px-2 py-1 text-[10px]"
-                disabled={!clientIdDraft.trim() || clientIdDraft.trim() === (emailStatus?.clientId ?? '')}
+                disabled={
+                  !clientIdDraft.trim() ||
+                  (clientIdDraft.trim() === (emailStatus?.clientId ?? '') && !clientSecretDraft.trim())
+                }
                 onClick={() => void saveClientId()}
               >
                 Save
@@ -729,7 +751,13 @@ export default function SettingsView(): JSX.Element {
               <button
                 className="btn btn-primary px-2 py-1 text-[10px]"
                 disabled={emailBusy || !emailStatus?.clientId}
-                title={emailStatus?.clientId ? undefined : 'Save a client ID first'}
+                title={
+                  !emailStatus?.clientId
+                    ? 'Save a client ID first'
+                    : emailStatus.hasClientSecret
+                      ? undefined
+                      : 'No client secret saved — Google Desktop-app clients need one for the token exchange'
+                }
                 onClick={() => void gmailSignIn()}
               >
                 {emailBusy ? 'Waiting for browser…' : 'Sign in with Google'}
@@ -759,16 +787,33 @@ export default function SettingsView(): JSX.Element {
             />
           </Row>
           <div className="py-3">
-            <div className="text-[11px] font-medium text-gray-400">Set up your own client ID</div>
+            <div className="text-[11px] font-medium text-gray-400">Set up your own OAuth client</div>
             <ol className="mt-1 list-decimal space-y-0.5 pl-5 text-[11px] leading-relaxed text-gray-500">
-              <li>Open console.cloud.google.com and create (or select) a project.</li>
+              <li>
+                Open{' '}
+                <button
+                  className="text-cyan-500 hover:underline"
+                  onClick={() =>
+                    void call('app:openExternal', { url: 'https://console.cloud.google.com' }).catch(
+                      () => undefined
+                    )
+                  }
+                >
+                  console.cloud.google.com
+                </button>{' '}
+                and create (or select) a project.
+              </li>
               <li>APIs &amp; Services → Library → search “Gmail API” → Enable.</li>
               <li>
                 OAuth consent screen → External → fill the required fields, then add your own
                 Google account under Test users.
               </li>
               <li>Credentials → Create credentials → OAuth client ID → Application type “Desktop app”.</li>
-              <li>Copy the Client ID (ends in .apps.googleusercontent.com) into the field above and Save.</li>
+              <li>
+                Copy both the Client ID (ends in .apps.googleusercontent.com) and the Client secret
+                into the fields above and Save — Google requires the secret for Desktop-app token
+                exchanges; it is not truly secret for installed apps.
+              </li>
             </ol>
           </div>
         </div>

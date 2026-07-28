@@ -48,6 +48,7 @@ import {
   gmailClientId,
   gmailConfigured,
   gmailEmail,
+  gmailHasClientSecret,
   gmailSignIn,
   gmailSignOut,
   setGmailClientId
@@ -670,13 +671,14 @@ export function registerIpc(services: Services): void {
   const emailStatus = (): EmailStatus => ({
     configured: gmailConfigured(),
     clientId: gmailClientId(),
+    hasClientSecret: gmailHasClientSecret(),
     email: gmailEmail(),
     polling: emailSync.polling(),
     lastSyncAt: lastSyncAt()
   })
   handle('email:status', () => emailStatus())
-  handle('email:setClientId', ({ clientId }) => {
-    setGmailClientId(clientId)
+  handle('email:setClientId', ({ clientId, clientSecret }) => {
+    setGmailClientId(clientId, clientSecret)
     return emailStatus()
   })
   handle('email:signIn', async () => {
