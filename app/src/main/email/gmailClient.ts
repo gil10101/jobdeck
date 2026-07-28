@@ -98,6 +98,7 @@ function decodeBody(data: string): string {
 /** Crude but dependency-free HTML → text for messages with no text/plain part. */
 function htmlToText(html: string): string {
   return html
+    .replace(/<head[\s\S]*?<\/head>/gi, '')
     .replace(/<(style|script)[\s\S]*?<\/\1>/gi, '')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/(p|div|tr|li|h[1-6]|blockquote)>/gi, '\n')
@@ -113,6 +114,18 @@ function htmlToText(html: string): string {
     .trim()
 }
 
+/** True when a text/plain body is actually HTML — some mailers (ATS
+ *  notification templates especially) put the full HTML document in the
+ *  text/plain part, or send single-part text/plain that is really markup.
+ *  High-precision signals first (document wrappers), then a count of
+ *  block-level tags so HTML fragments without a wrapper still register while
+ *  prose that merely mentions a tag or two does not. */
+function looksLikeHtml(text: string): boolean {
+  if (/<!doctype\s+html|<html[\s>]|<body[\s>]|<head[\s>]/i.test(text)) return true
+  const tags = text.match(/<\/?(p|div|table|tbody|tr|td|span|br|a|strong|em|ul|ol|li|img|h[1-6])\b[^>]*>/gi)
+  return (tags?.length ?? 0) >= 4
+}
+
 /** Depth-first hunt for the first part of the wanted mime type with data. */
 function findPart(part: RawPart | undefined, mimeType: string): string | null {
   if (!part) return null
@@ -124,12 +137,17 @@ function findPart(part: RawPart | undefined, mimeType: string): string | null {
   return null
 }
 
-/** Full body as plain text (text/plain part, else stripped text/html). */
+/** Full body as plain text (text/plain part, else stripped text/html). A
+ *  text/plain part that is secretly HTML gets stripped too, so the Email tab
+ *  and the assistant's get_email never render raw markup. */
 export async function getMessageBody(id: string): Promise<string> {
   assertMessageId(id)
   const msg = await gmailGet<RawMessage>(`/messages/${id}?format=full`)
   const plain = findPart(msg.payload, 'text/plain')
-  if (plain) return decodeBody(plain).slice(0, BODY_CHAR_CAP)
+  if (plain) {
+    const text = decodeBody(plain)
+    return (looksLikeHtml(text) ? htmlToText(text) : text).slice(0, BODY_CHAR_CAP)
+  }
   const html = findPart(msg.payload, 'text/html')
   if (html) return htmlToText(decodeBody(html)).slice(0, BODY_CHAR_CAP)
   return msg.snippet ?? ''
