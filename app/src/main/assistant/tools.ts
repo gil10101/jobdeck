@@ -17,9 +17,10 @@ import { emptyProfile } from '@shared/profile'
 
 // In-process MCP server ("app" namespace) exposing the app's state to the
 // assistant agent. READ tools (get_profile, list_applications, …) run freely.
-// Of the ACTION tools, add_profile_entry, install_job_board, and start_scout
-// gate through `requestApproval`; `remember` appends to long-term memory
-// without approval by design.
+// Every ACTION tool except `remember` gates through `requestApproval`
+// (add_profile_entry, update_profile_section, install_job_board, install_bun,
+// start_scout, rebuild_run); `remember` appends to long-term memory without
+// approval by design.
 
 export interface AssistantToolDeps {
   store: Store
@@ -207,6 +208,54 @@ export function buildAssistantMcp(deps: AssistantToolDeps): ReturnType<typeof cr
     }
   )
 
+  const updateProfileSection = tool(
+    'update_profile_section',
+    "Replace ONE section of the candidate's profile wholesale. Always call get_profile first and build the section's FULL new value from what is stored — the whole section is overwritten, so anything omitted is deleted. Use this for edits inside existing sections: rewording, removing, reordering, or bulk-adding items (e.g. résumé/cover-letter content rules → tailoring.hardRules or customRules; skills edits → the complete skills array). To append one new experience/project/skill entry, prefer add_profile_entry. `summary` must state in one line exactly what changed — the user approves the change based on it. Requires the user's approval before saving.",
+    {
+      section: z.enum([
+        'identity',
+        'education',
+        'experience',
+        'projects',
+        'skills',
+        'certifications',
+        'publications',
+        'awards',
+        'behavioral',
+        'narrative',
+        'searchConfig',
+        'tailoring',
+        'documents',
+        'customRules'
+      ]),
+      newValue: z.record(z.string(), z.any()).or(z.array(z.any())),
+      summary: z.string()
+    },
+    async ({ section, newValue, summary }) => {
+      // Shape guard: validateProfile heals a mistyped section back to its empty
+      // default, which would silently wipe it — refuse the call instead.
+      const wantArray = Array.isArray(emptyProfile()[section])
+      if (wantArray !== Array.isArray(newValue)) {
+        return json({
+          error: `${section} must be ${wantArray ? 'an array' : 'an object'} — call get_profile and send the complete section value`
+        })
+      }
+      // Clone: loadProfile() returns the module cache by reference, and a
+      // rejected/denied update must not leave the change in the live object.
+      const p = structuredClone(loadProfile() ?? emptyProfile())
+      ;(p as unknown as Record<string, unknown>)[section] = newValue
+      const result = validateProfile(p)
+      if (!result.ok) {
+        return json({ error: 'invalid profile after replacing the section', problems: result.problems })
+      }
+      const preview = `${section}: ${summary}`.slice(0, 500)
+      const ok = await deps.requestApproval('update_profile_section', preview)
+      if (!ok) return json({ denied: true })
+      saveProfile(result.profile)
+      return json({ ok: true, section })
+    }
+  )
+
   const checkJobBoards = tool(
     'check_job_boards',
     'Check whether the job-board search CLIs (jobright, linkedin, freehire) and the bun runtime are installed and configured — use this to diagnose scout failures.',
@@ -386,6 +435,7 @@ export function buildAssistantMcp(deps: AssistantToolDeps): ReturnType<typeof cr
       getEmail,
       checkJobBoards,
       addProfileEntry,
+      updateProfileSection,
       installJobBoard,
       installBunTool,
       startScout,
