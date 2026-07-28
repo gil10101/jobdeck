@@ -61,8 +61,9 @@ function removePhrase(text: string, phrase: string): string {
 }
 
 /** Multi-select filter: a compact button ("Titles (2)") opening a checkbox
- *  panel. Checked = the option's phrase is present in the composed text, so
- *  the dropdowns stay consistent with hand-edits to the textarea. */
+ *  panel styled like the AssistantPanel history dropdown. Checked = the
+ *  option's phrase is present in the composed text, so the dropdowns stay
+ *  consistent with hand-edits to the textarea. */
 function FilterDropdown({
   label,
   options,
@@ -80,7 +81,7 @@ function FilterDropdown({
   return (
     <div className="relative">
       <button
-        className={`chip ${count > 0 ? 'border-cyan-700 bg-cyan-950/60 text-cyan-200' : 'hover:border-gray-500'}`}
+        className={`btn px-2 py-1 ${count > 0 ? 'btn-primary' : ''}`}
         title={`Filter by ${label.toLowerCase()}`}
         onClick={() => setOpen((v) => !v)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
@@ -89,13 +90,13 @@ function FilterDropdown({
         <ChevronDown size={11} aria-hidden="true" />
       </button>
       {open && (
-        <div className="absolute left-0 top-full z-50 mt-1 max-h-56 w-56 overflow-auto rounded-md border border-edge bg-panel2 py-1 shadow-xl">
+        <div className="absolute left-0 top-full z-50 mt-1 max-h-72 w-56 overflow-auto rounded-md border border-edge bg-panel2 shadow-xl">
           {options.map((o) => {
             const checked = text.includes(o.phrase)
             return (
               <button
                 key={o.key}
-                className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs text-gray-200 hover:bg-panel"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-200 hover:bg-panel"
                 title={checked ? `Removes: ${o.phrase}` : `Appends: ${o.phrase}`}
                 onMouseDown={(e) => {
                   // Keep focus on the trigger so the panel survives multi-toggles.
@@ -122,6 +123,23 @@ function FilterDropdown({
 
 const WORK_MODELS = ['onsite', 'hybrid', 'remote'] as const
 
+/** 'salary $MIN–$MAX'; one-sided ≥/≤ when only one bound is set; null when
+ *  neither parses — the phrase then disappears from the instructions. */
+function salaryPhrase(min: string, max: string): string | null {
+  const fmt = (raw: string): string | null => {
+    const n = Number(raw)
+    return raw.trim() && Number.isFinite(n) && n > 0
+      ? `$${Math.round(n).toLocaleString('en-US')}`
+      : null
+  }
+  const lo = fmt(min)
+  const hi = fmt(max)
+  if (lo && hi) return `salary ${lo}–${hi}`
+  if (lo) return `salary ≥ ${lo}`
+  if (hi) return `salary ≤ ${hi}`
+  return null
+}
+
 /** Instruction composer: dropdown filters append plain-English constraint
  *  phrases into an editable textarea; the composed text is what scout:start
  *  receives. Enter (chat-style) or the send button launches the run. */
@@ -134,7 +152,8 @@ function InstructionComposer({
 }): JSX.Element {
   const [profile, setProfile] = useState<ProfileFile | null>(null)
   const [text, setText] = useState('')
-  const [minPay, setMinPay] = useState('')
+  const [salaryMin, setSalaryMin] = useState('')
+  const [salaryMax, setSalaryMax] = useState('')
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -147,14 +166,21 @@ function InstructionComposer({
     setText((t) => (t.includes(phrase) ? removePhrase(t, phrase) : appendPhrase(t, phrase)))
   }
 
-  const addMinPay = (): void => {
-    const n = Number(minPay)
-    if (!Number.isFinite(n) || n <= 0) return
-    setText((t) => appendPhrase(t, `only postings ≥ $${Math.round(n).toLocaleString('en-US')}`))
+  /** Swap the composed salary phrase live on every bound edit — the previous
+   *  phrase is healed out exactly like an unchecked dropdown option. */
+  const setSalary = (min: string, max: string): void => {
+    const prev = salaryPhrase(salaryMin, salaryMax)
+    const next = salaryPhrase(min, max)
+    setSalaryMin(min)
+    setSalaryMax(max)
+    setText((t) => {
+      const base = prev ? removePhrase(t, prev) : t
+      return next ? appendPhrase(base, next) : base
+    })
   }
 
   const run = async (): Promise<void> => {
-    if (busy || scouting) return
+    if (busy || scouting || !text.trim()) return
     setBusy(true)
     try {
       await onRun(text)
@@ -170,9 +196,9 @@ function InstructionComposer({
     <div className="border-b border-edge bg-panel px-4 py-3">
       <div className="relative">
         <textarea
-          className="input min-h-[3.5rem] w-full resize-none pr-11 text-xs leading-relaxed"
+          className="input min-h-[3.5rem] w-full resize-none pr-10 text-xs leading-relaxed"
           rows={2}
-          placeholder='Instructions for the next scout run — type freely or use the filters below (e.g. "focus on analytics roles; remote only"); empty = standard sweep…'
+          placeholder='Instructions for the next scout run — type freely or use the filters below (e.g. "focus on analytics roles; remote only")…'
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
@@ -186,8 +212,8 @@ function InstructionComposer({
           }}
         />
         <button
-          className="btn btn-primary absolute bottom-2 right-2 p-1.5"
-          disabled={busy || scouting}
+          className="btn btn-primary absolute bottom-2 right-2 flex h-7 w-7 items-center justify-center rounded-md p-0"
+          disabled={busy || scouting || !text.trim()}
           aria-label="Run scout"
           title={
             scouting
@@ -219,25 +245,31 @@ function InstructionComposer({
           onToggle={toggle}
         />
         <span className="ml-1 shrink-0 text-[10px] font-bold uppercase tracking-wide text-muted">
-          min pay
+          salary
         </span>
+        <span className="shrink-0 text-[11px] text-gray-500">$</span>
         <input
           type="number"
           min={0}
           step={1000}
-          className="input w-24 px-1.5 py-0.5 text-[11px]"
-          placeholder="$ / year"
-          value={minPay}
-          onChange={(e) => setMinPay(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && addMinPay()}
+          className="input w-24 appearance-none px-1.5 py-0.5 text-[11px] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          placeholder="Min"
+          title="Minimum posted pay per year"
+          value={salaryMin}
+          onChange={(e) => setSalary(e.target.value, salaryMax)}
         />
-        <button
-          className="chip hover:border-gray-500"
-          title="Append a minimum posted-pay filter"
-          onClick={addMinPay}
-        >
-          + add
-        </button>
+        <span className="shrink-0 text-[11px] text-gray-500">–</span>
+        <input
+          type="number"
+          min={0}
+          step={1000}
+          className="input w-24 appearance-none px-1.5 py-0.5 text-[11px] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          placeholder="Max"
+          title="Maximum posted pay per year"
+          value={salaryMax}
+          onChange={(e) => setSalary(salaryMin, e.target.value)}
+        />
+        <span className="shrink-0 text-[10px] text-gray-500">/yr</span>
       </div>
     </div>
   )
