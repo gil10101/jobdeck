@@ -10,7 +10,7 @@ import { readMemory, appendMemory } from './conversationStore'
 import { findSetting } from './settingsMap'
 import { gmailConfigured } from '../email/gmailAuth'
 import { getMessageBody, getMessageMeta, listMessages } from '../email/gmailClient'
-import { getCachedMessage, listCachedMessages } from '../email/emailStore'
+import { allCachedMessages, getCachedMessage } from '../email/emailStore'
 import { classifyEmail } from '../email/emailSync'
 import type { ExperienceEntry, ProjectEntry, SkillCategory } from '@shared/profile'
 import { emptyProfile } from '@shared/profile'
@@ -355,7 +355,7 @@ export function buildAssistantMcp(deps: AssistantToolDeps): ReturnType<typeof cr
         snippet: m.snippet
       })
       const q = query.trim().toLowerCase()
-      const hits = listCachedMessages('all')
+      const hits = allCachedMessages()
         .filter((m) => `${m.from} ${m.subject} ${m.snippet}`.toLowerCase().includes(q))
         .slice(0, 20)
       if (hits.length) return json({ source: 'cache', messages: hits.map(compact) })

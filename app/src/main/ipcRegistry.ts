@@ -57,11 +57,14 @@ import {
 import { getMessageBody } from './email/gmailClient'
 import {
   clearEmailCache,
+  createTag,
   getCachedMessage,
   lastSyncAt,
   listCachedMessages,
+  listTags,
   openSuggestionCount,
-  setSuggestionState
+  setSuggestionState,
+  updateMessage
 } from './email/emailStore'
 import { EmailSync } from './email/emailSync'
 
@@ -730,6 +733,9 @@ export function registerIpc(services: Services): void {
     setSuggestionState(emailId, 'dismissed')
     send('push:emailChanged', { suggestions: openSuggestionCount() })
   })
+  handle('email:update', ({ id, patch }) => updateMessage(id, patch))
+  handle('email:tags', () => ({ tags: listTags() }))
+  handle('email:createTag', ({ name }) => createTag(name))
 
   // ---- assistant: in-app chat, IPC channels mirror AssistantManager 1:1 ----
   const sessionDeps = {

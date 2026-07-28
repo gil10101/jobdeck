@@ -1,17 +1,22 @@
 import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
-import type { EmailMessage } from '@shared/types'
+import type { EmailFilter, EmailMessage } from '@shared/types'
 
 // Header/snippet cache for synced Gmail messages, in the app-data dir (0600 —
 // mail is personal and must never land in the workspace agents can read; the
 // assistant reaches it only through its tools). Bodies are never stored.
 
 const CACHE_CAP = 500
+/** Ready-made tags; user-created ones are stored beside them. */
+const PRESET_TAGS = ['interview', 'assessment', 'offer', 'follow up', 'recruiter', 'apply later']
+const TAG_MAX_LEN = 24
+const TAG_MAX_COUNT = 50
 
 interface EmailCacheFile {
   messages: EmailMessage[]
   lastSyncAt: string | null
+  customTags?: string[]
 }
 
 function cacheFile(): string {
@@ -26,10 +31,17 @@ function load(): EmailCacheFile {
     const parsed = JSON.parse(fs.readFileSync(cacheFile(), 'utf-8')) as EmailCacheFile
     cache = {
       messages: Array.isArray(parsed.messages) ? parsed.messages : [],
-      lastSyncAt: parsed.lastSyncAt ?? null
+      lastSyncAt: parsed.lastSyncAt ?? null,
+      customTags: Array.isArray(parsed.customTags) ? parsed.customTags : []
+    }
+    // Migrations for per-message user state added after first release.
+    for (const m of cache.messages) {
+      m.favorite ??= false
+      m.hidden ??= false
+      m.tags ??= []
     }
   } catch {
-    cache = { messages: [], lastSyncAt: null }
+    cache = { messages: [], lastSyncAt: null, customTags: [] }
   }
   return cache
 }
@@ -46,29 +58,90 @@ export function lastSyncAt(): string | null {
   return load().lastSyncAt
 }
 
+/** Every cached message, newest first — sync reconciliation and assistant
+ *  search need hidden mail too; the UI filters below never see it. */
+export function allCachedMessages(): EmailMessage[] {
+  return [...load().messages].sort((a, b) => b.date.localeCompare(a.date))
+}
+
 /** Newest first; 'job' = job-search-query matches, 'primary' = Gmail's
- *  Primary category sweep. */
-export function listCachedMessages(filter: 'job' | 'primary' | 'all'): EmailMessage[] {
-  const all = [...load().messages].sort((a, b) => b.date.localeCompare(a.date))
-  if (filter === 'job') return all.filter((m) => m.jobRelated)
-  if (filter === 'primary') return all.filter((m) => m.primary)
-  return all
+ *  Primary sweep, 'starred'/'hidden' = the user's own sets. Hidden messages
+ *  only ever appear under 'hidden'. */
+export function listCachedMessages(filter: EmailFilter): EmailMessage[] {
+  const all = allCachedMessages()
+  if (filter === 'hidden') return all.filter((m) => m.hidden)
+  const visible = all.filter((m) => !m.hidden)
+  if (filter === 'job') return visible.filter((m) => m.jobRelated)
+  if (filter === 'primary') return visible.filter((m) => m.primary)
+  if (filter === 'starred') return visible.filter((m) => m.favorite)
+  return visible
 }
 
 export function getCachedMessage(id: string): EmailMessage | null {
   return load().messages.find((m) => m.id === id) ?? null
 }
 
-/** Merge a sync batch by id and stamp lastSyncAt; keeps the newest CACHE_CAP. */
+/** Merge a sync batch by id and stamp lastSyncAt; keeps the newest CACHE_CAP.
+ *  Starred, tagged, and hidden messages are exempt from eviction — user state
+ *  must not silently vanish because newer mail arrived. */
 export function upsertMessages(msgs: EmailMessage[]): void {
   const store = load()
   const byId = new Map(store.messages.map((m) => [m.id, m]))
-  for (const m of msgs) byId.set(m.id, m)
-  store.messages = [...byId.values()]
-    .sort((a, b) => b.date.localeCompare(a.date))
-    .slice(0, CACHE_CAP)
+  for (const m of msgs) {
+    // Sync never owns user state: batches are built from a pre-sync snapshot,
+    // so a star/hide/tag set while the fetch ran must win over the batch copy.
+    const prev = byId.get(m.id)
+    byId.set(m.id, prev ? { ...m, favorite: prev.favorite, hidden: prev.hidden, tags: prev.tags } : m)
+  }
+  const sorted = [...byId.values()].sort((a, b) => b.date.localeCompare(a.date))
+  const exempt = (m: EmailMessage): boolean => m.favorite || m.hidden || m.tags.length > 0
+  let plain = 0
+  store.messages = sorted.filter((m) => exempt(m) || plain++ < CACHE_CAP)
   store.lastSyncAt = new Date().toISOString()
   persist()
+}
+
+/** Set per-message user state (star/hide/tags); throws for an unknown id. */
+export function updateMessage(
+  id: string,
+  patch: { favorite?: boolean; hidden?: boolean; tags?: string[] }
+): EmailMessage {
+  const msg = load().messages.find((m) => m.id === id)
+  if (!msg) throw new Error(`email not in cache: ${id}`)
+  if (patch.favorite !== undefined) msg.favorite = patch.favorite
+  if (patch.hidden !== undefined) msg.hidden = patch.hidden
+  if (patch.tags !== undefined) {
+    msg.tags = [...new Set(patch.tags.map(normalizeTag).filter(Boolean))]
+  }
+  persist()
+  return msg
+}
+
+function normalizeTag(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, ' ').slice(0, TAG_MAX_LEN)
+}
+
+/** Presets first, then custom tags, deduped case-insensitively. */
+export function listTags(): string[] {
+  const custom = (load().customTags ?? []).filter((t) => !PRESET_TAGS.includes(t))
+  return [...PRESET_TAGS, ...custom]
+}
+
+/** Register a user tag so it shows in every tag menu; returns the full list
+ *  plus the normalized name actually stored (for immediate assignment). */
+export function createTag(name: string): { tags: string[]; created: string } {
+  const clean = normalizeTag(name)
+  if (!clean) throw new Error('tag name is empty')
+  const store = load()
+  store.customTags ??= []
+  if (!PRESET_TAGS.includes(clean) && !store.customTags.includes(clean)) {
+    if (store.customTags.length >= TAG_MAX_COUNT) {
+      throw new Error(`tag limit reached (${TAG_MAX_COUNT})`)
+    }
+    store.customTags.push(clean)
+    persist()
+  }
+  return { tags: listTags(), created: clean }
 }
 
 export function setSuggestionState(id: string, state: 'open' | 'applied' | 'dismissed'): EmailMessage {
@@ -83,9 +156,10 @@ export function openSuggestionCount(): number {
   return load().messages.filter((m) => m.suggestion && m.suggestionState === 'open').length
 }
 
-/** Sign-out wipes the cache — cached mail must not outlive the account. */
+/** Sign-out wipes the cache — cached mail (and its tags) must not outlive
+ *  the account. */
 export function clearEmailCache(): void {
-  cache = { messages: [], lastSyncAt: null }
+  cache = { messages: [], lastSyncAt: null, customTags: [] }
   try {
     fs.rmSync(cacheFile(), { force: true })
   } catch (err) {

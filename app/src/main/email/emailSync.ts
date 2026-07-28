@@ -3,7 +3,7 @@ import type { Store } from '../store/Store'
 import type { TrackerRepo } from '../store/trackerRepo'
 import { gmailConfigured } from './gmailAuth'
 import { getMessageMeta, listMessages, type GmailMessageMeta } from './gmailClient'
-import { listCachedMessages, openSuggestionCount, upsertMessages } from './emailStore'
+import { allCachedMessages, openSuggestionCount, upsertMessages } from './emailStore'
 
 // Main-process poll loop (TodoWatcher sibling): every N minutes pull
 // job-search-shaped mail + Primary-category and recent-inbox sweeps, classify
@@ -209,8 +209,9 @@ export class EmailSync {
       const primaryIds = new Set(primary.ids.map((m) => m.id))
       const wantedIds = [...new Set([...job.ids, ...primary.ids, ...all.ids].map((m) => m.id))]
 
-      // Headers are immutable — only fetch ids the cache has never seen.
-      const cached = new Map(listCachedMessages('all').map((m) => [m.id, m]))
+      // Headers are immutable — only fetch ids the cache has never seen
+      // (hidden mail included, or it would be refetched forever).
+      const cached = new Map(allCachedMessages().map((m) => [m.id, m]))
       const newIds = wantedIds.filter((id) => !cached.has(id))
       const metas = await mapLimit(newIds, FETCH_CONCURRENCY, (id) => getMessageMeta(id))
 
@@ -275,7 +276,10 @@ export class EmailSync {
       jobRelated,
       primary,
       suggestion,
-      suggestionState: suggestion ? 'open' : null
+      suggestionState: suggestion ? 'open' : null,
+      favorite: false,
+      hidden: false,
+      tags: []
     }
   }
 

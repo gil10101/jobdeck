@@ -13,6 +13,7 @@ import type {
   CompanyInfo,
   ConversationMeta,
   CustomBoardTest,
+  EmailFilter,
   EmailMessage,
   EmailStatus,
   IntakeFolder,
@@ -180,12 +181,20 @@ export interface IpcInvokeContract {
   /** Opens the Google consent page in the browser; resolves when sign-in completes. */
   'email:signIn': { req: void; res: EmailStatus }
   'email:signOut': { req: void; res: EmailStatus }
-  'email:list': { req: { filter: 'job' | 'primary' | 'all' }; res: EmailMessage[] }
+  'email:list': { req: { filter: EmailFilter }; res: EmailMessage[] }
   /** Body text fetched live from Gmail (never cached on disk). */
   'email:getBody': { req: { id: string }; res: { text: string } }
   'email:refresh': { req: void; res: EmailStatus }
   'email:applySuggestion': { req: { emailId: string }; res: void }
   'email:dismissSuggestion': { req: { emailId: string }; res: void }
+  /** Per-message user state: star, hide, tag assignment. */
+  'email:update': {
+    req: { id: string; patch: { favorite?: boolean; hidden?: boolean; tags?: string[] } }
+    res: EmailMessage
+  }
+  /** Assignable tag names: presets plus every user-created tag. */
+  'email:tags': { req: void; res: { tags: string[] } }
+  'email:createTag': { req: { name: string }; res: { tags: string[]; created: string } }
   'assistant:send': {
     req: { conversationId: string | null; text: string; model: string | null }
     res: { conversationId: string }
@@ -312,6 +321,9 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'email:refresh',
   'email:applySuggestion',
   'email:dismissSuggestion',
+  'email:update',
+  'email:tags',
+  'email:createTag',
   'assistant:send',
   'assistant:stop',
   'assistant:approve',

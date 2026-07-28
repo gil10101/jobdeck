@@ -411,7 +411,16 @@ export interface EmailMessage {
   suggestion: EmailSuggestion | null
   /** null = no suggestion was ever computed for this message. */
   suggestionState: 'open' | 'applied' | 'dismissed' | null
+  /** Starred by the user; exempt from cache eviction. */
+  favorite: boolean
+  /** Hidden from every list except the Hidden filter; exempt from eviction. */
+  hidden: boolean
+  /** User-assigned tag names (from presets + custom tags). */
+  tags: string[]
 }
+
+/** Email list filters: content sweeps plus the user's own starred/hidden sets. */
+export type EmailFilter = 'job' | 'primary' | 'all' | 'starred' | 'hidden'
 
 export interface EmailStatus {
   /** A client ID is saved AND an account is signed in. */

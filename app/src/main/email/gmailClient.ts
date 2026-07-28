@@ -102,6 +102,8 @@ function htmlToText(html: string): string {
     .replace(/<(style|script)[\s\S]*?<\/\1>/gi, '')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/(p|div|tr|li|h[1-6]|blockquote)>/gi, '\n')
+    // Table cells: without a separator, adjacent cell texts concatenate.
+    .replace(/<\/(td|th)>/gi, ' ')
     .replace(/<[^>]+>/g, '')
     .replace(/&nbsp;/gi, ' ')
     .replace(/&amp;/gi, '&')
@@ -109,7 +111,9 @@ function htmlToText(html: string): string {
     .replace(/&gt;/gi, '>')
     .replace(/&quot;/gi, '"')
     .replace(/&#0*39;|&apos;/gi, "'")
+    .replace(/[ \t]{2,}/g, ' ')
     .replace(/[ \t]+\n/g, '\n')
+    .replace(/^[ \t]+/gm, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
 }
