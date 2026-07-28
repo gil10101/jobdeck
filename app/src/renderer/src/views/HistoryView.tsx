@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { History, RefreshCw, RotateCcw, Search } from 'lucide-react'
+import { Check, ChevronDown, History, RefreshCw, RotateCcw, Send } from 'lucide-react'
 import type { ScoutHistoryEntry } from '@shared/types'
 import type { ProfileFile } from '@shared/profile'
 import { call } from '../api'
@@ -44,42 +44,87 @@ function FitPill({ score }: { score: number | null }): JSX.Element {
   )
 }
 
-/** A filter chip that appends its phrase to the composed instructions once. */
-function PhraseChip({
-  label,
-  phrase,
-  text,
-  onAppend
-}: {
-  label: string
-  phrase: string
-  text: string
-  onAppend: (phrase: string) => void
-}): JSX.Element {
-  const active = text.includes(phrase)
-  return (
-    <button
-      className={`chip ${active ? 'border-cyan-700 bg-cyan-950/60 text-cyan-200' : 'hover:border-gray-500'}`}
-      title={active ? 'Already in the instructions (edit the text to remove)' : `Appends: ${phrase}`}
-      onClick={() => onAppend(phrase)}
-    >
-      {label}
-    </button>
-  )
+/** Append `phrase` to the composed instructions once, "; "-separated. */
+function appendPhrase(text: string, phrase: string): string {
+  if (text.includes(phrase)) return text
+  return text.trim() ? `${text.trim()}; ${phrase}` : phrase
 }
 
-function ChipGroupLabel({ text }: { text: string }): JSX.Element {
+/** Remove an appended phrase and heal the "; " separators around the gap. */
+function removePhrase(text: string, phrase: string): string {
+  return text
+    .replace(phrase, '')
+    .replace(/\s*;\s*;\s*/g, '; ')
+    .replace(/^\s*;\s*/, '')
+    .replace(/\s*;\s*$/, '')
+    .trim()
+}
+
+/** Multi-select filter: a compact button ("Titles (2)") opening a checkbox
+ *  panel. Checked = the option's phrase is present in the composed text, so
+ *  the dropdowns stay consistent with hand-edits to the textarea. */
+function FilterDropdown({
+  label,
+  options,
+  text,
+  onToggle
+}: {
+  label: string
+  options: { key: string; label: string; phrase: string }[]
+  text: string
+  onToggle: (phrase: string) => void
+}): JSX.Element | null {
+  const [open, setOpen] = useState(false)
+  if (options.length === 0) return null
+  const count = options.filter((o) => text.includes(o.phrase)).length
   return (
-    <span className="ml-1 shrink-0 text-[10px] font-bold uppercase tracking-wide text-muted first:ml-0">
-      {text}
-    </span>
+    <div className="relative">
+      <button
+        className={`chip ${count > 0 ? 'border-cyan-700 bg-cyan-950/60 text-cyan-200' : 'hover:border-gray-500'}`}
+        title={`Filter by ${label.toLowerCase()}`}
+        onClick={() => setOpen((v) => !v)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+      >
+        {count > 0 ? `${label} (${count})` : label}
+        <ChevronDown size={11} aria-hidden="true" />
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-50 mt-1 max-h-56 w-56 overflow-auto rounded-md border border-edge bg-panel2 py-1 shadow-xl">
+          {options.map((o) => {
+            const checked = text.includes(o.phrase)
+            return (
+              <button
+                key={o.key}
+                className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs text-gray-200 hover:bg-panel"
+                title={checked ? `Removes: ${o.phrase}` : `Appends: ${o.phrase}`}
+                onMouseDown={(e) => {
+                  // Keep focus on the trigger so the panel survives multi-toggles.
+                  e.preventDefault()
+                  onToggle(o.phrase)
+                }}
+              >
+                <span
+                  className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border ${
+                    checked ? 'border-cyan-600 bg-cyan-950/60 text-cyan-300' : 'border-edge'
+                  }`}
+                >
+                  {checked && <Check size={10} strokeWidth={3} aria-hidden="true" />}
+                </span>
+                <span className="truncate">{o.label}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }
 
 const WORK_MODELS = ['onsite', 'hybrid', 'remote'] as const
 
-/** Instruction composer: chips append plain-English constraint phrases into an
- *  editable textarea; the composed text is what scout:start receives. */
+/** Instruction composer: dropdown filters append plain-English constraint
+ *  phrases into an editable textarea; the composed text is what scout:start
+ *  receives. Enter (chat-style) or the send button launches the run. */
 function InstructionComposer({
   scouting,
   onRun
@@ -98,20 +143,18 @@ function InstructionComposer({
       .catch(() => setProfile(null))
   }, [])
 
-  const append = (phrase: string): void => {
-    setText((t) => {
-      if (t.includes(phrase)) return t
-      return t.trim() ? `${t.trim()}; ${phrase}` : phrase
-    })
+  const toggle = (phrase: string): void => {
+    setText((t) => (t.includes(phrase) ? removePhrase(t, phrase) : appendPhrase(t, phrase)))
   }
 
   const addMinPay = (): void => {
     const n = Number(minPay)
     if (!Number.isFinite(n) || n <= 0) return
-    append(`only postings ≥ $${Math.round(n).toLocaleString('en-US')}`)
+    setText((t) => appendPhrase(t, `only postings ≥ $${Math.round(n).toLocaleString('en-US')}`))
   }
 
   const run = async (): Promise<void> => {
+    if (busy || scouting) return
     setBusy(true)
     try {
       await onRun(text)
@@ -121,49 +164,63 @@ function InstructionComposer({
   }
 
   const employmentTypes = profile?.searchConfig.employmentTypes ?? []
-  const titles = (profile?.searchConfig.targetRoles ?? []).slice(0, 6).map((r) => r.title)
+  const titles = (profile?.searchConfig.targetRoles ?? []).map((r) => r.title)
 
   return (
     <div className="border-b border-edge bg-panel px-4 py-3">
-      <div className="flex items-start gap-2">
+      <div className="relative">
         <textarea
-          className="input min-h-[3.25rem] flex-1 resize-y text-xs leading-relaxed"
-          placeholder='Instructions for the next scout run — type freely, or use the chips below to compose (e.g. "focus on analytics roles; remote only")…'
+          className="input min-h-[3.5rem] w-full resize-none pr-11 text-xs leading-relaxed"
+          rows={2}
+          placeholder='Instructions for the next scout run — type freely or use the filters below (e.g. "focus on analytics roles; remote only"); empty = standard sweep…'
           value={text}
           onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            // IME users confirm a composition candidate with Enter; that
+            // Enter must not launch a run.
+            if (e.nativeEvent.isComposing) return
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              void run()
+            }
+          }}
         />
         <button
-          className="btn btn-primary shrink-0"
+          className="btn btn-primary absolute bottom-2 right-2 p-1.5"
           disabled={busy || scouting}
-          title={scouting ? 'A scout run is already live — wait for it to finish' : 'Launch a scout run with these instructions'}
+          aria-label="Run scout"
+          title={
+            scouting
+              ? 'A scout run is already live — wait for it to finish'
+              : 'Launch a scout run with these instructions (Enter)'
+          }
           onClick={() => void run()}
         >
-          <Search size={13} />
-          {scouting ? 'Scouting…' : 'Run scout'}
+          <Send size={13} aria-hidden="true" />
         </button>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
-        {employmentTypes.length > 0 && (
-          <>
-            <ChipGroupLabel text="type" />
-            {employmentTypes.map((t) => (
-              <PhraseChip key={t} label={t} phrase={`${t} roles only`} text={text} onAppend={append} />
-            ))}
-          </>
-        )}
-        {titles.length > 0 && (
-          <>
-            <ChipGroupLabel text="titles" />
-            {titles.map((t) => (
-              <PhraseChip key={t} label={t} phrase={`focus on "${t}"`} text={text} onAppend={append} />
-            ))}
-          </>
-        )}
-        <ChipGroupLabel text="model" />
-        {WORK_MODELS.map((m) => (
-          <PhraseChip key={m} label={m} phrase={`${m} only`} text={text} onAppend={append} />
-        ))}
-        <ChipGroupLabel text="min pay" />
+        <FilterDropdown
+          label="Titles"
+          options={titles.map((t, i) => ({ key: `${i}:${t}`, label: t, phrase: `focus on "${t}"` }))}
+          text={text}
+          onToggle={toggle}
+        />
+        <FilterDropdown
+          label="Type"
+          options={employmentTypes.map((t) => ({ key: t, label: t, phrase: `${t} roles only` }))}
+          text={text}
+          onToggle={toggle}
+        />
+        <FilterDropdown
+          label="Work model"
+          options={WORK_MODELS.map((m) => ({ key: m, label: m, phrase: `${m} only` }))}
+          text={text}
+          onToggle={toggle}
+        />
+        <span className="ml-1 shrink-0 text-[10px] font-bold uppercase tracking-wide text-muted">
+          min pay
+        </span>
         <input
           type="number"
           min={0}
@@ -415,7 +472,7 @@ export default function HistoryView(): JSX.Element {
               <div className="p-4 text-xs text-gray-600">Loading…</div>
             ) : entries.length === 0 ? (
               <div className="p-4 text-xs leading-relaxed text-gray-600">
-                No scout runs yet — compose instructions above and hit Run scout.
+                No scout runs yet — compose instructions above and hit send.
               </div>
             ) : (
               entries.map((e) => (
