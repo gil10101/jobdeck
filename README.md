@@ -93,8 +93,8 @@ Key design decisions:
 ## Getting started
 
 ```bash
-git clone <repository-url>
-cd <repository>/app
+git clone https://github.com/gil10101/jobdeck
+cd jobdeck/app
 npm install
 npm run dev
 ```
