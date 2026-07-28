@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/mascot/cat_note_collar.gif" alt="Pip, the courier bird" width="200">
+  <img src="assets/mascot/cat_note_collar.gif" alt="mascot" width="200">
 </p>
 
 # ohmo
@@ -93,8 +93,8 @@ Key design decisions:
 ## Getting started
 
 ```bash
-git clone https://github.com/gil10101/jobdeck
-cd jobdeck/app
+git clone <repository-url>
+cd <repository>/app
 npm install
 npm run dev
 ```

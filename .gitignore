@@ -93,3 +93,6 @@ app-data/
 # Internal planning artifacts (machine paths, not product)
 docs/superpowers/
 .superpowers/
+
+# Development docs (plans, reviews) are working material, never published
+docs/

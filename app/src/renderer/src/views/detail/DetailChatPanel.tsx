@@ -48,7 +48,7 @@ export default function DetailChatPanel({
       {chat.messages.length === 0 && !chat.streaming && (
         <div className="px-4 pb-2 text-[11px] leading-relaxed text-gray-600">
           Ask for revisions ("shorten the cover letter's second paragraph", "swap the featured
-          project for Orchid") or paste a question the company asked — the agent drafts an answer
+          project for a more relevant one") or paste a question the company asked — the agent drafts an answer
           here and files it once you approve.
         </div>
       )}
