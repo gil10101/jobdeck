@@ -467,3 +467,33 @@ identifier (HTTP 404)". Add can therefore never save an unfetchable board.
   min-pay input kept; Run scout button → icon-only send at the textarea's
   bottom-right, Enter submits (Shift+Enter newline, IME-guarded). Phrase
   toggles now also REMOVE their phrase and heal the "; " separators.
+
+### Who I am view (2026-07-27)
+
+**Shipped** (commit `6bb2c28`): read-only "Who I am" tab — the anti-blackbox
+view of everything the agents know about the user.
+- Route `{ view: 'whoami' }` (`store.ts`), sidebar entry with `UserRound`
+  icon in the bottom block directly above Settings (`Sidebar.tsx`), route
+  render in `App.tsx`.
+- `views/WhoAmIView.tsx`: fetches `profile:get` + `master:getContext` +
+  `knowledge:get` on mount; centered max-w-4xl scroll page of panel
+  sections in the Settings uppercase-muted header style — Identity,
+  Education, Experience, Projects, Skills, Certifications, Publications,
+  Awards (list sections hidden when empty), Behavioral profile, Narrative,
+  Search config summary, Master résumé context ("may be listed on
+  documents", pre block), Knowledge base ("background only — never on
+  documents", notes pre + file list with sizes), Tailoring hard rules.
+- Per-entry agent steering (inclusionRule / framingNotes / mustKeepPhrases,
+  education notes) renders as muted uppercase-labelled guidance sub-lines,
+  so the user sees exactly what instructions ride along with each entry.
+- Header Edit button → Settings (the profile editor lives there); null
+  profile → onboarding prompt panel instead of the page.
+- In-section extras beyond the spec list, kept because the page promises
+  "everything": narrative stories, behavioral assessment source, education
+  thesis/coursework, user customRules under the hard-rules panel. Whole
+  unlisted profile areas (evaluation config, role profiles, document prefs,
+  board setup) stay off the page — they are configuration, already visible
+  in Settings, and the section list scoped them out.
+- Master context / knowledge base sections always render, with explicit
+  "empty" lines when blank — absence of hidden context is itself the
+  information this page exists to show.
