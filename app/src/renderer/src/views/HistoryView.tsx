@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Check, ChevronDown, History, RefreshCw, RotateCcw, Send } from 'lucide-react'
+import { Check, ChevronDown, CornerDownLeft, History, RefreshCw, RotateCcw } from 'lucide-react'
 import type { ScoutHistoryEntry } from '@shared/types'
 import type { ProfileFile } from '@shared/profile'
 import { call } from '../api'
@@ -196,7 +196,7 @@ function InstructionComposer({
     <div className="border-b border-edge bg-panel px-4 py-3">
       <div className="relative">
         <textarea
-          className="input min-h-[3.5rem] w-full resize-none pr-10 text-xs leading-relaxed"
+          className="input block min-h-[3.5rem] w-full resize-none pr-10 text-xs leading-relaxed focus:border-edge"
           rows={2}
           placeholder='Instructions for the next scout run — type freely or use the filters below (e.g. "focus on analytics roles; remote only")…'
           value={text}
@@ -222,7 +222,7 @@ function InstructionComposer({
           }
           onClick={() => void run()}
         >
-          <Send size={13} aria-hidden="true" />
+          <CornerDownLeft size={13} aria-hidden="true" />
         </button>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -252,7 +252,7 @@ function InstructionComposer({
           type="number"
           min={0}
           step={1000}
-          className="input w-24 appearance-none px-1.5 py-0.5 text-[11px] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          className="input w-24 appearance-none px-1.5 py-0.5 text-[11px] focus:border-edge [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
           placeholder="Min"
           title="Minimum posted pay per year"
           value={salaryMin}
@@ -263,7 +263,7 @@ function InstructionComposer({
           type="number"
           min={0}
           step={1000}
-          className="input w-24 appearance-none px-1.5 py-0.5 text-[11px] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          className="input w-24 appearance-none px-1.5 py-0.5 text-[11px] focus:border-edge [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
           placeholder="Max"
           title="Maximum posted pay per year"
           value={salaryMax}

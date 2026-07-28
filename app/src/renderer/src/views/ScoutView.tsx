@@ -340,7 +340,6 @@ export default function ScoutView(): JSX.Element {
   const runs = useApp((s) => s.runs)
   const toast = useApp((s) => s.toast)
   const navigate = useApp((s) => s.navigate)
-  const [instructions, setInstructions] = useState('')
   const [filter, setFilter] = useState<'new' | 'accepted' | 'rejected'>('new')
   const [sourceFilter, setSourceFilter] = useState('all')
   const [minFit, setMinFit] = useState(0)
@@ -396,9 +395,10 @@ export default function ScoutView(): JSX.Element {
     }
   }
 
+  // Standard sweep — custom instructions are composed in the History tab.
   const startScout = async (): Promise<void> => {
     try {
-      const meta = await call('scout:start', { instructions: instructions || undefined })
+      const meta = await call('scout:start', { instructions: undefined })
       toast('Scout agent launched — watch it work in Runs', 'success')
       void useApp.getState().refreshRuns()
       navigate({ view: 'runs', runId: meta.id })
@@ -443,20 +443,17 @@ export default function ScoutView(): JSX.Element {
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 border-b border-edge bg-panel px-4 py-2.5">
         <h1 className="text-sm font-semibold text-gray-100">Scout</h1>
-        <input
-          className="input w-96"
-          placeholder='Optional instructions, e.g. "focus on healthcare analytics" or "city jobs only"…'
-          value={instructions}
-          onChange={(e) => setInstructions(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && !liveScout && void startScout()}
-        />
         {liveScout ? (
           <button className="btn" onClick={() => navigate({ view: 'runs', runId: liveScout.id })}>
             <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400" />
             Scouting… view run
           </button>
         ) : (
-          <button className="btn btn-primary" onClick={startScout}>
+          <button
+            className="btn btn-primary"
+            title="Run a standard sweep — compose custom instructions in History"
+            onClick={startScout}
+          >
             ⌕ Scout now
           </button>
         )}
