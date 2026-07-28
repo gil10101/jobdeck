@@ -497,3 +497,72 @@ view of everything the agents know about the user.
 - Master context / knowledge base sections always render, with explicit
   "empty" lines when blank — absence of hidden context is itself the
   information this page exists to show.
+
+### Fix/feature wave 2 (2026-07-27)
+
+**Task 1 — OAuth client JSON upload + actionable 403 guidance** (commit
+`10fa5a8`):
+- `email:importClientJson` IPC: JSON-filtered open dialog (knowledge:addFiles
+  pattern) → `parseClientJson` in gmailAuth accepts
+  `{installed:{client_id, client_secret}}` (secret optional), rejects a
+  `{web:{…}}` client with instructions to create a Desktop-app client, and
+  rejects non-client JSON with the expected shape named → stored through the
+  existing `setGmailClientId` safeStorage path → returns the refreshed
+  EmailStatus. Judgment call: response is `{imported, status}` rather than
+  bare EmailStatus so a cancelled dialog is distinguishable and never toasts
+  success (mirrors knowledge:addFiles `{added: 0}`).
+- `GMAIL_API_403_HINT` (enable-API guidance with the direct
+  console.cloud.google.com/apis/library link + test-user reminder) thrown on
+  HTTP 403 from every Gmail fetch: `gmailGet` (covers profile/list/
+  getMessageMeta/getMessageBody) and the sign-in profile read — the two
+  places a fresh client first hits the disabled-API wall.
+- Email tab: a failed Refresh whose error mentions 403 renders the hint as a
+  persistent amber banner under the toolbar with an "Open Gmail API library"
+  button (toast still fires; banner clears on the next successful refresh).
+  Body-pane errors inherit the hint text automatically via `gmailGet`.
+- Settings: "Upload client JSON" button beside the manual fields (manual
+  entry stays); the setup guide's enable-API step now links the Gmail API
+  library page directly and names the 403 symptom; the final step offers the
+  JSON download as the primary path.
+
+**Task 2 — section-by-section edit mode inside Who I am** (commit `a0b617d`):
+- ProfileEditor was monolithic → refactored into exported per-section form
+  components (`IdentityForm` … `CustomRulesForm`, all
+  `{value: ProfileFile, onChange}`) plus one `PROFILE_SECTIONS` array
+  (key/title/summary/defaultOpen/Form). The default export renders the same
+  collapsible rows from that array — Settings ProfilePanel and the
+  onboarding wizard (also an importer) keep identical behavior.
+- WhoAmIView Edit enters an in-view edit mode (no more Settings hop):
+  left nav driven from PROFILE_SECTIONS (all 15 sections the editor
+  supports, incl. Fit evaluation and Custom agent rules beyond the listed
+  set — "whatever ProfileEditor supports"), right pane renders the selected
+  section's form against a single `structuredClone` draft. Pinned bottom
+  bar: Save posts the whole draft to profile:save (validation refusals
+  toast and keep the draft in edit mode), Cancel discards → read view.
+  Read view untouched.
+- Skills in this mode use a dedicated SkillsChipEditor: items as chips with
+  hover-revealed ✕ inside the chip, per-category + opens an inline input
+  (Enter commits and stays open for the next, Escape/blur closes), inline
+  category rename, add/remove whole categories. Judgment call: Settings
+  keeps its CommaList skills form — the refactor contract was "no Settings
+  behavior change", so the chip UX ships only where it was specified.
+
+**Task 3 — assistant update_profile_section** (commit `2a442b7`):
+- Approval-gated `update_profile_section` {section: 14-key enum, newValue:
+  record|array, summary: string}: clone profile → wholesale replace →
+  validateProfile (reject with problems) → approval preview
+  `${section}: ${summary}` capped at 500 chars → save on approval. Tool
+  description instructs: get_profile first, construct the FULL section
+  (never partial), summary states exactly what changed.
+- Added shape guard beyond the spec: validateProfile heals a mistyped
+  section (object where an array belongs, or vice versa) back to its empty
+  default, which would have silently wiped the section and then saved —
+  such calls are refused with the expected shape named.
+- systemAppend: new tool added to the approval-gated enumeration + one
+  routing paragraph (document content rules → tailoring.hardRules or
+  customRules via update_profile_section; "edit the skills section…" →
+  update_profile_section on skills; single new entries → add_profile_entry;
+  after any profile change tell the user the Who I am tab reflects it).
+- Known limit: validation runs on a pre-approval snapshot, so a profile
+  change landing while the approval card waits would be overwritten on
+  approve — acceptable for a single-user desktop app.
