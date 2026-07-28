@@ -1,12 +1,15 @@
-// Read-only "Who I am" page: everything the agents know about the user, in one
-// place — the full profile, the master résumé context, and the knowledge base.
-// Editing happens in Settings; this view only makes the model's inputs visible.
+// "Who I am" page: everything the agents know about the user, in one place —
+// the full profile, the master résumé context, and the knowledge base. Edit
+// switches to an in-view section-by-section editor over a single draft; the
+// per-section forms are the same components the Settings editor renders.
 
 import { useEffect, useState } from 'react'
 import { SquarePen, UserRound } from 'lucide-react'
 import type { ProfileFile } from '@shared/profile'
 import { call } from '../api'
 import { useApp } from '../store'
+import { PROFILE_SECTIONS } from '../components/profile/ProfileEditor'
+import SkillsChipEditor from '../components/profile/SkillsChipEditor'
 
 interface KnowledgeInfo {
   notes: string
@@ -112,11 +115,16 @@ function PreBlock({ text }: { text: string }): JSX.Element {
 }
 
 export default function WhoAmIView(): JSX.Element {
-  const navigate = useApp((s) => s.navigate)
+  const toast = useApp((s) => s.toast)
   const [loading, setLoading] = useState(true)
   const [profile, setProfile] = useState<ProfileFile | null>(null)
   const [masterContext, setMasterContext] = useState('')
   const [kb, setKb] = useState<KnowledgeInfo>({ notes: '', files: [] })
+  // Edit mode: non-null draft = editing; all section forms mutate this one
+  // object and a single Save validates + persists every change at once.
+  const [draft, setDraft] = useState<ProfileFile | null>(null)
+  const [sectionKey, setSectionKey] = useState(PROFILE_SECTIONS[0].key)
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     void Promise.all([
@@ -131,6 +139,22 @@ export default function WhoAmIView(): JSX.Element {
     })
   }, [])
 
+  const save = async (): Promise<void> => {
+    if (!draft) return
+    setSaving(true)
+    try {
+      const saved = await call('profile:save', { profile: draft })
+      setProfile(saved)
+      setDraft(null)
+      toast('Profile saved — every agent sees the update immediately', 'success')
+    } catch (err) {
+      // Typically a validation refusal — keep the draft so nothing is lost.
+      toast(String(err), 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   if (loading) return <div className="p-6 text-sm text-gray-500">Loading…</div>
 
   if (!profile) {
@@ -143,6 +167,66 @@ export default function WhoAmIView(): JSX.Element {
             The agents have nothing to go on. Run onboarding to build your profile — it is the
             source for every search, evaluation, and generated document.
           </p>
+        </div>
+      </div>
+    )
+  }
+
+  if (draft) {
+    const section = PROFILE_SECTIONS.find((s) => s.key === sectionKey) ?? PROFILE_SECTIONS[0]
+    return (
+      <div className="flex h-full flex-col">
+        <div className="flex items-center gap-3 border-b border-edge bg-panel px-4 py-2.5">
+          <SquarePen size={14} className="shrink-0 text-cyan-300" />
+          <h1 className="text-sm font-semibold text-gray-100">Editing profile</h1>
+          <span className="text-[11px] text-gray-500">
+            Changes stay in a draft until you Save.
+          </span>
+        </div>
+        <div className="flex min-h-0 flex-1">
+          <nav className="w-48 shrink-0 overflow-auto border-r border-edge bg-panel py-2">
+            {PROFILE_SECTIONS.map((s) => (
+              <button
+                key={s.key}
+                className={`block w-full px-4 py-1.5 text-left text-[11px] ${
+                  s.key === section.key
+                    ? 'bg-cyan-950/60 font-medium text-cyan-200'
+                    : 'text-gray-400 hover:bg-panel2 hover:text-gray-200'
+                }`}
+                onClick={() => setSectionKey(s.key)}
+              >
+                {s.title}
+              </button>
+            ))}
+          </nav>
+          <div className="min-w-0 flex-1 overflow-auto px-6 py-4">
+            <div className="mx-auto max-w-3xl">
+              <div className="text-[10px] font-bold uppercase tracking-wide text-muted">
+                {section.title}
+              </div>
+              <div className="mt-2">
+                {section.key === 'skills' ? (
+                  <SkillsChipEditor
+                    value={draft.skills}
+                    onChange={(skills) => setDraft({ ...draft, skills })}
+                  />
+                ) : (
+                  <section.Form value={draft} onChange={setDraft} />
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 border-t border-edge bg-panel px-4 py-2.5">
+          <button className="btn btn-green" disabled={saving} onClick={() => void save()}>
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+          <button className="btn" disabled={saving} onClick={() => setDraft(null)}>
+            Cancel
+          </button>
+          <span className="text-[10px] text-gray-600">
+            Save validates and writes every changed section at once; Cancel discards the draft.
+          </span>
         </div>
       </div>
     )
@@ -183,7 +267,13 @@ export default function WhoAmIView(): JSX.Element {
               knowledge base.
             </p>
           </div>
-          <button className="btn shrink-0" onClick={() => navigate({ view: 'settings' })}>
+          <button
+            className="btn shrink-0"
+            onClick={() => {
+              setSectionKey(PROFILE_SECTIONS[0].key)
+              setDraft(structuredClone(profile))
+            }}
+          >
             <SquarePen size={13} />
             Edit
           </button>
