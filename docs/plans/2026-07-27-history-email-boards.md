@@ -617,3 +617,53 @@ view of everything the agents know about the user.
   Known limit: hand-editing the salary phrase in the textarea breaks the
   next swap's exact-match removal — same drift class the checkbox
   filters already accept.
+
+### Polish wave 2 (2026-07-28)
+
+**History/Scout fixes** (commit `9bd5384`):
+- Composer textarea + salary Min/Max inputs override `.input`'s
+  `focus:border-cyan-500` with per-control `focus:border-edge` (utilities
+  layer beats the components-layer `@apply`, and `.input` already sets
+  `outline-none` unconditionally — no ring exists to suppress). The
+  global class is untouched; every other input keeps the cyan focus.
+- Send button insets equalized: the textarea was inline-block, so the
+  relative wrapper carried a ~4px descender gap below it and `bottom-2`
+  measured from the wrong box (button sat ~4px from the field's bottom
+  border vs 8px from the right). `block` on the textarea makes the
+  wrapper hug the border box; bottom-2/right-2 are now identical insets
+  (border is a uniform 1px so inside-border distances match too).
+- Send icon is `CornerDownLeft` (enter/return glyph), same size 13.
+- ScoutView instructions input + state deleted; `⌕ Scout now` calls
+  `scout:start` with `instructions: undefined` (standard sweep) and its
+  tooltip points at History, now the only instructions surface.
+
+**Profile list-field fixes** (commit `7a66ffd`):
+- StringList rows: `group/row relative` wrapper; ✕ is `invisible`,
+  revealed by `group-hover/row` + `group-focus-within/row` (keyboard
+  path: tab from the field lands on a visible button), absolutely
+  positioned inside the field's right edge with `pr-8` on the field so
+  text never underlaps. Visibility (not display) toggles = zero layout
+  shift.
+- StringList inputs → auto-growing textareas: `rows={1}`, `resize-none`,
+  `[field-sizing:content] min-h-[2.25rem] whitespace-pre-wrap
+  break-words`, `block` to kill the inline descender gap. Covers every
+  StringList consumer in ProfileEditor: experience/project bullets,
+  must-keep phrases, traits/strengths/growth/thrives-in, what-excites/
+  sectors/deal-breakers, strong/moderate/weak match areas, calibration
+  notes, hard rules, excluded companies, extra hard filters, custom
+  tailoring rules (verified by grep — StringList is only used there).
+- Coursework/Technologies/Skills are CommaList, not StringList — same
+  growing-textarea treatment applied; `commit()` now splits on
+  `/[,\n]/` so Enter behaves as a separator instead of embedding a
+  newline inside an item (bonus: multi-line pastes parse).
+- EntryList card `✕ remove` and SkillsChipEditor category-row ✕ use the
+  same hover/focus-within reveal. Named groups throughout (`group/row`,
+  `group/entry`, `group/cat`): StringList rows nest inside EntryList
+  cards and SkillsChipEditor's skill chips already use plain `group`,
+  so unnamed groups would cross-trigger reveals.
+- Not touched: CategoryPicker role-chip ✕ (chip, not a row; file not in
+  scope) and `.input` global focus style.
+
+Typecheck 0 after each commit; theme grep clean on all four touched
+files. `field-sizing: content` needs Chromium 123+ — fine for this
+Electron; degrades to a fixed-height single-row textarea elsewhere.
