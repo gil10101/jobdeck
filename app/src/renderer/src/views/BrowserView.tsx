@@ -111,6 +111,7 @@ export default function BrowserView(): JSX.Element {
   const [history, setHistory] = useState<SavedLink[]>(() => loadLinks(HISTORY_KEY))
   const [menuOpen, setMenuOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   useEffect(() => saveLinks(BOOKMARKS_KEY, bookmarks), [bookmarks])
   useEffect(() => saveLinks(HISTORY_KEY, history), [history])
@@ -155,15 +156,37 @@ export default function BrowserView(): JSX.Element {
         /* webview not ready */
       }
     }
+    // A failed navigation otherwise leaves a silent blank page — surface it.
+    const onStart = (): void => setLoadError(null)
+    const onFail = (e: Event): void => {
+      const ev = e as unknown as {
+        errorCode: number
+        errorDescription: string
+        validatedURL: string
+        isMainFrame: boolean
+      }
+      // -3 = ERR_ABORTED: fired by ordinary SPA redirects/cancelled loads.
+      if (!ev.isMainFrame || ev.errorCode === -3) return
+      setLoadError(
+        `Page failed to load: ${ev.errorDescription || 'unknown error'} (${ev.errorCode}) — ${ev.validatedURL}`
+      )
+    }
+    const onGone = (): void => setLoadError('The page crashed — reload to try again.')
     wv.addEventListener('did-navigate', onNav)
     wv.addEventListener('did-navigate-in-page', onNav)
     wv.addEventListener('did-finish-load', onNav)
     wv.addEventListener('page-title-updated', onTitle)
+    wv.addEventListener('did-start-loading', onStart)
+    wv.addEventListener('did-fail-load', onFail)
+    wv.addEventListener('render-process-gone', onGone)
     return () => {
       wv.removeEventListener('did-navigate', onNav)
       wv.removeEventListener('did-navigate-in-page', onNav)
       wv.removeEventListener('did-finish-load', onNav)
       wv.removeEventListener('page-title-updated', onTitle)
+      wv.removeEventListener('did-start-loading', onStart)
+      wv.removeEventListener('did-fail-load', onFail)
+      wv.removeEventListener('render-process-gone', onGone)
     }
   }, [src])
 
@@ -294,6 +317,30 @@ export default function BrowserView(): JSX.Element {
           )}
         </div>
       </div>
+
+      {loadError && (
+        <div className="flex items-center gap-2 border-b border-edge bg-panel px-3 py-1.5 text-xs text-red-300">
+          <span className="min-w-0 flex-1 truncate" title={loadError}>
+            {loadError}
+          </span>
+          <button
+            className="btn px-2 py-0.5"
+            onClick={() => {
+              setLoadError(null)
+              webviewRef.current?.reload()
+            }}
+          >
+            Retry
+          </button>
+          <button
+            className="p-1 text-gray-500 hover:text-gray-300"
+            title="Dismiss"
+            onClick={() => setLoadError(null)}
+          >
+            <X size={12} />
+          </button>
+        </div>
+      )}
 
       <div className="relative min-h-0 flex-1 bg-white">
         {src ? (

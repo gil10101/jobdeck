@@ -32,6 +32,13 @@ app.on('second-instance', () => {
   }
 })
 
+// Electron ships no FedCM browser UI, but the API surface feature-detects as
+// present under our plain-Chrome UA — Google's "Continue as …" sign-in chips
+// then take the FedCM path and stall silently on click. Disabling the feature
+// makes Google Identity Services fall back to its popup flow, which the
+// sandboxed-popup handler in window.ts supports. Must run before ready.
+app.commandLine.appendSwitch('disable-features', 'FedCm,FedCmIdpSigninStatus')
+
 // Must run before app.whenReady().
 registerLocalFileScheme()
 installWebviewHardening()
