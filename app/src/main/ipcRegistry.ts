@@ -733,7 +733,12 @@ export function registerIpc(services: Services): void {
     setSuggestionState(emailId, 'dismissed')
     send('push:emailChanged', { suggestions: openSuggestionCount() })
   })
-  handle('email:update', ({ id, patch }) => updateMessage(id, patch))
+  handle('email:update', ({ id, patch }) => {
+    const msg = updateMessage(id, patch)
+    // Hiding/unhiding moves mail in or out of the open-suggestion count.
+    if (patch.hidden !== undefined) send('push:emailChanged', { suggestions: openSuggestionCount() })
+    return msg
+  })
   handle('email:tags', () => ({ tags: listTags() }))
   handle('email:createTag', ({ name }) => createTag(name))
 

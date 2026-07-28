@@ -233,7 +233,11 @@ export class EmailSync {
         const inPrimary = known.primary === true || primaryIds.has(id)
         let { suggestion, suggestionState } = known
         if (suggestionState === 'open' || suggestionState === null) {
-          suggestion = suggestForMessage(known.classification, known.from, known.subject, rows)
+          // Hidden = the user says the classifier got this one wrong, so never
+          // hold a suggestion on it. Unhiding re-derives on the next sync.
+          suggestion = known.hidden
+            ? null
+            : suggestForMessage(known.classification, known.from, known.subject, rows)
           suggestionState = suggestion ? 'open' : null
         }
         const changed =
@@ -246,6 +250,7 @@ export class EmailSync {
 
       if (autoApply) {
         for (const msg of batch) {
+          if (msg.hidden) continue
           if (msg.suggestion && msg.suggestionState === 'open') {
             this.applyToTracker(msg.suggestion)
             msg.suggestionState = 'applied'

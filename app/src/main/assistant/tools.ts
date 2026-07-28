@@ -355,7 +355,10 @@ export function buildAssistantMcp(deps: AssistantToolDeps): ReturnType<typeof cr
         snippet: m.snippet
       })
       const q = query.trim().toLowerCase()
+      // Mail the user hid is invisible to the assistant too — hidden means
+      // hidden everywhere, including the live-search fallback below.
       const hits = allCachedMessages()
+        .filter((m) => !m.hidden)
         .filter((m) => `${m.from} ${m.subject} ${m.snippet}`.toLowerCase().includes(q))
         .slice(0, 20)
       if (hits.length) return json({ source: 'cache', messages: hits.map(compact) })
@@ -364,7 +367,8 @@ export function buildAssistantMcp(deps: AssistantToolDeps): ReturnType<typeof cr
       }
       try {
         const { ids } = await listMessages(query, 10)
-        const metas = await Promise.all(ids.map(({ id }) => getMessageMeta(id)))
+        const visible = ids.filter(({ id }) => getCachedMessage(id)?.hidden !== true)
+        const metas = await Promise.all(visible.map(({ id }) => getMessageMeta(id)))
         return json({
           source: 'live',
           messages: metas.map((m) =>
@@ -389,6 +393,8 @@ export function buildAssistantMcp(deps: AssistantToolDeps): ReturnType<typeof cr
       }
       try {
         const cached = getCachedMessage(id)
+        // Hidden mail stays hidden from the assistant as well.
+        if (cached?.hidden) return json({ error: `message not found: ${id}` })
         const meta = cached ?? (await getMessageMeta(id))
         const body = await getMessageBody(id)
         return json({

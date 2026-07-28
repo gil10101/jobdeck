@@ -58,8 +58,10 @@ export function lastSyncAt(): string | null {
   return load().lastSyncAt
 }
 
-/** Every cached message, newest first — sync reconciliation and assistant
- *  search need hidden mail too; the UI filters below never see it. */
+/** Every cached message, newest first — sync reconciliation needs hidden mail
+ *  (or it would refetch it forever). Every other consumer must filter hidden
+ *  out: the user hides mail to correct misclassification, so hidden means
+ *  hidden everywhere — UI, assistant search, suggestion counts. */
 export function allCachedMessages(): EmailMessage[] {
   return [...load().messages].sort((a, b) => b.date.localeCompare(a.date))
 }
@@ -153,7 +155,8 @@ export function setSuggestionState(id: string, state: 'open' | 'applied' | 'dism
 }
 
 export function openSuggestionCount(): number {
-  return load().messages.filter((m) => m.suggestion && m.suggestionState === 'open').length
+  return load().messages.filter((m) => !m.hidden && m.suggestion && m.suggestionState === 'open')
+    .length
 }
 
 /** Sign-out wipes the cache — cached mail (and its tags) must not outlive
