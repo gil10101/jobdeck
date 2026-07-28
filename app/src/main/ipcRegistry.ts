@@ -688,6 +688,9 @@ export function registerIpc(services: Services): void {
   handle('email:status', () => emailStatus())
   handle('email:setClientId', ({ clientId, clientSecret }) => {
     setGmailClientId(clientId, clientSecret)
+    // Switching client IDs invalidates the stored tokens — stop the poll loop
+    // rather than let it fail against a connection that no longer exists.
+    if (!gmailConfigured()) emailSync.stop()
     return emailStatus()
   })
   handle('email:importClientJson', async () => {
@@ -701,6 +704,8 @@ export function registerIpc(services: Services): void {
     if (result.canceled || !file) return { imported: false, status: emailStatus() }
     const { clientId, clientSecret } = parseClientJson(fs.readFileSync(file, 'utf-8'))
     setGmailClientId(clientId, clientSecret)
+    // See email:setClientId — an ID switch invalidates the stored tokens.
+    if (!gmailConfigured()) emailSync.stop()
     return { imported: true, status: emailStatus() }
   })
   handle('email:signIn', async () => {

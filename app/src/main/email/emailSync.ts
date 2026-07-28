@@ -147,6 +147,9 @@ export class EmailSync {
   private timer: NodeJS.Timeout | null = null
   private scheduledMinutes = 0
   private syncing = false
+  // Bumped on stop(): a sync already in flight must not write its results
+  // after sign-out, or it would resurrect the cache clearEmailCache wiped.
+  private generation = 0
 
   constructor(private deps: EmailSyncDeps) {
     // Interval changes land immediately, not after the old interval elapses.
@@ -172,11 +175,17 @@ export class EmailSync {
     const firstStart = !this.timer
     this.schedule()
     if (firstStart) {
-      void this.syncNow().catch((err) => console.error('[email] initial sync failed:', err))
+      void this.syncNow().catch((err) => {
+        console.error('[email] initial sync failed:', err)
+        // invalid_grant signs Gmail out mid-sync — stop instead of polling a
+        // dead connection forever.
+        if (!gmailConfigured()) this.stop()
+      })
     }
   }
 
   stop(): void {
+    this.generation++
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
   }
@@ -186,7 +195,11 @@ export class EmailSync {
     this.scheduledMinutes = this.pollMinutes()
     this.timer = setTimeout(() => {
       void this.syncNow()
-        .catch((err) => console.error('[email] poll sync failed:', err))
+        .catch((err) => {
+          console.error('[email] poll sync failed:', err)
+          // See start(): a revoked token signs out mid-sync — stop the loop.
+          if (!gmailConfigured()) this.stop()
+        })
         .finally(() => {
           // Chain the next tick only while polling is still on.
           if (this.timer) this.schedule()
@@ -199,6 +212,7 @@ export class EmailSync {
     if (this.syncing) return { fetched: 0 }
     if (!gmailConfigured()) throw new Error('Gmail is not connected')
     this.syncing = true
+    const gen = this.generation
     try {
       const [job, primary, all] = await Promise.all([
         listMessages(JOB_QUERY, PAGE_SIZE),
@@ -214,6 +228,10 @@ export class EmailSync {
       const cached = new Map(allCachedMessages().map((m) => [m.id, m]))
       const newIds = wantedIds.filter((id) => !cached.has(id))
       const metas = await mapLimit(newIds, FETCH_CONCURRENCY, (id) => getMessageMeta(id))
+      // Signed out while the fetches ran: drop everything — no tracker writes,
+      // no cache write (the rest of this pass is synchronous, so one check
+      // after the last await covers it all).
+      if (gen !== this.generation) return { fetched: 0 }
 
       const rows = this.deps.tracker.listRows()
       const autoApply = this.deps.store.state.settings.emailAutoApply
@@ -249,11 +267,25 @@ export class EmailSync {
       }
 
       if (autoApply) {
-        for (const msg of batch) {
-          if (msg.hidden) continue
-          if (msg.suggestion && msg.suggestionState === 'open') {
-            this.applyToTracker(msg.suggestion)
+        // Oldest first, so when several messages map to one row the newest
+        // email's status wins. Each apply re-reads its row and fails alone —
+        // a row deleted mid-loop must not abort the rest (or the cache write).
+        const applicable = batch
+          .filter((m) => !m.hidden && m.suggestion && m.suggestionState === 'open')
+          .sort((a, b) => a.date.localeCompare(b.date))
+        for (const msg of applicable) {
+          const suggestion = msg.suggestion!
+          // markApplied stamps dateApplied and may rename the folder on disk —
+          // too much blast radius for a fuzzy company-name match. Auto-apply
+          // covers plain status flips only; 'applied' stays a manual Apply.
+          if (suggestion.suggestStatus === 'applied') continue
+          try {
+            const row = this.deps.tracker.getRow(suggestion.rowId)
+            if (!row || row.statusKey === suggestion.suggestStatus) continue
+            this.applyToTracker(suggestion)
             msg.suggestionState = 'applied'
+          } catch (err) {
+            console.error('[email] auto-apply failed:', err)
           }
         }
       }
