@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react'
+import { ArrowUpRight, ChevronLeft, ChevronRight, Play, RefreshCw } from 'lucide-react'
 import type { WebviewElement } from '../types.d'
 import { call } from '../api'
 import { useApp } from '../store'
@@ -18,6 +18,7 @@ export default function BrowserView(): JSX.Element {
   const [currentUrl, setCurrentUrl] = useState(src)
   const [canBack, setCanBack] = useState(false)
   const [canFwd, setCanFwd] = useState(false)
+  const [building, setBuilding] = useState(false)
 
   useEffect(() => {
     const wv = webviewRef.current
@@ -57,6 +58,31 @@ export default function BrowserView(): JSX.Element {
     else setSrc(u)
   }
 
+  // One-click build from the open listing: the guest page's rendered DOM is
+  // handed to the main process, which extracts the posting, files an intake
+  // item, and queues the build — no copy-paste round trip through Intake.
+  const buildFromPage = async (): Promise<void> => {
+    const wv = webviewRef.current
+    if (!wv || !currentUrl || building) return
+    setBuilding(true)
+    try {
+      const raw = (await wv.executeJavaScript(
+        `JSON.stringify({
+           html: document.documentElement ? document.documentElement.outerHTML : '',
+           title: document.title || '',
+           bodyText: document.body ? document.body.innerText : ''
+         })`
+      )) as string
+      const page = JSON.parse(raw) as { html: string; title: string; bodyText: string }
+      const { run } = await call('browser:buildFromPage', { url: currentUrl, ...page })
+      toast(`Build queued: ${run.slug} — track it in Runs`)
+    } catch (err) {
+      toast(String(err), 'error')
+    } finally {
+      setBuilding(false)
+    }
+  }
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 border-b border-edge bg-panel px-3 py-2">
@@ -76,6 +102,14 @@ export default function BrowserView(): JSX.Element {
           onKeyDown={(e) => e.key === 'Enter' && go()}
           placeholder="https://…"
         />
+        <button
+          className="btn"
+          disabled={!currentUrl || building}
+          title="Build an application from the listing on this page: résumé + cover letter, added to Intake and the Tracker"
+          onClick={() => void buildFromPage()}
+        >
+          <Play size={12} /> {building ? 'Reading…' : 'Build'}
+        </button>
         <button
           className="btn"
           disabled={!currentUrl}

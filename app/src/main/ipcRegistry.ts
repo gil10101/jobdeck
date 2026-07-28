@@ -7,7 +7,7 @@ import type { IpcChannel, IpcInvokeContract } from '@shared/ipc'
 import type { RunInput } from './agent/AgentRunner'
 import { buildApplicationDetail } from './parsers/detail'
 import { parseCandidatesFile } from './parsers/report'
-import { fetchPostingFromUrl } from './parsers/jobPostingUrl'
+import { extractJobPosting, fetchPostingFromUrl } from './parsers/jobPostingUrl'
 import { scanApplications } from './fsops/FolderScanner'
 import { copyText, openExternal, openFolder, showItem } from './fsops/reveal'
 import { importFromXlsx } from './xlsx/importXlsx'
@@ -209,6 +209,46 @@ export function registerIpc(services: Services): void {
       company: posting.company,
       role: posting.role
     })
+  })
+  handle('browser:buildFromPage', async ({ url, html, title, bodyText }) => {
+    if (!/^https?:\/\//i.test(url)) throw new Error('only http(s) pages can be built from')
+    // The rendered DOM sees what the logged-in user sees, so its JSON-LD is
+    // tried first (auth-gated SPA listings like board detail pages); a
+    // server-side refetch covers pages whose markup only ships in the initial
+    // response; the visible text is the last resort for pages with no
+    // structured data at all. Page content is untrusted third-party data —
+    // it flows into postingText, which the build pipeline already treats as
+    // untrusted.
+    let posting = extractJobPosting(html.slice(0, 3_000_000), url)
+    if (!posting) posting = await fetchPostingFromUrl(url).catch(() => null)
+    if (!posting) {
+      const text = bodyText.trim().slice(0, 30_000)
+      if (text.length < 200) {
+        throw new Error(
+          'could not find a job posting on this page — open the listing itself (not the results list) and try again'
+        )
+      }
+      posting = {
+        role: title.trim().slice(0, 120) || '(untitled role)',
+        company: '',
+        text: `${title.trim()}\nSource: ${url}\n\n${text}`
+      }
+    }
+    const item = createIntakeItem({
+      text: posting.text,
+      url,
+      company: posting.company,
+      role: posting.role
+    })
+    const run = runner.start({
+      intakeId: item.id,
+      postingText: item.postingText,
+      imagePaths: [],
+      applyUrl: url,
+      companyHint: item.companyHint,
+      roleHint: item.roleHint
+    })
+    return { item, run }
   })
   handle('intake:dismiss', ({ id }) => {
     store.mutate(['intake'], (s) => {

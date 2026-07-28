@@ -31,6 +31,7 @@ export interface WebviewElement extends HTMLElement {
   reload(): void
   stop(): void
   insertText(text: string): Promise<void>
+  executeJavaScript(code: string): Promise<unknown>
 }
 
 export {}

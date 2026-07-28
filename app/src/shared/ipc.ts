@@ -54,6 +54,13 @@ export interface IpcInvokeContract {
   // Fetches a public job-posting page and builds an intake item from its
   // schema.org JobPosting JSON-LD — URL in, structured posting out.
   'intake:fromUrl': { req: { url: string }; res: IntakeItem }
+  /** Build straight from the page open in the Browser tab: the rendered DOM
+   *  (what a logged-in user sees) is parsed for a JobPosting, an intake item
+   *  is created, and a build run starts — one click, no copy-paste. */
+  'browser:buildFromPage': {
+    req: { url: string; html: string; title: string; bodyText: string }
+    res: { item: IntakeItem; run: RunMeta }
+  }
   'intake:dismiss': { req: { id: string }; res: void }
   'intake:listFolders': { req: void; res: IntakeFolder[] }
   'intake:createFolder': { req: { name: string; icon: string }; res: IntakeFolder }
@@ -245,6 +252,7 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'intake:list',
   'intake:addPasted',
   'intake:fromUrl',
+  'browser:buildFromPage',
   'intake:dismiss',
   'intake:listFolders',
   'intake:createFolder',
