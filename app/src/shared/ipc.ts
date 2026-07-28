@@ -180,7 +180,7 @@ export interface IpcInvokeContract {
   /** Opens the Google consent page in the browser; resolves when sign-in completes. */
   'email:signIn': { req: void; res: EmailStatus }
   'email:signOut': { req: void; res: EmailStatus }
-  'email:list': { req: { filter: 'job' | 'all' }; res: EmailMessage[] }
+  'email:list': { req: { filter: 'job' | 'primary' | 'all' }; res: EmailMessage[] }
   /** Body text fetched live from Gmail (never cached on disk). */
   'email:getBody': { req: { id: string }; res: { text: string } }
   'email:refresh': { req: void; res: EmailStatus }

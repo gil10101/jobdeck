@@ -406,6 +406,8 @@ export interface EmailMessage {
   classification: EmailClassification
   /** Matched the job-search query (vs. only the all-recent inbox sweep). */
   jobRelated: boolean
+  /** Listed in Gmail's Primary category sweep at some sync. */
+  primary: boolean
   suggestion: EmailSuggestion | null
   /** null = no suggestion was ever computed for this message. */
   suggestionState: 'open' | 'applied' | 'dismissed' | null

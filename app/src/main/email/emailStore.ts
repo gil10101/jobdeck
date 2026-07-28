@@ -46,10 +46,13 @@ export function lastSyncAt(): string | null {
   return load().lastSyncAt
 }
 
-/** Newest first; 'job' = only messages matched by the job-search query. */
-export function listCachedMessages(filter: 'job' | 'all'): EmailMessage[] {
+/** Newest first; 'job' = job-search-query matches, 'primary' = Gmail's
+ *  Primary category sweep. */
+export function listCachedMessages(filter: 'job' | 'primary' | 'all'): EmailMessage[] {
   const all = [...load().messages].sort((a, b) => b.date.localeCompare(a.date))
-  return filter === 'job' ? all.filter((m) => m.jobRelated) : all
+  if (filter === 'job') return all.filter((m) => m.jobRelated)
+  if (filter === 'primary') return all.filter((m) => m.primary)
+  return all
 }
 
 export function getCachedMessage(id: string): EmailMessage | null {

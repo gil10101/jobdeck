@@ -6,13 +6,36 @@ import { getMessageMeta, listMessages, type GmailMessageMeta } from './gmailClie
 import { listCachedMessages, openSuggestionCount, upsertMessages } from './emailStore'
 
 // Main-process poll loop (TodoWatcher sibling): every N minutes pull
-// job-search-shaped mail + a recent-inbox sweep, classify deterministically,
-// and propose tracker status updates. Suggestions are one-click by default;
-// they are auto-applied ONLY behind settings.emailAutoApply.
+// job-search-shaped mail + Primary-category and recent-inbox sweeps, classify
+// deterministically, and propose tracker status updates. Suggestions are
+// one-click by default; they are auto-applied ONLY behind settings.emailAutoApply.
 
-/** Subject terms that mark mail as job-search-related, ~30 days back. */
+/** Coding-assessment platforms — mail from these IS the assessment. */
+const ASSESSMENT_DOMAINS = [
+  'hackerrank.com',
+  'codility.com',
+  'codesignal.com',
+  'karat.com',
+  'hirevue.com',
+  'testgorilla.com'
+]
+/** ATS notification senders — always job mail, but the subject picks the class. */
+const ATS_DOMAINS = [
+  'greenhouse.io',
+  'lever.co',
+  'ashbyhq.com',
+  'myworkday.com',
+  'icims.com',
+  'smartrecruiters.com'
+]
+
+/** Job-search mail, ~30 days back: subject terms OR a known assessment/ATS
+ *  sender — assessment invites often carry no keyword in the subject at all. */
 const JOB_QUERY =
-  'newer_than:30d subject:(application OR applied OR applying OR interview OR assessment OR offer OR OA OR HackerRank OR Codility OR CodeSignal OR "take-home" OR "coding challenge" OR schedule OR candidacy OR recruiter)'
+  'newer_than:30d (subject:(application OR applied OR applying OR interview OR assessment OR offer OR OA OR HackerRank OR Codility OR CodeSignal OR "take-home" OR "coding challenge" OR "online assessment" OR "next steps" OR "technical screen" OR invitation OR "complete your" OR schedule OR candidacy OR recruiter)' +
+  ` OR from:(${[...ASSESSMENT_DOMAINS, ...ATS_DOMAINS].join(' OR ')}))`
+/** The "Primary" toggle set: Gmail's Primary category, recent. */
+const PRIMARY_QUERY = 'category:primary newer_than:7d'
 /** The "All" toggle set: everything recent, so a miss above is still visible. */
 const ALL_QUERY = 'in:inbox newer_than:7d'
 const PAGE_SIZE = 50
@@ -20,13 +43,25 @@ const FETCH_CONCURRENCY = 5
 const MIN_POLL_MINUTES = 1
 const MAX_POLL_MINUTES = 120
 
+/** True when any address in the From header sits on (a subdomain of) one of
+ *  `domains` — assessment invites often come from a mail.* subdomain. */
+function fromDomainMatch(from: string, domains: string[]): boolean {
+  const hosts = [...from.toLowerCase().matchAll(/@([a-z0-9-][a-z0-9.-]*)/g)].map((m) => m[1])
+  return hosts.some((h) => domains.some((d) => h === d || h.endsWith(`.${d}`)))
+}
+
 /** Deterministic classification from headers (+ snippet for the two classes
  *  whose subjects are usually generic, e.g. "Update on your application").
  *  Order matters: assessment invites mention interviews, rejections mention
- *  everything — most specific signals first. */
+ *  everything — most specific signals first. Assessment-platform senders are
+ *  'assessment' outright; ATS senders fall through the subject rules first,
+ *  then default by whether the subject mentions the application. */
 export function classifyEmail(from: string, subject: string, snippet: string): EmailClassification {
   const s = subject
-  if (/assessment|hackerrank|codility|codesignal|coding (challenge|test|exercise)|take[- ]home|\boa\b/i.test(s)) {
+  if (
+    /assessment|hackerrank|codility|codesignal|coding (challenge|test|exercise)|take[- ]home|\boa\b/i.test(s) ||
+    fromDomainMatch(from, ASSESSMENT_DOMAINS)
+  ) {
     return 'assessment'
   }
   if (/offer letter|job offer|offer of employment|pleased to (extend|offer)|your offer/i.test(s)) {
@@ -35,12 +70,15 @@ export function classifyEmail(from: string, subject: string, snippet: string): E
   const rejection =
     /unfortunately|we regret|not (be )?(moving|proceeding) forward|other candidates|not (been )?selected|no longer under consideration|pursue other (applicants|candidates)|position has been filled/i
   if (rejection.test(s) || rejection.test(snippet)) return 'rejection'
-  if (/interview|phone screen|screening call|schedule (a|your) (call|chat|conversation|meeting)|your availability|meet the team/i.test(s)) {
+  if (/interview|technical screen|phone screen|screening call|next steps|invitation|schedule (a|your) (call|chat|conversation|meeting)|your availability|meet the team/i.test(s)) {
     return 'interview'
   }
   const confirmation =
     /application (was |has been )?(received|submitted)|(thank you|thanks) for (applying|your application)|we('ve| have) received your application|application confirmation|successfully (applied|submitted)/i
   if (confirmation.test(s) || confirmation.test(snippet)) return 'confirmation'
+  if (fromDomainMatch(from, ATS_DOMAINS)) {
+    return /application/i.test(s) ? 'confirmation' : 'other'
+  }
   if (/recruit|talent acquisition|sourcing|hiring team/i.test(from) || /\b(opportunity|opening|role at|position at)\b/i.test(s)) {
     return 'recruiter'
   }
@@ -162,12 +200,14 @@ export class EmailSync {
     if (!gmailConfigured()) throw new Error('Gmail is not connected')
     this.syncing = true
     try {
-      const [job, all] = await Promise.all([
+      const [job, primary, all] = await Promise.all([
         listMessages(JOB_QUERY, PAGE_SIZE),
+        listMessages(PRIMARY_QUERY, PAGE_SIZE),
         listMessages(ALL_QUERY, PAGE_SIZE)
       ])
       const jobIds = new Set(job.ids.map((m) => m.id))
-      const wantedIds = [...new Set([...job.ids, ...all.ids].map((m) => m.id))]
+      const primaryIds = new Set(primary.ids.map((m) => m.id))
+      const wantedIds = [...new Set([...job.ids, ...primary.ids, ...all.ids].map((m) => m.id))]
 
       // Headers are immutable — only fetch ids the cache has never seen.
       const cached = new Map(listCachedMessages('all').map((m) => [m.id, m]))
@@ -179,15 +219,17 @@ export class EmailSync {
       const batch: EmailMessage[] = []
 
       for (const meta of metas) {
-        batch.push(this.buildMessage(meta, jobIds.has(meta.id), rows))
+        batch.push(this.buildMessage(meta, jobIds.has(meta.id), primaryIds.has(meta.id), rows))
       }
-      // Re-listed known messages: refresh the job flag (a message can enter the
-      // job set later) and re-derive still-open/uncomputed suggestions against
+      // Re-listed known messages: refresh the job/primary flags (a message can
+      // enter either set later; caches from before the primary flag existed
+      // heal here too) and re-derive still-open/uncomputed suggestions against
       // the current tracker; applied/dismissed decisions are final.
       for (const id of wantedIds) {
         const known = cached.get(id)
         if (!known) continue
         const jobRelated = known.jobRelated || jobIds.has(id)
+        const inPrimary = known.primary === true || primaryIds.has(id)
         let { suggestion, suggestionState } = known
         if (suggestionState === 'open' || suggestionState === null) {
           suggestion = suggestForMessage(known.classification, known.from, known.subject, rows)
@@ -195,9 +237,10 @@ export class EmailSync {
         }
         const changed =
           jobRelated !== known.jobRelated ||
+          inPrimary !== known.primary ||
           suggestionState !== known.suggestionState ||
           JSON.stringify(suggestion) !== JSON.stringify(known.suggestion)
-        if (changed) batch.push({ ...known, jobRelated, suggestion, suggestionState })
+        if (changed) batch.push({ ...known, jobRelated, primary: inPrimary, suggestion, suggestionState })
       }
 
       if (autoApply) {
@@ -218,13 +261,19 @@ export class EmailSync {
     }
   }
 
-  private buildMessage(meta: GmailMessageMeta, jobRelated: boolean, rows: TrackerRow[]): EmailMessage {
+  private buildMessage(
+    meta: GmailMessageMeta,
+    jobRelated: boolean,
+    primary: boolean,
+    rows: TrackerRow[]
+  ): EmailMessage {
     const classification = classifyEmail(meta.from, meta.subject, meta.snippet)
     const suggestion = suggestForMessage(classification, meta.from, meta.subject, rows)
     return {
       ...meta,
       classification,
       jobRelated,
+      primary,
       suggestion,
       suggestionState: suggestion ? 'open' : null
     }

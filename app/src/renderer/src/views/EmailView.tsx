@@ -45,12 +45,42 @@ function ClassChip({ classification }: { classification: EmailClassification }):
   )
 }
 
+/** Bare http(s) URLs open externally; split-with-capture puts every URL at an
+ *  odd index, everything else stays plain pre-wrap text — no other markup. */
+function LinkifiedBody({ text }: { text: string }): JSX.Element {
+  const parts = text.split(/(https?:\/\/[^\s<>"]+[^\s<>".,;:!?')\]])/g)
+  return (
+    <div className="max-w-3xl whitespace-pre-wrap text-[13px] leading-relaxed text-gray-200">
+      {parts.map((part, i) =>
+        i % 2 === 1 ? (
+          <button
+            key={i}
+            className="break-all text-left text-cyan-400 hover:underline"
+            title={part}
+            onClick={() => void call('app:openExternal', { url: part }).catch(() => undefined)}
+          >
+            {part}
+          </button>
+        ) : (
+          part
+        )
+      )}
+    </div>
+  )
+}
+
+const FILTERS = [
+  { key: 'job', label: 'Job', hint: 'Job-search-related mail (last 30 days)' },
+  { key: 'primary', label: 'Primary', hint: "Gmail's Primary category (last 7 days)" },
+  { key: 'all', label: 'All', hint: 'Everything recent in the inbox (last 7 days)' }
+] as const
+
 export default function EmailView(): JSX.Element {
   const navigate = useApp((s) => s.navigate)
   const toast = useApp((s) => s.toast)
   const [status, setStatus] = useState<EmailStatus | null>(null)
   const [messages, setMessages] = useState<EmailMessage[]>([])
-  const [filter, setFilter] = useState<'job' | 'all'>('job')
+  const [filter, setFilter] = useState<'job' | 'primary' | 'all'>('job')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [body, setBody] = useState<string | null>(null)
   const [bodyErr, setBodyErr] = useState<string | null>(null)
@@ -168,14 +198,14 @@ export default function EmailView(): JSX.Element {
         <h1 className="text-sm font-semibold text-gray-100">Email</h1>
         {status?.email && <span className="truncate text-[11px] text-gray-500">{status.email}</span>}
         <div className="ml-2 flex gap-1">
-          {(['job', 'all'] as const).map((f) => (
+          {FILTERS.map((f) => (
             <button
-              key={f}
-              className={`chip ${filter === f ? 'border-cyan-700 bg-cyan-950/60 text-cyan-200' : ''}`}
-              title={f === 'job' ? 'Job-search-related mail (last 30 days)' : 'Everything recent in the inbox (last 7 days)'}
-              onClick={() => setFilter(f)}
+              key={f.key}
+              className={`chip ${filter === f.key ? 'border-cyan-700 bg-cyan-950/60 text-cyan-200' : ''}`}
+              title={f.hint}
+              onClick={() => setFilter(f.key)}
             >
-              {f === 'job' ? 'Job' : 'All'}
+              {f.label}
             </button>
           ))}
         </div>
@@ -242,7 +272,9 @@ export default function EmailView(): JSX.Element {
             <div className="p-4 text-xs text-gray-600">
               {filter === 'job'
                 ? 'No job-search mail found yet. Refresh, or switch to All.'
-                : 'Nothing synced yet — hit Refresh.'}
+                : filter === 'primary'
+                  ? 'No Primary mail synced yet. Refresh, or switch to All.'
+                  : 'Nothing synced yet — hit Refresh.'}
             </div>
           )}
           {messages.map((m) => (
@@ -254,10 +286,10 @@ export default function EmailView(): JSX.Element {
               }`}
             >
               <div className="flex items-center gap-2">
-                <ClassChip classification={m.classification} />
                 <span className="min-w-0 truncate text-[11px] font-medium text-gray-300">
                   {fromName(m.from)}
                 </span>
+                <ClassChip classification={m.classification} />
                 <span className="ml-auto shrink-0 text-[10px] text-gray-600">{relTime(m.date)}</span>
               </div>
               <div className="truncate text-xs text-gray-200">{m.subject || '(no subject)'}</div>
@@ -286,9 +318,7 @@ export default function EmailView(): JSX.Element {
                 ) : body === null ? (
                   <div className="text-xs text-gray-600">Loading message…</div>
                 ) : (
-                  <div className="max-w-3xl whitespace-pre-wrap text-[13px] leading-relaxed text-gray-200">
-                    {body}
-                  </div>
+                  <LinkifiedBody text={body} />
                 )}
               </div>
             </>
