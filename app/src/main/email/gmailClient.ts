@@ -1,4 +1,4 @@
-import { getAccessToken } from './gmailAuth'
+import { GMAIL_API_403_HINT, getAccessToken } from './gmailAuth'
 
 // Thin Gmail REST client over global fetch — no googleapis dependency. All
 // calls are read-only (gmail.readonly scope) and hit gmail.googleapis.com
@@ -29,6 +29,7 @@ async function gmailGet<T>(pathAndQuery: string): Promise<T> {
     headers: { Authorization: `Bearer ${token}` }
   })
   if (!res.ok) {
+    if (res.status === 403) throw new Error(GMAIL_API_403_HINT)
     throw new Error(`Gmail API request failed (HTTP ${res.status} ${res.statusText})`)
   }
   return (await res.json()) as T

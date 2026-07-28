@@ -287,6 +287,19 @@ export default function SettingsView(): JSX.Element {
     }
   }
 
+  const importClientJson = async (): Promise<void> => {
+    try {
+      const { imported, status } = await call('email:importClientJson', undefined)
+      if (!imported) return
+      setEmailStatus(status)
+      if (status.clientId) setClientIdDraft(status.clientId)
+      setClientSecretDraft('')
+      toast('Gmail OAuth client imported from JSON', 'success')
+    } catch (err) {
+      toast(String(err), 'error')
+    }
+  }
+
   const gmailSignIn = async (): Promise<void> => {
     setEmailBusy(true)
     try {
@@ -703,7 +716,7 @@ export default function SettingsView(): JSX.Element {
           </div>
           <Row
             label="Google OAuth client"
-            hint="Your own Desktop-app OAuth client (read-only Gmail scope). Google requires the client secret for Desktop-app token exchanges even with PKCE — it is not truly secret for installed apps. The secret and sign-in tokens are encrypted with your OS keychain and stored in app data — never in the workspace."
+            hint="Your own Desktop-app OAuth client (read-only Gmail scope). Upload the client JSON Google offers on creation, or paste the two fields. Google requires the client secret for Desktop-app token exchanges even with PKCE — it is not truly secret for installed apps. The secret and sign-in tokens are encrypted with your OS keychain and stored in app data — never in the workspace."
           >
             <div className="flex flex-col items-end gap-1.5">
               <input
@@ -723,16 +736,25 @@ export default function SettingsView(): JSX.Element {
                 value={clientSecretDraft}
                 onChange={(e) => setClientSecretDraft(e.target.value)}
               />
-              <button
-                className="btn btn-primary px-2 py-1 text-[10px]"
-                disabled={
-                  !clientIdDraft.trim() ||
-                  (clientIdDraft.trim() === (emailStatus?.clientId ?? '') && !clientSecretDraft.trim())
-                }
-                onClick={() => void saveClientId()}
-              >
-                Save
-              </button>
+              <div className="flex gap-1.5">
+                <button
+                  className="btn px-2 py-1 text-[10px]"
+                  title="Pick the client_secret_….json file downloaded from Google Cloud Console"
+                  onClick={() => void importClientJson()}
+                >
+                  Upload client JSON
+                </button>
+                <button
+                  className="btn btn-primary px-2 py-1 text-[10px]"
+                  disabled={
+                    !clientIdDraft.trim() ||
+                    (clientIdDraft.trim() === (emailStatus?.clientId ?? '') && !clientSecretDraft.trim())
+                  }
+                  onClick={() => void saveClientId()}
+                >
+                  Save
+                </button>
+              </div>
             </div>
           </Row>
           <Row
@@ -803,16 +825,30 @@ export default function SettingsView(): JSX.Element {
                 </button>{' '}
                 and create (or select) a project.
               </li>
-              <li>APIs &amp; Services → Library → search “Gmail API” → Enable.</li>
+              <li>
+                Enable the Gmail API for that project:{' '}
+                <button
+                  className="text-cyan-500 hover:underline"
+                  onClick={() =>
+                    void call('app:openExternal', {
+                      url: 'https://console.cloud.google.com/apis/library/gmail.googleapis.com'
+                    }).catch(() => undefined)
+                  }
+                >
+                  APIs &amp; Services → Library → Gmail API
+                </button>{' '}
+                → Enable. Skipping this is the usual cause of a 403 on sign-in or Refresh.
+              </li>
               <li>
                 OAuth consent screen → External → fill the required fields, then add your own
                 Google account under Test users.
               </li>
               <li>Credentials → Create credentials → OAuth client ID → Application type “Desktop app”.</li>
               <li>
-                Copy both the Client ID (ends in .apps.googleusercontent.com) and the Client secret
-                into the fields above and Save — Google requires the secret for Desktop-app token
-                exchanges; it is not truly secret for installed apps.
+                Download the client JSON Google offers and hit “Upload client JSON” above — or copy
+                the Client ID (ends in .apps.googleusercontent.com) and the Client secret into the
+                fields and Save. Google requires the secret for Desktop-app token exchanges; it is
+                not truly secret for installed apps.
               </li>
             </ol>
           </div>

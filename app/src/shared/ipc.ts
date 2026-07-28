@@ -174,6 +174,9 @@ export interface IpcInvokeContract {
   // ---- Gmail (read-only; BYO OAuth client ID, PKCE loopback flow) ----
   'email:status': { req: void; res: EmailStatus }
   'email:setClientId': { req: { clientId: string; clientSecret?: string }; res: EmailStatus }
+  /** File picker for the client JSON downloaded from Google Cloud; parses it and
+   *  stores id + secret. imported=false when the dialog was cancelled. */
+  'email:importClientJson': { req: void; res: { imported: boolean; status: EmailStatus } }
   /** Opens the Google consent page in the browser; resolves when sign-in completes. */
   'email:signIn': { req: void; res: EmailStatus }
   'email:signOut': { req: void; res: EmailStatus }
@@ -301,6 +304,7 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'companies:backfill',
   'email:status',
   'email:setClientId',
+  'email:importClientJson',
   'email:signIn',
   'email:signOut',
   'email:list',

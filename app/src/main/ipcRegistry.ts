@@ -51,6 +51,7 @@ import {
   gmailHasClientSecret,
   gmailSignIn,
   gmailSignOut,
+  parseClientJson,
   setGmailClientId
 } from './email/gmailAuth'
 import { getMessageBody } from './email/gmailClient'
@@ -680,6 +681,19 @@ export function registerIpc(services: Services): void {
   handle('email:setClientId', ({ clientId, clientSecret }) => {
     setGmailClientId(clientId, clientSecret)
     return emailStatus()
+  })
+  handle('email:importClientJson', async () => {
+    const win = services.getWindow()
+    const result = await dialog.showOpenDialog(win ?? new BrowserWindow({ show: false }), {
+      title: 'Choose the OAuth client JSON downloaded from Google Cloud',
+      properties: ['openFile'],
+      filters: [{ name: 'OAuth client JSON', extensions: ['json'] }]
+    })
+    const file = result.filePaths[0]
+    if (result.canceled || !file) return { imported: false, status: emailStatus() }
+    const { clientId, clientSecret } = parseClientJson(fs.readFileSync(file, 'utf-8'))
+    setGmailClientId(clientId, clientSecret)
+    return { imported: true, status: emailStatus() }
   })
   handle('email:signIn', async () => {
     await gmailSignIn()

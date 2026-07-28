@@ -22,6 +22,38 @@ const PROFILE_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/profile'
 /** The consent page is human-paced; abandon the loopback server after this. */
 const FLOW_TIMEOUT_MS = 2 * 60_000
 
+/** A 403 from the Gmail API almost always means the Cloud project never had the
+ *  API enabled (or the account is not a test user) — surface the fix, not the code. */
+export const GMAIL_API_403_HINT =
+  'Gmail API returned 403 — most likely the Gmail API is not enabled for your Google Cloud project. Enable it at https://console.cloud.google.com/apis/library/gmail.googleapis.com, wait a minute, then Refresh. Also confirm you added yourself as a test user on the OAuth consent screen.'
+
+/** Parse the OAuth client JSON downloaded from Google Cloud Console. Only a
+ *  Desktop-app client ({installed:{…}}) can run the loopback flow; a Web
+ *  client ({web:{…}}) is rejected with instructions to create the right type. */
+export function parseClientJson(raw: string): { clientId: string; clientSecret?: string } {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    throw new Error('that file is not valid JSON')
+  }
+  const root = (parsed ?? {}) as Record<string, unknown>
+  if (root.web && !root.installed) {
+    throw new Error(
+      'this is a Web-application OAuth client, which cannot sign in from a desktop app — in Google Cloud Console → Credentials, create an OAuth client with Application type "Desktop app" and upload that JSON instead'
+    )
+  }
+  const installed = root.installed as { client_id?: unknown; client_secret?: unknown } | undefined
+  const clientId = typeof installed?.client_id === 'string' ? installed.client_id.trim() : ''
+  if (!clientId) {
+    throw new Error(
+      'not a Google OAuth client file — expected the JSON downloaded from Google Cloud Console → Credentials (it has an "installed" section with a client_id)'
+    )
+  }
+  const secret = typeof installed?.client_secret === 'string' ? installed.client_secret.trim() : ''
+  return secret ? { clientId, clientSecret: secret } : { clientId }
+}
+
 interface GmailAuthFile {
   clientId?: string
   email?: string
@@ -245,6 +277,7 @@ export async function gmailSignIn(): Promise<{ email: string }> {
     const profileRes = await fetch(PROFILE_URL, {
       headers: { Authorization: `Bearer ${accessToken}` }
     })
+    if (profileRes.status === 403) throw new Error(GMAIL_API_403_HINT)
     if (!profileRes.ok) throw new Error(`could not read the Gmail profile (HTTP ${profileRes.status})`)
     const profile = (await profileRes.json()) as { emailAddress?: string }
     const email = profile.emailAddress ?? ''

@@ -55,6 +55,9 @@ export default function EmailView(): JSX.Element {
   const [body, setBody] = useState<string | null>(null)
   const [bodyErr, setBodyErr] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  // Inline banner for a failed refresh whose error carries 403 guidance —
+  // toasts vanish, but this failure needs the console link to stay visible.
+  const [syncHint, setSyncHint] = useState<string | null>(null)
   const filterRef = useRef(filter)
   filterRef.current = filter
 
@@ -104,8 +107,11 @@ export default function EmailView(): JSX.Element {
     try {
       setStatus(await call('email:refresh', undefined))
       setMessages(await call('email:list', { filter: filterRef.current }))
+      setSyncHint(null)
     } catch (err) {
-      toast(String(err), 'error')
+      const text = String(err)
+      setSyncHint(text.includes('403') ? text : null)
+      toast(text, 'error')
     } finally {
       setRefreshing(false)
     }
@@ -181,6 +187,22 @@ export default function EmailView(): JSX.Element {
           {refreshing ? 'Syncing…' : 'Refresh'}
         </button>
       </div>
+
+      {syncHint && (
+        <div className="flex items-start gap-3 border-b border-edge bg-amber-950/30 px-4 py-2">
+          <span className="min-w-0 flex-1 text-[11px] leading-relaxed text-amber-300">{syncHint}</span>
+          <button
+            className="btn shrink-0 px-2 py-0.5 text-[10px]"
+            onClick={() =>
+              void call('app:openExternal', {
+                url: 'https://console.cloud.google.com/apis/library/gmail.googleapis.com'
+              }).catch(() => undefined)
+            }
+          >
+            Open Gmail API library
+          </button>
+        </div>
+      )}
 
       {suggestions.length > 0 && (
         <div className="max-h-40 overflow-auto border-b border-edge">
