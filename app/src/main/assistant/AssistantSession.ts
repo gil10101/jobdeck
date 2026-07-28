@@ -221,7 +221,8 @@ export class AssistantSession {
             runStore: this.deps.runStore,
             startScout: this.deps.startScout,
             rebuildRun: this.deps.rebuildRun,
-            requestApproval: bridge
+            requestApproval: bridge,
+            profileChanged: () => this.deps.send('push:storeChanged', { domains: ['profile'] })
           })
         }
       const model = this.requestedModel || this.deps.store.state.settings.model

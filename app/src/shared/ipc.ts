@@ -221,7 +221,7 @@ export interface IpcPushContract {
   'push:runEvent': { runId: string; event: RunEvent }
   'push:runChanged': RunMeta
   'push:todoNew': IntakeItem
-  'push:storeChanged': { domains: ('rows' | 'intake' | 'settings' | 'candidates')[] }
+  'push:storeChanged': { domains: ('rows' | 'intake' | 'settings' | 'candidates' | 'profile')[] }
   'push:companiesChanged': Record<string, CompanyInfo>
   'push:assistantEvent': { conversationId: string; event: RunEvent }
   'push:assistantApproval': AssistantApproval

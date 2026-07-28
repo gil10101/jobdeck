@@ -28,6 +28,16 @@ export default function ProfilePanel(): JSX.Element {
   }
   useEffect(refresh, [])
 
+  // Assistant-made profile edits refresh this panel too; a draft in progress
+  // is untouched (only the read view refetches).
+  useEffect(
+    () =>
+      onPush('push:storeChanged', ({ domains }) => {
+        if (domains.includes('profile')) refresh()
+      }),
+    []
+  )
+
   // Watch the extraction run; load the draft when it succeeds.
   useEffect(() => {
     if (!extracting) return

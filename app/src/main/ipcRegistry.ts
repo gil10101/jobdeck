@@ -105,8 +105,10 @@ export function registerIpc(services: Services): void {
   handle('tracker:delete', ({ id, deleteFolder }) => {
     const row = tracker.getRow(id)
     if (!row) throw new Error(`row not found: ${id}`)
-    // Cancel any in-flight build tied to this row.
+    // Cancel any in-flight build tied to this row, and kill its revision chat
+    // before the folder goes away (the chat edits inside that folder).
     if (row.runId) runner.cancel(row.runId)
+    detailChat.delete(id)
     // Remember the "no" — flip the source candidate to rejected so scouts
     // never re-suggest a posting the user already looked into and declined.
     store.mutate(['candidates'], (s) => {
@@ -473,7 +475,10 @@ export function registerIpc(services: Services): void {
   handle('profile:save', ({ profile }) => {
     const result = validateProfile(profile)
     if (!result.ok) throw new Error(`profile invalid: ${result.problems.join('; ')}`)
-    return saveProfile(result.profile)
+    const saved = saveProfile(result.profile)
+    // Views showing the profile (Who I am, Settings) refetch on this push.
+    send('push:storeChanged', { domains: ['profile'] })
+    return saved
   })
   handle('profile:draft', ({ runId }) => {
     const meta = runner.get(runId).meta

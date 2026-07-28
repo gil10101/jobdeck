@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react'
 import { SquarePen, UserRound } from 'lucide-react'
 import type { ProfileFile } from '@shared/profile'
-import { call } from '../api'
+import { call, onPush } from '../api'
 import { useApp } from '../store'
 import { PROFILE_SECTIONS } from '../components/profile/ProfileEditor'
 import SkillsChipEditor from '../components/profile/SkillsChipEditor'
@@ -138,6 +138,16 @@ export default function WhoAmIView(): JSX.Element {
       setLoading(false)
     })
   }, [])
+
+  // Assistant-made profile edits land while this tab is open — refetch on
+  // push, but never while an edit draft is in progress (it must not be lost).
+  useEffect(() => {
+    if (draft) return
+    return onPush('push:storeChanged', ({ domains }) => {
+      if (!domains.includes('profile')) return
+      void call('profile:get', undefined).then(setProfile).catch(() => undefined)
+    })
+  }, [draft])
 
   const save = async (): Promise<void> => {
     if (!draft) return

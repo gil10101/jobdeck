@@ -8,7 +8,7 @@ import { MASTER_DIR, toAbs } from '../paths'
 import { renderProfileMd, renderTailoringRulesMd } from '../profile/render'
 import { loadProfile } from '../profile/profileStore'
 import { AssistantSession, type SessionConfig, type SessionDeps } from './AssistantSession'
-import { loadConversation } from './conversationStore'
+import { deleteConversation, loadConversation } from './conversationStore'
 
 // Per-application revision chat: one session per tracker row, working directly
 // inside that application's folder. Unlike the global assistant, edits apply
@@ -25,6 +25,10 @@ function conversationIdFor(rowId: string): string {
 
 export class DetailChatManager {
   private sessions = new Map<string, AssistantSession>()
+  // folderPath each session's config was built from — the [DONE] rename moves
+  // the folder, and a session whose cwd/jail still point at the old path
+  // denies every file tool until it is rebuilt.
+  private sessionFolders = new Map<string, string>()
 
   constructor(private deps: SessionDeps) {}
 
@@ -33,14 +37,32 @@ export class DetailChatManager {
     if (!row) throw new Error(`row not found: ${rowId}`)
     if (!row.folderPath) throw new Error('this application has no folder to revise')
     const id = conversationIdFor(rowId)
-    const session = this.sessions.get(id) ?? new AssistantSession(id, this.deps, this.config(row))
+    let session = this.sessions.get(id)
+    if (session && this.sessionFolders.get(id) !== row.folderPath) {
+      // Folder moved (e.g. mark-submitted rename): rebuild the session so the
+      // jail follows. The SDK thread resumes via the persisted sdkSessionId.
+      session.dispose()
+      session = undefined
+    }
+    if (!session) session = new AssistantSession(id, this.deps, this.config(row))
     this.sessions.set(id, session)
+    this.sessionFolders.set(id, row.folderPath)
     session.send(text)
     return { conversationId: id }
   }
 
   stop(rowId: string): void {
     this.sessions.get(conversationIdFor(rowId))?.stop()
+  }
+
+  /** Row deleted: kill the live session and remove its conversation file so
+   *  it cannot outlive (or keep editing) the application it belonged to. */
+  delete(rowId: string): void {
+    const id = conversationIdFor(rowId)
+    this.sessions.get(id)?.dispose()
+    this.sessions.delete(id)
+    this.sessionFolders.delete(id)
+    deleteConversation(id)
   }
 
   get(rowId: string): AssistantConversation | null {
@@ -50,15 +72,16 @@ export class DetailChatManager {
   private config(row: TrackerRow): SessionConfig {
     const folderRel = row.folderPath!
     const folderAbs = toAbs(folderRel)
-    // Symlink-safe containment: compare against the folder's real path, and
-    // realpath the target's nearest existing ancestor so a symlink planted
-    // inside the folder cannot route reads/writes outside it.
+    // Symlink-safe containment: realpath the target's nearest existing
+    // ancestor and require it inside the folder's real path. This both stops
+    // a symlink planted inside the folder from routing reads/writes outside
+    // it, and accepts paths spelled through a symlinked workspace (macOS
+    // /tmp → /private/tmp) that a textual prefix check would wrongly deny.
     const realFolder = fs.realpathSync(folderAbs)
     const insideFolder = (p: unknown): boolean => {
       if (typeof p !== 'string' || !p) return false
-      const abs = path.resolve(realFolder, p)
-      if (abs !== realFolder && !abs.startsWith(realFolder + path.sep)) return false
-      let probe = abs
+      // Relative paths resolve against the un-resolved cwd the SDK works in.
+      let probe = path.resolve(folderAbs, p)
       try {
         while (!fs.existsSync(probe)) probe = path.dirname(probe)
         const real = fs.realpathSync(probe)
@@ -75,10 +98,11 @@ export class DetailChatManager {
     const insideKnowledge = (p: unknown): boolean => {
       if (typeof p !== 'string' || !p) return false
       try {
+        // Same probe-based containment as insideFolder (reads only, so the
+        // target must exist — realpath it directly).
         const realKnowledge = fs.realpathSync(knowledgeAbs)
-        const abs = path.resolve(realKnowledge, p)
-        if (!abs.startsWith(realKnowledge + path.sep)) return false
-        return fs.realpathSync(abs).startsWith(realKnowledge + path.sep)
+        const real = fs.realpathSync(path.resolve(knowledgeAbs, p))
+        return real.startsWith(realKnowledge + path.sep)
       } catch {
         return false
       }

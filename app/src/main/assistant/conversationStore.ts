@@ -57,7 +57,10 @@ export function listConversations(): ConversationMeta[] {
     const dir = conversationsDir()
     return fs
       .readdirSync(dir)
-      .filter((f) => f.endsWith('.json'))
+      // row_* files are detail-chat threads owned by DetailChatManager; they
+      // must never surface in the assistant panel's history (resuming one
+      // there would rerun it without the folder jail).
+      .filter((f) => f.endsWith('.json') && !f.startsWith('row_'))
       .map((f) => {
         try {
           const c = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf-8')) as AssistantConversation

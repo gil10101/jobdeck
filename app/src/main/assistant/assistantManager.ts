@@ -31,6 +31,11 @@ export class AssistantManager {
     if (conversationId !== null && !/^[A-Za-z0-9_-]+$/.test(conversationId)) {
       throw new Error(`invalid conversation id: ${conversationId}`)
     }
+    // row_* ids belong to DetailChatManager — resuming one here would attach
+    // the global config (repo cwd, global tools) to a folder-jailed thread.
+    if (conversationId?.startsWith('row_')) {
+      throw new Error(`detail-chat conversations cannot be resumed in the assistant panel: ${conversationId}`)
+    }
     const id = conversationId ?? createConversation().id
     const session = this.sessions.get(id) ?? new AssistantSession(id, this.deps)
     this.sessions.set(id, session)

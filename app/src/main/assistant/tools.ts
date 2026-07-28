@@ -29,6 +29,8 @@ export interface AssistantToolDeps {
   startScout: (instructions: string) => { id: string }
   rebuildRun: (runId: string) => { id: string; slug: string }
   requestApproval: (tool: string, preview: string) => Promise<boolean>
+  /** Notify the renderer that the profile file changed (Who I am refetches). */
+  profileChanged: () => void
 }
 
 function json(payload: unknown): { content: [{ type: 'text'; text: string }] } {
@@ -204,6 +206,7 @@ export function buildAssistantMcp(deps: AssistantToolDeps): ReturnType<typeof cr
       const result = validateProfile(p)
       if (!result.ok) return json({ error: 'invalid profile after adding entry', problems: result.problems })
       saveProfile(result.profile)
+      deps.profileChanged()
       return json({ ok: true, section })
     }
   )
@@ -240,18 +243,28 @@ export function buildAssistantMcp(deps: AssistantToolDeps): ReturnType<typeof cr
           error: `${section} must be ${wantArray ? 'an array' : 'an object'} — call get_profile and send the complete section value`
         })
       }
-      // Clone: loadProfile() returns the module cache by reference, and a
-      // rejected/denied update must not leave the change in the live object.
+      // Dry-run validation against the current profile, so an invalid value
+      // is refused before the user is ever asked to approve it. (Clone:
+      // loadProfile() returns the module cache by reference.)
+      const dry = structuredClone(loadProfile() ?? emptyProfile())
+      ;(dry as unknown as Record<string, unknown>)[section] = newValue
+      const dryResult = validateProfile(dry)
+      if (!dryResult.ok) {
+        return json({ error: 'invalid profile after replacing the section', problems: dryResult.problems })
+      }
+      const preview = `${section}: ${summary}`.slice(0, 500)
+      const ok = await deps.requestApproval('update_profile_section', preview)
+      if (!ok) return json({ denied: true })
+      // Re-apply onto the profile as it exists NOW — edits that landed while
+      // the approval card sat open must survive this save.
       const p = structuredClone(loadProfile() ?? emptyProfile())
       ;(p as unknown as Record<string, unknown>)[section] = newValue
       const result = validateProfile(p)
       if (!result.ok) {
         return json({ error: 'invalid profile after replacing the section', problems: result.problems })
       }
-      const preview = `${section}: ${summary}`.slice(0, 500)
-      const ok = await deps.requestApproval('update_profile_section', preview)
-      if (!ok) return json({ denied: true })
       saveProfile(result.profile)
+      deps.profileChanged()
       return json({ ok: true, section })
     }
   )
