@@ -125,6 +125,19 @@ function str(v: unknown): string {
   return typeof v === 'string' ? v.trim() : ''
 }
 
+/** Fetched board strings are third-party data that ends up in a file the
+ *  scout agent Reads: strip control characters and newlines, collapse
+ *  whitespace runs, and cap the length so a hostile or malformed feed cannot
+ *  smuggle formatting/bulk into the prefetch file or the prompt. */
+function cleanText(v: unknown, max: number): string {
+  if (typeof v !== 'string') return ''
+  return v
+    .replace(/[\u0000-\u001F\u007F-\u009F]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, max)
+}
+
 /** ISO date (YYYY-MM-DD) from an ISO string or ms epoch; undefined when absent. */
 function isoDate(v: unknown): string | undefined {
   if (typeof v === 'number' && Number.isFinite(v)) {
@@ -152,11 +165,13 @@ function normalizeGreenhouse(data: unknown): CustomBoardRow[] {
         departments?: { name?: unknown }[]
       }
       return {
-        title: str(job.title),
-        location: str(job.location?.name),
+        title: cleanText(job.title, 200),
+        location: cleanText(job.location?.name, 200),
         url: str(job.absolute_url),
         postedAt: isoDate(job.first_published) ?? isoDate(job.updated_at),
-        department: Array.isArray(job.departments) ? str(job.departments[0]?.name) || undefined : undefined
+        department: Array.isArray(job.departments)
+          ? cleanText(job.departments[0]?.name, 200) || undefined
+          : undefined
       }
     })
     .filter((r) => r.title && r.url)
@@ -173,11 +188,12 @@ function normalizeLever(data: unknown): CustomBoardRow[] {
         categories?: { location?: unknown; team?: unknown; department?: unknown }
       }
       return {
-        title: str(job.text),
-        location: str(job.categories?.location),
+        title: cleanText(job.text, 200),
+        location: cleanText(job.categories?.location, 200),
         url: str(job.hostedUrl),
         postedAt: isoDate(job.createdAt),
-        department: str(job.categories?.team) || str(job.categories?.department) || undefined
+        department:
+          cleanText(job.categories?.team, 200) || cleanText(job.categories?.department, 200) || undefined
       }
     })
     .filter((r) => r.title && r.url)
@@ -198,11 +214,11 @@ function normalizeAshby(data: unknown): CustomBoardRow[] {
         isListed?: unknown
       }
       return {
-        title: str(job.title),
-        location: str(job.location),
+        title: cleanText(job.title, 200),
+        location: cleanText(job.location, 200),
         url: str(job.jobUrl),
         postedAt: isoDate(job.publishedAt),
-        department: str(job.department) || str(job.team) || undefined,
+        department: cleanText(job.department, 200) || cleanText(job.team, 200) || undefined,
         listed: job.isListed !== false
       }
     })
@@ -227,8 +243,8 @@ function prettyLabel(slug: string): string {
 async function greenhouseBoardName(slug: string): Promise<string | null> {
   try {
     const data = await fetchJson(`https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(slug)}`)
-    const name = (data as { name?: unknown } | null)?.name
-    return typeof name === 'string' && name.trim() ? name.trim() : null
+    // The name is third-party text headed for the profile and the prompt.
+    return cleanText((data as { name?: unknown } | null)?.name, 80) || null
   } catch {
     return null
   }
@@ -239,7 +255,9 @@ async function greenhouseBoardName(slug: string): Promise<string | null> {
 export async function testCustomBoard(rawUrl: string): Promise<CustomBoardTest> {
   const { ats, slug } = detectCustomBoard(rawUrl)
   const rows = await fetchCustomBoardRows(ats, slug)
-  const label = (ats === 'greenhouse' ? await greenhouseBoardName(slug) : null) ?? prettyLabel(slug)
+  const label =
+    cleanText((ats === 'greenhouse' ? await greenhouseBoardName(slug) : null) ?? prettyLabel(slug), 80) ||
+    slug.slice(0, 80)
   return { ats, slug, label, sampleCount: rows.length }
 }
 
