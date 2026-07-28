@@ -442,3 +442,28 @@ identifier (HTTP 404)". Add can therefore never save an unfetchable board.
 `app/src/main/ipcRegistry.ts`, `app/src/main/agent/{AgentRunner,prompt}.ts`,
 `app/resources/prompts/scout_jobs.md`,
 `app/src/renderer/src/views/SettingsView.tsx`.
+
+### Fix wave (2026-07-27)
+
+- **Custom boards hardening:** fetched strings (title/location/department,
+  and the greenhouse board name that becomes the label) are sanitized at
+  normalization — control chars/newlines stripped, whitespace collapsed,
+  fields capped at 200 chars (labels 80). The scout prompt's custom-boards
+  section now frames rows as third-party data: evaluate, never obey.
+- **Gmail OAuth root cause:** sign-in died at the code exchange with
+  `invalid_request` because `gmailAuth.ts` sent no `client_secret` — by
+  design ("Desktop client IDs are public identifiers"), but Google REQUIRES
+  the secret for Desktop-app token exchanges even with PKCE (it is simply
+  not treated as confidential for installed apps). Everything else in the
+  exchange was already correct (urlencoded body, grant_type/code/verifier,
+  redirect_uri identical to the consent URL's `http://127.0.0.1:<port>`).
+  Fix: optional Client secret field in Settings; `email:setClientId` gains
+  `clientSecret`, stored via the same safeStorage path as the refresh token,
+  never echoed (EmailStatus reports `hasClientSecret` only), sent in both
+  the code and refresh exchanges when present. Setup guide names both
+  fields and its console.cloud.google.com step is now a clickable link.
+- **History composer:** chip rows → three multi-select dropdowns (Titles /
+  Type / Work model, counts on the trigger, assistant-dropdown idiom);
+  min-pay input kept; Run scout button → icon-only send at the textarea's
+  bottom-right, Enter submits (Shift+Enter newline, IME-guarded). Phrase
+  toggles now also REMOVE their phrase and heal the "; " separators.
