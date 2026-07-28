@@ -100,7 +100,7 @@ export default function SkillsChipEditor(props: {
               props.onChange(skills.filter((_, k) => k !== i))
             }}
           >
-            ✕
+            <X size={10} />
           </button>
         </div>
       ))}

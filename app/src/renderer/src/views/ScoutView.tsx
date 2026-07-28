@@ -1,4 +1,13 @@
 import { useEffect, useState } from 'react'
+import {
+  ArrowUpRight,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Search,
+  X
+} from 'lucide-react'
 import type { CandidateJob } from '@shared/types'
 import { call } from '../api'
 import { useApp, companyKey } from '../store'
@@ -38,7 +47,9 @@ function ActionButtons({ c, actions }: { c: CandidateJob; actions: Actions }): J
   if (c.state === 'accepted') {
     return (
       <>
-        <span className="chip border-green-800 text-green-300">✓ accepted</span>
+        <span className="chip border-green-800 text-green-300">
+          <Check size={11} /> accepted
+        </span>
         {c.buildRunId && (
           <button className="btn" onClick={() => navigate({ view: 'runs', runId: c.buildRunId! })}>
             View build run
@@ -48,7 +59,11 @@ function ActionButtons({ c, actions }: { c: CandidateJob; actions: Actions }): J
     )
   }
   if (c.state === 'rejected') {
-    return <span className="chip text-muted">✗ rejected</span>
+    return (
+      <span className="chip text-muted">
+        <X size={11} /> rejected
+      </span>
+    )
   }
   return (
     <>
@@ -58,7 +73,7 @@ function ActionButtons({ c, actions }: { c: CandidateJob; actions: Actions }): J
         title="Add a tracker row and queue the résumé + cover-letter build"
         onClick={() => void actions.accept(c.id)}
       >
-        ✓ Accept
+        <Check size={13} /> Accept
       </button>
       <button
         className="btn"
@@ -66,7 +81,7 @@ function ActionButtons({ c, actions }: { c: CandidateJob; actions: Actions }): J
         title="Never suggest this posting again"
         onClick={() => void actions.reject(c.id)}
       >
-        ✗ Reject
+        <X size={13} /> Reject
       </button>
     </>
   )
@@ -195,7 +210,7 @@ function PostingPanel({
               </div>
             </div>
             <button className="btn shrink-0 px-2" onClick={onClose} title="Close (Esc)">
-              ✕
+              <X size={14} />
             </button>
           </div>
 
@@ -234,7 +249,7 @@ function PostingPanel({
                     )
                   }
                 >
-                  open ↗
+                  open <ArrowUpRight size={11} />
                 </button>
               </div>
             )}
@@ -259,7 +274,15 @@ function PostingPanel({
             {c.postingText && (
               <div className="mt-1">
                 <button className="btn" onClick={() => setRawOpen((v) => !v)}>
-                  {rawOpen ? '▾ Hide full posting' : '▸ Full posting text'}
+                  {rawOpen ? (
+                    <>
+                      <ChevronDown size={13} /> Hide full posting
+                    </>
+                  ) : (
+                    <>
+                      <ChevronRight size={13} /> Full posting text
+                    </>
+                  )}
                 </button>
                 {(rawOpen || !hasStructure) && (
                   <pre className="mt-2 whitespace-pre-wrap font-sans text-[11px] leading-relaxed text-gray-400">
@@ -313,7 +336,17 @@ function CandidateCard({
           {c.position} <span className="text-gray-500">@</span> {c.company}
         </span>
         {info && <RatingBadge rating={info.rating} url={info.url} />}
-        <span className="shrink-0 text-[10px] text-gray-600">{selected ? '◂ open' : 'details ▸'}</span>
+        <span className="inline-flex shrink-0 items-center gap-0.5 text-[10px] text-gray-600">
+          {selected ? (
+            <>
+              <ChevronLeft size={10} /> open
+            </>
+          ) : (
+            <>
+              details <ChevronRight size={10} />
+            </>
+          )}
+        </span>
       </div>
       <div className="mt-2">
         <CandidateChips c={c} />
@@ -454,7 +487,7 @@ export default function ScoutView(): JSX.Element {
             title="Run a standard sweep — compose custom instructions in History"
             onClick={startScout}
           >
-            ⌕ Scout now
+            <Search size={13} /> Scout now
           </button>
         )}
         <div className="ml-auto flex items-center gap-1.5">

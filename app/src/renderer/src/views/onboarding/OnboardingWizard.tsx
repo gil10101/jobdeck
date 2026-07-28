@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { ArrowLeft, ArrowRight, Check, Upload } from 'lucide-react'
 import type { ProfileFile } from '@shared/profile'
 import type { RunMeta } from '@shared/types'
 import { call, onPush } from '../../api'
@@ -166,7 +167,7 @@ export default function OnboardingWizard(): JSX.Element {
                       : 'text-gray-600'
                 }`}
               >
-                {i < stepIndex[step] ? '✓ ' : ''}
+                {i < stepIndex[step] && <Check size={10} className="mr-0.5 inline" />}
                 {l}
               </span>
               {i < labels.length - 1 && <span className="text-gray-700">·</span>}
@@ -197,7 +198,7 @@ export default function OnboardingWizard(): JSX.Element {
             </p>
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <button className="btn btn-primary" onClick={upload}>
-                ⇪ Add files…
+                <Upload size={13} /> Add files…
               </button>
             </div>
             {uploadNames.length > 0 && (
@@ -221,7 +222,7 @@ export default function OnboardingWizard(): JSX.Element {
                 disabled={busy || (uploadNames.length === 0 && !pasteText.trim())}
                 onClick={extract}
               >
-                Extract my profile →
+                Extract my profile <ArrowRight size={13} />
               </button>
               <button className="btn ml-auto text-gray-500" onClick={finish}>
                 Skip setup for now
@@ -273,10 +274,10 @@ export default function OnboardingWizard(): JSX.Element {
             </div>
             <div className="mt-3 flex items-center gap-2">
               <button className="btn btn-green" disabled={busy} onClick={saveProfile}>
-                ✓ Save profile
+                <Check size={13} /> Save profile
               </button>
               <button className="btn" disabled={busy} onClick={() => setStep('sources')}>
-                ← Back
+                <ArrowLeft size={13} /> Back
               </button>
             </div>
           </div>
@@ -284,14 +285,17 @@ export default function OnboardingWizard(): JSX.Element {
 
         {step === 'done' && (
           <div className="mt-6 text-center">
-            <div className="text-sm font-semibold text-green-300">✓ You're set up</div>
+            <div className="text-sm font-semibold text-green-300">
+              <Check size={14} className="mr-1 inline" />
+              You&apos;re set up
+            </div>
             <p className="mt-2 text-xs leading-relaxed text-gray-400">
               Scout finds matching jobs, Accept builds your tailored résumé + cover letter, Apply
               opens the posting with your answers docked beside it. Your profile is editable
               anytime in Settings.
             </p>
             <button className="btn btn-primary mt-5 px-6 py-2.5" onClick={finish}>
-              Start →
+              Start <ArrowRight size={13} />
             </button>
           </div>
         )}

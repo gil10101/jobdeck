@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Check, ChevronDown, ChevronRight, X } from 'lucide-react'
 import type { RunEvent } from '@shared/types'
 
 const MAX_RENDERED = 500
@@ -19,7 +20,11 @@ function ToolRow({ event, end }: { event: RunEvent & { kind: 'tool_start' }; end
         />
         <span className="shrink-0 font-semibold text-gray-300">{event.tool}</span>
         <span className="min-w-0 flex-1 truncate text-gray-500">{event.summary}</span>
-        {end && <span className="shrink-0 text-[10px] text-gray-600">{open ? '▾' : '▸'}</span>}
+        {end && (
+          <span className="shrink-0 text-gray-600">
+            {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+          </span>
+        )}
       </button>
       {open && end && (
         <pre className="ml-6 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-bg p-2 text-[10px] leading-relaxed text-gray-500">
@@ -71,13 +76,13 @@ export default function Timeline({ events }: { events: RunEvent[] }): JSX.Elemen
           case 'init':
             return (
               <div key={e.seq} className="px-2 py-1 text-cyan-500">
-                ⚡ agent session started · model {e.model}
+                agent session started · model {e.model}
               </div>
             )
           case 'status':
             return (
               <div key={e.seq} className="px-2 py-1 uppercase tracking-wide text-gray-600">
-                → {e.status}
+                {e.status}
               </div>
             )
           case 'tool_start':
@@ -106,7 +111,17 @@ export default function Timeline({ events }: { events: RunEvent[] }): JSX.Elemen
                     : 'border-red-900 bg-red-950/40 text-red-300'
                 }`}
               >
-                {e.ok ? '✓ agent finished' : `✗ ${e.errorText ?? 'agent errored'}`}
+                {e.ok ? (
+                  <>
+                    <Check size={12} className="mr-1 inline" />
+                    agent finished
+                  </>
+                ) : (
+                  <>
+                    <X size={12} className="mr-1 inline" />
+                    {e.errorText ?? 'agent errored'}
+                  </>
+                )}
                 {(typeof e.contextTokens === 'number' || typeof e.costUsd === 'number') && (
                   <span
                     className="ml-2 text-[10px] opacity-70"

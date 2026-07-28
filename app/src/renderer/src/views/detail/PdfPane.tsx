@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { RefreshCw } from 'lucide-react'
 import type { ApplicationDetail } from '@shared/types'
 import { localFileUrl } from '@shared/ipc'
 import { call } from '../../api'
@@ -59,7 +60,7 @@ export default function PdfPane({
         doc: active as 'resume' | 'cover'
       })
       setNonce((n) => n + 1) // reload the iframe with the fresh PDF
-      if (res.pages === 1) toast('Recompiled — 1 page ✓', 'success')
+      if (res.pages === 1) toast('Recompiled — 1 page', 'success')
       else toast(`Recompiled — ${res.pages ?? '?'} pages (should be 1!)`, 'error')
     } catch (err) {
       toast(String(err), 'error')
@@ -91,7 +92,13 @@ export default function PdfPane({
             title="Run pdflatex twice on the edited .tex and reload the PDF"
             onClick={recompile}
           >
-            {compiling ? 'Compiling…' : '⟳ Recompile'}
+            {compiling ? (
+              'Compiling…'
+            ) : (
+              <>
+                <RefreshCw size={11} /> Recompile
+              </>
+            )}
           </button>
         )}
       </div>

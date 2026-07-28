@@ -28,7 +28,7 @@ forker in any market out of the box.
 > public JSON API, so results are structured (skills, seniority, region facets)
 > rather than parsed from markup.
 
-## ⚠️ Scope: tech-focused
+## Scope warning: tech-focused
 
 freehire's corpus already includes some non-tech postings (it crawls whole company
 career pages), **but its faceted filtering — skills, categories, and seniority
@@ -37,7 +37,7 @@ software / data / engineering / tech roles, where the filtering is strong. Non-t
 coverage exists but is still maturing; don't rely on this skill for general
 (non-technical) job coverage yet.
 
-## ℹ️ Hosted-service dependency (best-effort, no SLA)
+## Note: hosted-service dependency (best-effort, no SLA)
 
 This skill depends on a third-party hosted service, freehire.dev. Reads are
 **public and unauthenticated** — the same zero-signup bar as `linkedin-search`.

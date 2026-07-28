@@ -24,7 +24,7 @@ company info, and a direct apply link).
 > and reads their private recommendation feed. It is different from the public scrapers
 > (LinkedIn, freehire): the results are already tailored to the user, so scores are meaningful.
 
-## ⚠️ Personal use only
+## Warning: personal use only
 
 This uses the user's **own** Jobright account against Jobright's private backend API
 (`swan-api.jobright.ai`). Keep volume low, never share the session, and do not use it for bulk

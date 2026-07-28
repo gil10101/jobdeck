@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { ArrowUpRight, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react'
 import type { WebviewElement } from '../types.d'
 import { call } from '../api'
 import { useApp } from '../store'
@@ -60,13 +61,13 @@ export default function BrowserView(): JSX.Element {
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 border-b border-edge bg-panel px-3 py-2">
         <button className="btn px-2" disabled={!canBack} onClick={() => webviewRef.current?.goBack()}>
-          ◀
+          <ChevronLeft size={14} />
         </button>
         <button className="btn px-2" disabled={!canFwd} onClick={() => webviewRef.current?.goForward()}>
-          ▶
+          <ChevronRight size={14} />
         </button>
         <button className="btn px-2" onClick={() => webviewRef.current?.reload()}>
-          ⟳
+          <RefreshCw size={13} />
         </button>
         <input
           className="input flex-1 font-mono text-[11px]"
@@ -85,7 +86,7 @@ export default function BrowserView(): JSX.Element {
             )
           }
         >
-          ↗ Browser
+          <ArrowUpRight size={13} /> Browser
         </button>
       </div>
 

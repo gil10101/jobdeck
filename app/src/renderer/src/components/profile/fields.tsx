@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
+import { ChevronDown, ChevronRight, X } from 'lucide-react'
 
 /**
  * Dropdown over a fixed option set. When `allowOther` is set and the current
@@ -91,7 +92,9 @@ export function Section(props: {
         className="flex w-full items-center gap-2 py-2.5 text-left"
         onClick={() => setOpen((o) => !o)}
       >
-        <span className="w-3 text-[10px] text-gray-500">{open ? '▾' : '▸'}</span>
+        <span className="w-3 text-gray-500">
+          {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        </span>
         <span className="text-[11px] font-semibold text-gray-200">{props.title}</span>
         {props.summary && (
           <span className="ml-auto text-[10px] text-gray-500">{props.summary}</span>
@@ -207,7 +210,7 @@ export function StringList(props: {
             title="Remove"
             onClick={() => props.onChange(items.filter((_, j) => j !== i))}
           >
-            ✕
+            <X size={12} />
           </button>
         </div>
       ))}
@@ -319,7 +322,7 @@ export function EntryList<T>(props: {
               className="btn invisible ml-auto px-1.5 py-0.5 text-[10px] text-gray-500 group-focus-within/entry:visible group-hover/entry:visible"
               onClick={() => props.onChange(items.filter((_, j) => j !== i))}
             >
-              ✕ remove
+              <X size={10} /> remove
             </button>
           </div>
           {props.render(item, (patch) => setAt(i, patch))}

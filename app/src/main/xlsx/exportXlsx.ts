@@ -57,7 +57,7 @@ export async function exportToXlsx(store: Store): Promise<{ path: string }> {
   const companies = loadCompanies()
   for (const r of store.state.rows) {
     const info = companies[normalizeKey(r.company)]
-    const glassdoor = info?.rating != null ? '★ ' + info.rating.toFixed(1) : ''
+    const glassdoor = info?.rating != null ? info.rating.toFixed(1) : ''
     const row = ws.addRow({
       position: r.position,
       company: r.company,

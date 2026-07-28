@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { ArrowRight, ChevronDown, ChevronRight, RefreshCw, Square } from 'lucide-react'
 import type { RunMeta } from '@shared/types'
 
 function ScoutOutcomeBar({
@@ -14,11 +15,12 @@ function ScoutOutcomeBar({
       <div className="flex items-center gap-3 px-4 py-3">
         <span className="text-xs font-medium text-gray-200">{meta.summary ?? 'Scout finished'}</span>
         <button className="btn btn-primary" onClick={onReview}>
-          Review candidates →
+          Review candidates <ArrowRight size={13} />
         </button>
         {meta.problems && meta.problems.length > 0 && (
           <button className="btn ml-auto" onClick={() => setNotesOpen((v) => !v)}>
-            {notesOpen ? '▾' : '▸'} Scout notes ({meta.problems.length})
+            {notesOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />} Scout notes (
+            {meta.problems.length})
           </button>
         )}
       </div>
@@ -187,7 +189,7 @@ export default function RunsView({ runId }: { runId?: string }): JSX.Element {
                   className="btn btn-danger ml-auto"
                   onClick={() => void call('runs:cancel', { runId: meta.id })}
                 >
-                  ■ Cancel
+                  <Square size={11} fill="currentColor" /> Cancel
                 </button>
               )}
               {meta.kind === 'build' &&
@@ -204,7 +206,7 @@ export default function RunsView({ runId }: { runId?: string }): JSX.Element {
                         .catch((err) => useApp.getState().toast(String(err), 'error'))
                     }
                   >
-                    ⟳ Rebuild
+                    <RefreshCw size={13} /> Rebuild
                   </button>
                 )}
             </div>

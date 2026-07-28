@@ -57,7 +57,7 @@ export const SETTINGS_MAP: SettingEntry[] = [
   {
     topic: 'type into apply forms',
     location: 'Settings → Workflow → Experimental: type into apply forms',
-    note: 'adds a ⌨ button on answer fields in the Apply view that types into the embedded browser'
+    note: 'adds a keyboard button on answer fields in the Apply view that types into the embedded browser'
   },
   {
     topic: 'glassdoor ratings',

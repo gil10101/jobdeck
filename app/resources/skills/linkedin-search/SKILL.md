@@ -25,7 +25,7 @@ forker in any market out of the box.
 > LinkedIn's `jobs-guest` endpoints are global and the HTML parsing is country-independent;
 > only the `--location` you pass changes per market.
 
-## ⚠️ Personal use only
+## Warning: personal use only
 
 This uses LinkedIn's public job pages; automated access is against LinkedIn's Terms of
 Service, so **keep volume low and don't use it commercially or for bulk data collection.**

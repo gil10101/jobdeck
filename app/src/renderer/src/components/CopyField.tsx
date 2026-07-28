@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Check, Keyboard } from 'lucide-react'
 import { call } from '../api'
 import { useApp } from '../store'
 
@@ -46,13 +47,19 @@ export default function CopyField({
             onMouseDown={insert}
             title="Type into focused field in the embedded browser"
           >
-            ⌨
+            <Keyboard size={13} />
           </button>
         )}
         <span
-          className={`text-[10px] ${copied ? 'text-green-400' : 'text-gray-500 opacity-0 group-hover:opacity-100'}`}
+          className={`inline-flex items-center gap-0.5 text-[10px] ${copied ? 'text-green-400' : 'text-gray-500 opacity-0 group-hover:opacity-100'}`}
         >
-          {copied ? '✓ copied' : 'copy'}
+          {copied ? (
+            <>
+              <Check size={10} /> copied
+            </>
+          ) : (
+            'copy'
+          )}
         </span>
       </div>
     </div>

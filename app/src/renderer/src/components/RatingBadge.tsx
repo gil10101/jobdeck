@@ -1,3 +1,4 @@
+import { Star } from 'lucide-react'
 import { call } from '../api'
 
 /** Tiny inline Glassdoor rating pill — a muted dash when there's no cached rating. */
@@ -11,7 +12,7 @@ export default function RatingBadge(props: {
 
   const content = (
     <>
-      <span className="text-amber-300">★</span>
+      <Star size={10} className="shrink-0 text-amber-300" fill="currentColor" />
       <span className="text-gray-200">{rating.toFixed(1)}</span>
     </>
   )

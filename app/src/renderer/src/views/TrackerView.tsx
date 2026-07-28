@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { ArrowDown, ArrowUp, Download, RefreshCw, Upload } from 'lucide-react'
 import {
   flexRender,
   getCoreRowModel,
@@ -130,7 +131,7 @@ export default function TrackerView(): JSX.Element {
         }`,
         res.conflicts.length ? 'info' : 'success'
       )
-      for (const c of res.conflicts.slice(0, 3)) toast(`⚠ ${c.slug}: ${c.detail}`)
+      for (const c of res.conflicts.slice(0, 3)) toast(`conflict — ${c.slug}: ${c.detail}`)
       await refreshRows()
     } catch (err) {
       toast(`Scan failed: ${String(err)}`, 'error')
@@ -177,13 +178,13 @@ export default function TrackerView(): JSX.Element {
         </div>
         <div className="ml-auto flex items-center gap-2">
           <button className="btn" disabled={busy} onClick={() => setConfirmImport(true)}>
-            ⇪ Import xlsx
+            <Upload size={13} /> Import xlsx
           </button>
           <button className="btn" disabled={busy} onClick={doExport}>
-            ⇓ Export xlsx
+            <Download size={13} /> Export xlsx
           </button>
           <button className="btn" disabled={busy} onClick={doScan}>
-            ⟳ Rescan folders
+            <RefreshCw size={13} /> Rescan folders
           </button>
         </div>
       </div>
@@ -201,7 +202,10 @@ export default function TrackerView(): JSX.Element {
                     style={{ width: header.getSize() }}
                   >
                     {flexRender(header.column.columnDef.header, header.getContext())}
-                    {{ asc: ' ↑', desc: ' ↓' }[header.column.getIsSorted() as string] ?? ''}
+                    {{
+                      asc: <ArrowUp size={11} className="ml-1 inline" />,
+                      desc: <ArrowDown size={11} className="ml-1 inline" />
+                    }[header.column.getIsSorted() as string] ?? null}
                   </th>
                 ))}
               </tr>

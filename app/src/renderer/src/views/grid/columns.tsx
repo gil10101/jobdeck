@@ -1,5 +1,5 @@
 import { createColumnHelper, type ColumnDef } from '@tanstack/react-table'
-import { ArrowUpRight } from 'lucide-react'
+import { ArrowUpRight, X } from 'lucide-react'
 import type { TrackerRow } from '@shared/types'
 import StatusBadge from '../../components/StatusBadge'
 import RatingBadge from '../../components/RatingBadge'
@@ -157,7 +157,7 @@ export function buildColumns(): ColumnDef<TrackerRow, any>[] {
               }}
             />
             <ActionButton
-              label="✕"
+              label={<X size={12} />}
               title="Delete this application (removes its folder too)"
               onClick={() => {
                 const meta = info.table.options.meta as

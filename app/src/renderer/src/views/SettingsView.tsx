@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Check, X } from 'lucide-react'
 import type { AppSettings, BoardId, BoardsStatus, EmailStatus } from '@shared/types'
 import type { CustomBoard } from '@shared/profile'
 import { call } from '../api'
@@ -424,7 +425,7 @@ export default function SettingsView(): JSX.Element {
                     onClick={() => void removeKbFile(f.name)}
                     title="Remove from knowledge base"
                   >
-                    ✕
+                    <X size={12} />
                   </button>
                 </div>
               ))}
@@ -531,7 +532,7 @@ export default function SettingsView(): JSX.Element {
           </Row>
           <Row
             label="Experimental: type into apply forms"
-            hint='Adds a "⌨" button on answer fields in the Apply view that types the value into the focused field of the embedded browser.'
+            hint="Adds a keyboard button on answer fields in the Apply view that types the value into the focused field of the embedded browser."
           >
             <Toggle
               value={settings.insertTextEnabled}
@@ -584,7 +585,7 @@ export default function SettingsView(): JSX.Element {
                       </button>
                     ) : boards?.bunOk ? (
                       <span className="chip border-green-800 text-green-300">
-                        ✓ {jr && !b.configured ? 'installed' : 'ready'}
+                        <Check size={11} /> {jr && !b.configured ? 'installed' : 'ready'}
                       </span>
                     ) : (
                       <span className="chip border-amber-700 text-amber-300">needs bun</span>
@@ -650,7 +651,7 @@ export default function SettingsView(): JSX.Element {
                   onClick={() => void removeCustom(b.id)}
                   title="Remove this company board"
                 >
-                  ✕
+                  <X size={12} />
                 </button>
               </div>
             </Row>

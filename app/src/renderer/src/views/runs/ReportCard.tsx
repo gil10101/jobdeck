@@ -1,4 +1,5 @@
 import type { ReportJson, RunMeta } from '@shared/types'
+import { ArrowRight, Check as CheckIcon, X as XIcon } from 'lucide-react'
 import { FolderIcon } from '../../components/icons'
 import { call } from '../../api'
 import { useApp } from '../../store'
@@ -6,7 +7,7 @@ import { useApp } from '../../store'
 function Check({ ok, label }: { ok: boolean; label: string }): JSX.Element {
   return (
     <span className={`chip ${ok ? 'border-green-800 text-green-300' : 'border-red-900 text-red-300'}`}>
-      {ok ? '✓' : '✗'} {label}
+      {ok ? <CheckIcon size={11} /> : <XIcon size={11} />} {label}
     </span>
   )
 }
@@ -39,7 +40,11 @@ export default function ReportCard({
           <Check ok={report.coverLetterPages === 1} label={`cover ${report.coverLetterPages}p`} />
         )}
         <Check ok={String(report.noEmDashes).toLowerCase() === 'confirmed'} label="no em-dashes" />
-        {report.cityjobsMessage && <span className="chip">cityjobs message ✓</span>}
+        {report.cityjobsMessage && (
+          <span className="chip">
+            cityjobs message <CheckIcon size={11} />
+          </span>
+        )}
       </div>
       {report.fitNote && (
         <div className="fit-note mt-2 px-3 py-2 text-xs leading-relaxed">{report.fitNote}</div>
@@ -56,7 +61,7 @@ export default function ReportCard({
               Open Detail
             </button>
             <button className="btn" onClick={() => navigate({ view: 'apply', rowId: row.id })}>
-              Apply →
+              Apply <ArrowRight size={13} />
             </button>
           </>
         )}

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { ChevronDown, ChevronRight, X } from 'lucide-react'
 import type { AssistantApproval, AssistantMessage, RunEvent } from '@shared/types'
 import ApprovalCard from './ApprovalCard'
 
@@ -31,7 +32,11 @@ function ToolRow({
         />
         <span className="shrink-0 font-semibold text-gray-300">{prettyToolName(event.tool)}</span>
         <span className="min-w-0 flex-1 truncate text-gray-500">{event.summary}</span>
-        {end && <span className="shrink-0 text-[10px] text-gray-600">{open ? '▾' : '▸'}</span>}
+        {end && (
+          <span className="shrink-0 text-gray-600">
+            {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+          </span>
+        )}
       </button>
       {open && end && (
         <pre className="ml-5 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-bg p-2 text-[10px] leading-relaxed text-gray-500">
@@ -86,7 +91,8 @@ function AssistantBlock({
           key={e.seq}
           className="mt-1 whitespace-pre-wrap rounded-md border border-red-900 bg-red-950/40 px-2 py-1.5 text-red-300"
         >
-          ✗ {e.errorText ?? 'assistant run failed'}
+          <X size={12} className="mr-1 inline" />
+          {e.errorText ?? 'assistant run failed'}
         </div>
       ))}
     </div>

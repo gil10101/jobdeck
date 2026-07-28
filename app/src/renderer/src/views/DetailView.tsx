@@ -1,4 +1,4 @@
-import { PanelRight } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Check, Mic, PanelRight } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { ApplicationDetail } from '@shared/types'
 import StatusBadge from '../components/StatusBadge'
@@ -85,7 +85,7 @@ export default function DetailView({ rowId }: { rowId: string }): JSX.Element {
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-3 border-b border-edge bg-panel px-4 py-2.5">
         <button className="btn" onClick={() => navigate({ view: 'tracker' })}>
-          ←
+          <ArrowLeft size={14} />
         </button>
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold text-gray-100">
@@ -110,7 +110,7 @@ export default function DetailView({ rowId }: { rowId: string }): JSX.Element {
         <div className="ml-auto flex items-center gap-2">
           {row.statusKey === 'not_applied' && (
             <button className="btn btn-green" onClick={() => setConfirmSubmit(true)}>
-              ✓ Mark submitted
+              <Check size={13} /> Mark submitted
             </button>
           )}
           {row.folderPath && (
@@ -126,7 +126,7 @@ export default function DetailView({ rowId }: { rowId: string }): JSX.Element {
                   .catch((err) => toast(String(err), 'error'))
               }}
             >
-              🎤 Prep interview
+              <Mic size={13} /> Prep interview
             </button>
           )}
           {row.folderPath && (
@@ -142,7 +142,7 @@ export default function DetailView({ rowId }: { rowId: string }): JSX.Element {
             </button>
           )}
           <button className="btn btn-primary" onClick={() => navigate({ view: 'apply', rowId })}>
-            Apply →
+            Apply <ArrowRight size={13} />
           </button>
           <button
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-panel2 hover:text-gray-200"

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { ChevronDown, ChevronUp, X } from 'lucide-react'
 import type { RoleCategory } from './roleTaxonomy'
 
 export interface PickedRole {
@@ -80,7 +81,7 @@ export default function CategoryPicker(props: {
                 title="up"
                 onClick={() => move(i, -1)}
               >
-                ▲
+                <ChevronUp size={10} />
               </button>
               <button
                 type="button"
@@ -88,7 +89,7 @@ export default function CategoryPicker(props: {
                 title="down"
                 onClick={() => move(i, 1)}
               >
-                ▼
+                <ChevronDown size={10} />
               </button>
               <button
                 type="button"
@@ -96,7 +97,7 @@ export default function CategoryPicker(props: {
                 title="remove"
                 onClick={() => toggle(r.title)}
               >
-                ✕
+                <X size={10} />
               </button>
             </span>
           ))}

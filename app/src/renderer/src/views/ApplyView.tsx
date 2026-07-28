@@ -1,4 +1,12 @@
-import { PanelRight } from 'lucide-react'
+import {
+  ArrowLeft,
+  ArrowUpRight,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  PanelRight,
+  RefreshCw
+} from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { ApplicationDetail } from '@shared/types'
 import type { WebviewElement } from '../types.d'
@@ -29,7 +37,7 @@ function FileRow({ label, relPath }: { label: string; relPath: string }): JSX.El
             .catch((err) => toast(String(err), 'error'))
         }}
       >
-        {copied ? '✓' : 'Copy path'}
+        {copied ? <Check size={12} /> : 'Copy path'}
       </button>
       <button
         className="btn px-2 py-0.5 text-[10px]"
@@ -153,16 +161,16 @@ export default function ApplyView({ rowId }: { rowId: string }): JSX.Element {
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 border-b border-edge bg-panel px-3 py-2">
         <button className="btn" onClick={() => navigate({ view: 'detail', rowId })}>
-          ←
+          <ArrowLeft size={14} />
         </button>
         <button className="btn px-2" disabled={!canBack} onClick={() => webviewRef.current?.goBack()}>
-          ◀
+          <ChevronLeft size={14} />
         </button>
         <button className="btn px-2" disabled={!canFwd} onClick={() => webviewRef.current?.goForward()}>
-          ▶
+          <ChevronRight size={14} />
         </button>
         <button className="btn px-2" onClick={() => webviewRef.current?.reload()}>
-          ⟳
+          <RefreshCw size={13} />
         </button>
         <input
           className="input flex-1 font-mono text-[11px]"
@@ -180,7 +188,7 @@ export default function ApplyView({ rowId }: { rowId: string }): JSX.Element {
             )
           }
         >
-          ↗ Browser
+          <ArrowUpRight size={13} /> Browser
         </button>
         <button
           className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-panel2 hover:text-gray-200"
@@ -242,7 +250,7 @@ export default function ApplyView({ rowId }: { rowId: string }): JSX.Element {
                   className="btn btn-green mt-2 w-full justify-center"
                   onClick={() => setConfirmSubmit(true)}
                 >
-                  ✓ Mark submitted
+                  <Check size={13} /> Mark submitted
                 </button>
               </div>
               <div className="min-h-0 flex-1 overflow-auto">

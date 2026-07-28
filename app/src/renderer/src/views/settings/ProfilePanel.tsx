@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Check } from 'lucide-react'
 import type { ProfileFile } from '@shared/profile'
 import type { RunMeta } from '@shared/types'
 import { call, onPush } from '../../api'
@@ -129,7 +130,7 @@ export default function ProfilePanel(): JSX.Element {
         {profile ? (
           <>
             <span className="chip border-green-800 text-green-300">
-              ✓ {profile.identity.fullName}
+              <Check size={11} /> {profile.identity.fullName}
             </span>
             <span className="text-[11px] text-gray-500">
               rev {profile.revision} · files: {profile.documents.fileBasename}_* ·{' '}

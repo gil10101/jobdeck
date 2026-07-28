@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Check } from 'lucide-react'
 import type { ApplicationDetail } from '@shared/types'
 import CopyField from '../../components/CopyField'
 import { call } from '../../api'
@@ -22,7 +23,7 @@ function SectionBlock({ heading, body }: { heading: string; body: string }): JSX
               .catch((err) => toast(String(err), 'error'))
           }}
         >
-          {copied ? '✓' : 'copy'}
+          {copied ? <Check size={11} /> : 'copy'}
         </button>
       </div>
       <div className="mt-1.5 whitespace-pre-wrap text-[11px] leading-relaxed text-gray-400">

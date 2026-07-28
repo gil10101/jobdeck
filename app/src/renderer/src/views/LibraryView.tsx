@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { ChevronDown, ChevronRight, RefreshCw, Upload } from 'lucide-react'
 import type { LibraryCategory, LibraryFile } from '@shared/types'
 import { localFileUrl } from '@shared/ipc'
 import { FolderIcon } from '../components/icons'
@@ -179,10 +180,10 @@ export default function LibraryView(): JSX.Element {
                 .catch((err) => toast(String(err), 'error'))
             }
           >
-            ⇪ Add files
+            <Upload size={11} /> Add files
           </button>
           <button className="btn px-2 py-0.5 text-[10px]" onClick={load} title="Refresh file list">
-            ⟳
+            <RefreshCw size={11} />
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-auto py-1">
@@ -192,7 +193,9 @@ export default function LibraryView(): JSX.Element {
                 className="flex w-full items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide text-muted hover:text-gray-300"
                 onClick={() => toggle(cat.title)}
               >
-                <span>{collapsed.has(cat.title) ? '▸' : '▾'}</span>
+                <span>
+                  {collapsed.has(cat.title) ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                </span>
                 {cat.title}
                 <span className="font-normal text-gray-600">{cat.files.length}</span>
               </button>

@@ -229,7 +229,7 @@ function IntakeCard({
         </button>
         {item.state === 'new' || item.state === 'failed' ? (
           <button className="btn btn-primary shrink-0" onClick={build}>
-            ▶ Build
+            <Play size={12} /> Build
           </button>
         ) : item.runId ? (
           <button
@@ -790,7 +790,7 @@ export default function IntakeView(): JSX.Element {
                       title="Remove screenshot"
                       onClick={() => setImages((prev) => prev.filter((_, j) => j !== i))}
                     >
-                      ✕
+                      <X size={12} />
                     </button>
                   </div>
                 ))}

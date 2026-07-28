@@ -1,3 +1,4 @@
+import { X } from 'lucide-react'
 import { useApp } from '../store'
 
 const KIND_STYLES = {
@@ -18,7 +19,7 @@ export default function ToastHost(): JSX.Element {
         >
           <span className="break-words leading-relaxed">{t.text}</span>
           <button className="shrink-0 opacity-60 hover:opacity-100" onClick={() => dismiss(t.id)}>
-            ✕
+            <X size={14} />
           </button>
         </div>
       ))}
