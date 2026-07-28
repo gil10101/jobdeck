@@ -40,11 +40,6 @@ export default function ReportCard({
           <Check ok={report.coverLetterPages === 1} label={`cover ${report.coverLetterPages}p`} />
         )}
         <Check ok={String(report.noEmDashes).toLowerCase() === 'confirmed'} label="no em-dashes" />
-        {report.cityjobsMessage && (
-          <span className="chip">
-            cityjobs message <CheckIcon size={11} />
-          </span>
-        )}
       </div>
       {report.fitNote && (
         <div className="fit-note mt-2 px-3 py-2 text-xs leading-relaxed">{report.fitNote}</div>

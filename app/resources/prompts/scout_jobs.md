@@ -51,7 +51,7 @@ Write `{{OUTPUT_PATH}}` as VALID JSON (no fences, no comments):
       "workModel": "<onsite|hybrid|remote|unknown>",
       "datePosted": "<YYYY-MM-DD or null>",
       "applyUrl": "<best apply URL — company site preferred over aggregator>",
-      "source": "<jobright|linkedin|freehire|company|cityjobs|web>",
+      "source": "<jobright|linkedin|freehire|company|localBoards|web>",
       "fitScore": 85,
       "fitNote": "<one line, honest, gaps named>",
       "postingText": "<the fullest posting text you gathered — NEVER empty>",

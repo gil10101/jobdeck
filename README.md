@@ -141,6 +141,10 @@ cover_letters/        LaTeX cover-letter class + fonts (manual-use heritage)
 assets/mascot/        Pip
 ```
 
+## Roadmap
+
+- **Alternative model providers** (Qwen, Gemini, other OpenAI-compatible APIs): the agent layer is built on the Claude Agent SDK, which speaks the Anthropic API only. The planned route is an optional local translation proxy (LiteLLM-style) the app points `ANTHROPIC_BASE_URL` at, with bring-your-own API keys stored in the OS keychain — useful as a fallback when Claude usage limits are exhausted. Tool-calling fidelity varies by model, so approval-gated agent flows will need per-provider validation before this ships.
+
 ## Acknowledgements
 
 - This project grew out of [Mads Lorentzen's ai-job-search](https://github.com/MadsLorentzen/ai-job-search) — a CLAUDE.md-driven job-application framework for Claude Code. The desktop app reimplements that workflow as a standalone application.

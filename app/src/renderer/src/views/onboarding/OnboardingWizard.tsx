@@ -170,7 +170,7 @@ export default function OnboardingWizard(): JSX.Element {
                 {i < stepIndex[step] && <Check size={10} className="mr-0.5 inline" />}
                 {l}
               </span>
-              {i < labels.length - 1 && <span className="text-gray-700">·</span>}
+              {i < labels.length - 1 && <span className="text-gray-600">·</span>}
             </div>
           ))}
         </div>

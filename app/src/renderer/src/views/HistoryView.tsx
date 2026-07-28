@@ -106,7 +106,7 @@ function FilterDropdown({
               >
                 <span
                   className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border ${
-                    checked ? 'border-cyan-600 bg-cyan-950/60 text-cyan-300' : 'border-edge'
+                    checked ? 'border-cyan-700 bg-cyan-950/60 text-cyan-300' : 'border-edge'
                   }`}
                 >
                   {checked && <Check size={10} strokeWidth={3} aria-hidden="true" />}

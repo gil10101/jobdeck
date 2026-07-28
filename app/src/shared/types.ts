@@ -66,7 +66,6 @@ export interface ReportJson {
   resumePages: number
   coverLetterPages: number
   noEmDashes: string // 'confirmed'
-  cityjobsMessage: boolean
   fitNote: string
   problems: string[]
   files: Record<string, string>

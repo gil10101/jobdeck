@@ -79,7 +79,6 @@ Write `applications/{{SLUG}}/report.json` as VALID JSON (no fences):
   "resumePages": 1,
   "coverLetterPages": 1,
   "noEmDashes": "confirmed",
-  "cityjobsMessage": false,
   "fitNote": "<one line, honest, gaps named>",
   "problems": [],
   "keywordCoverage": [

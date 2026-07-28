@@ -434,7 +434,7 @@ function FolderSection({
 
   return (
     <div
-      className={`rounded-lg transition-shadow ${dragOver ? 'ring-2 ring-cyan-600' : ''}`}
+      className={`rounded-lg transition-shadow ${dragOver ? 'ring-2 ring-cyan-700' : ''}`}
       {...dropProps}
     >
       <div className="group flex items-center gap-1.5 py-1">
@@ -682,7 +682,7 @@ export default function IntakeView(): JSX.Element {
                     key={key}
                     className={`flex h-7 w-7 items-center justify-center rounded-md border ${
                       folderIconKey === key
-                        ? 'border-cyan-600 bg-cyan-950/50 text-cyan-300'
+                        ? 'border-cyan-700 bg-cyan-950/50 text-cyan-300'
                         : 'border-edge text-gray-400 hover:bg-panel2'
                     }`}
                     onClick={() => setFolderIconKey(key)}
