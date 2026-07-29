@@ -31,17 +31,24 @@ The workflow, end to end:
  workspace         review.               and adds a tracker row.  packs.
 ```
 
-Plus an **in-app AI assistant**: it answers questions about your runs, applications, settings, and profile through a locked-down tool set, and takes a small number of actions — starting a scout, adding a profile entry, repairing a job-board CLI — each behind an explicit Approve/Deny card.
+Plus an **in-app AI assistant**: it answers questions about your runs, applications, settings, profile, and synced email through a locked-down tool set, and takes a small number of actions — starting a scout, rebuilding a dead run, editing your profile, repairing a job-board CLI — each behind an explicit Approve/Deny card.
 
 ## Features
 
 - **Onboarding wizard** — point it at your existing résumé/LinkedIn export; an agent extracts a structured profile (identity, education, experience, projects, skills, search criteria) and surfaces what it couldn't determine as questions. You review and edit everything in a structured editor before it's saved to `profile.json`.
-- **Scout runs** — an agent searches the enabled job boards (personalized jobright feed, LinkedIn public listings, freehire) plus the open web, applies your hard filters (role, salary band, location tiers, company size, recency, deal-breakers), and writes fit-scored candidates with honest gap notes. Candidates land in a review queue — accept one to build an application, or reject it.
-- **Build runs** — for each accepted posting, an agent drafts a tailored one-page résumé and cover letter in LaTeX from your master documents, compiles them (tectonic / pdflatex / xelatex / lualatex, auto-detected with a Settings override), iterates until both are exactly one page, extracts the PDF text layer to verify what an ATS parser actually sees (literal contact details, sane reading order, keyword coverage without stuffing), pre-fills common application-form answers, and adds a tracker row. Fabricating skills or experience is prohibited at the prompt level; gaps stay visible.
-- **Tracker** — every application as a row with status, salary, location, links to the generated documents, and a cached Glassdoor rating per company (fetched automatically for new companies).
+- **Scout runs** — an agent searches the enabled job boards (personalized jobright feed, LinkedIn public listings, freehire) plus the open web, applies your hard filters (role, salary band, location tiers, company size, recency, deal-breakers), and writes fit-scored candidates with honest gap notes. Candidates land in a review queue — accept one to build an application, or reject it. Internships are tagged in the queue.
+- **Custom company boards** — add any company's Greenhouse, Lever, or Ashby board by URL; the app prefetches its openings itself (exact-host allowlist, sanitized rows) and hands them to scouts as data.
+- **Scout history** — every past scout with what it kept and what it excluded (with the reason per posting), rerunnable with the original instructions, plus a composer that turns structured filter picks (sources, work model, salary range, and more) into the next scout's instructions.
+- **Intake** — the build queue. Paste a posting, drop screenshots, drag in a `.txt`, or paste just a URL — the app extracts the posting from the page's structured data. Organize items into folders with icons, drag-and-drop between them, build one or build all, and open a details slide-over per item.
+- **Build runs** — for each accepted posting, an agent drafts a tailored one-page résumé and cover letter in LaTeX from your master documents, compiles them (tectonic / pdflatex / xelatex / lualatex, auto-detected with a Settings override), iterates until both are exactly one page, extracts the PDF text layer to verify what an ATS parser actually sees (literal contact details, sane reading order, keyword coverage without stuffing), pre-fills common application-form answers, and adds a tracker row. Fabricating skills or experience is prohibited at the prompt level; gaps stay visible. Failed or cancelled builds are rebuildable in one click with their original input.
+- **Tracker** — every application as a row with status, salary, location, quick-open posting links, links to the generated documents, and a cached Glassdoor rating per company (fetched automatically for new companies).
+- **Per-application chat** — each application's detail view has a revision chat whose agent works directly inside that application's folder (and nowhere else): "tighten the summary", "recompile", "the form asks X — draft an answer". Document edits apply immediately and recompile to exactly one page; new Q&A answers are drafted in chat first and only appended after you approve.
 - **Apply view** — the posting's site embedded next to your pre-filled answers, with an experimental type-into-forms helper. Submission stays a human step by design.
 - **Interview runs** — stage-specific prep from the exact documents the interviewer read, mapped to your profile's stories.
-- **Assistant panel** — streaming chat with conversation history, session resume across restarts, per-reply model picker, a context-usage donut, and long-term memory notes. Read tools are free; every state-changing action requires your approval in the UI.
+- **Email** — connect Gmail read-only with your own OAuth client (paste the ID or upload the client JSON). The app polls for job-search mail, classifies it (assessment, interview, offer, rejection, confirmation, recruiter — including by ATS/assessment sender domains), and suggests tracker status updates you apply or dismiss (optional auto-apply for status flips). Job, Primary, and All inbox filters plus your own layer: star, hide (hidden means hidden everywhere, including from the assistant), and tags with inline creation. Links in bodies are clickable.
+- **Browser** — an embedded browser with tabs, split view (two independent panes, each with its own toolbar and history sidebar), bookmarks, and browsing history. Logins are shared with the Apply view. The **Build button** turns the listing you are looking at into a queued build — the page you see is parsed for its posting, filed into Intake, and sent through the normal build pipeline without copy-paste.
+- **Assistant panel** — streaming chat with conversation history, session resume across restarts, per-reply model picker, a context-usage donut, long-term memory notes, and a draggable expanded window. It can search your synced email (read-only), diagnose scout/board failures, start scouts, rebuild dead builds, and edit your profile through natural language — every state-changing action behind an Approve/Deny card.
+- **Who I am** — one tab showing everything the agents know about you: the full profile, master-résumé context, and knowledge base, with an in-tab section editor. The knowledge base holds background-only material (transcripts, notes, files) agents may use for judgment and answers but never place on a résumé or cover letter.
 - **Runs view** — a live timeline for every agent run: each tool call, streamed text, errors, and end-of-run context usage. The exact prompt each run received is saved to disk for audit.
 - **Library** — browse and preview everything the app has generated in your workspace.
 
@@ -51,8 +58,9 @@ Plus an **in-app AI assistant**: it answers questions about your runs, applicati
 ┌────────────────────────── Electron ──────────────────────────┐
 │                                                              │
 │  renderer (React + zustand + Tailwind)                       │
-│    views: Tracker · Scout · Intake · Runs · Library ·        │
-│           Settings · Apply · Onboarding · Assistant panel    │
+│    views: Tracker · Scout · History · Intake · Runs ·        │
+│           Email · Browser · Library · Who I am · Settings ·  │
+│           Apply · Onboarding · Assistant + detail chats      │
 │                        │ typed IPC (invoke + push)           │
 │  preload: thin typed bridge, contextIsolation on             │
 │                        │                                     │
@@ -60,11 +68,14 @@ Plus an **in-app AI assistant**: it answers questions about your runs, applicati
 │    AgentRunner ── one-shot agent runs (scout/build/          │
 │    │              interview/onboard) via Agent SDK query()   │
 │    AssistantSession ── streaming chat session with approval  │
-│    │                   bridge and SDK session resume         │
+│    │                   bridge and SDK session resume; reused │
+│    │                   by per-application detail chats       │
 │    stores ── tracker.json · profile.json · settings ·        │
 │    │         runs · conversations (all plain files)          │
 │    boards ── job-board CLI health, install, credentials,     │
-│              app-side jobright feed prefetch                 │
+│    │         app-side jobright feed + custom-board prefetch  │
+│    email ── Gmail OAuth (PKCE loopback), poll sync,          │
+│             classification, tracker suggestions              │
 └──────────────┬───────────────────────────┬───────────────────┘
                │                           │
         workspace folder             Claude Agent SDK
@@ -105,7 +116,7 @@ First launch opens the onboarding wizard:
 2. **Add your source material** — upload your current résumé/CV (PDF), paste text, or both.
 3. **Review the extracted profile** — answer the gaps the extractor flagged, adjust anything in the structured editor, save.
 
-Then configure **Settings → Job boards** (jobright credentials if you use it; LinkedIn and freehire need none) and run your first scout from the Scout view.
+Then configure **Settings → Job boards** (jobright credentials if you use it; LinkedIn and freehire need none) and run your first scout from the Scout view. Optionally connect Gmail under **Settings → Email** with your own Google OAuth client to get inbox classification and tracker status suggestions.
 
 A starter master-résumé template lives at `cv/main_example.tex` — a plain-`article`, single-column, ATS-safe one-pager. Drop your filled-in version into your workspace's `master/` folder and build runs will tailor from it; without one, the build agent constructs the layout from the same spec.
 
@@ -114,15 +125,17 @@ A starter master-résumé template lives at `cv/main_example.tex` — a plain-`a
 Everything lives in **Settings**:
 
 - **Agent runs** — model override (aliases or pinned versions), max turns per run, concurrent runs, live text streaming.
-- **Job boards** — per-board enable toggles, install status with one-click repair, jobright credentials (keychain-encrypted) and connection test, bun runtime detection/install, Glassdoor rating backfill.
-- **Candidate profile** — the structured profile editor, and profile refinement runs.
+- **Job boards** — per-board enable toggles, install status with one-click repair, jobright credentials (keychain-encrypted) and connection test, custom Greenhouse/Lever/Ashby company boards, bun runtime detection/install, Glassdoor rating backfill.
+- **Email (Gmail)** — bring your own Google OAuth client (paste the client ID/secret or upload the downloaded JSON), sign in read-only, set the poll interval, and choose whether status suggestions auto-apply.
+- **Candidate profile** — the structured profile editor, profile refinement runs, master-résumé context, and the knowledge base.
 - **Workflow** — folder renaming on submit, the experimental apply-form typing helper.
-- **Appearance** — dark/light theme.
+- **Appearance** — dark/light theme, sidebar tab toggles, draggable panel dividers.
 
 ## Data & privacy
 
 - **Local-first**: your profile, applications, generated documents, run transcripts, and assistant conversations are plain files in your chosen workspace folder. The app phones nothing home.
-- **What leaves your machine**: agent runs send their prompts (which include relevant profile data) to Anthropic through your own Claude login, exactly like using Claude Code directly; scout runs and the rating lookup query the job boards / search from your IP.
+- **What leaves your machine**: agent runs send their prompts (which include relevant profile data) to Anthropic through your own Claude login, exactly like using Claude Code directly; scout runs and the rating lookup query the job boards / search from your IP; the email feature talks directly to Google's Gmail API with your own OAuth client.
+- **Email stays yours**: Gmail access is read-only scope through an OAuth client you create; the refresh token and client secret are encrypted with the OS keychain, message headers are cached locally with owner-only file permissions, and signing out wipes the cache. Email content is treated as untrusted third-party data everywhere agents can see it.
 - **Job-board access is personal-use**: the CLIs use your own accounts and public endpoints, deliberately rate-limited to human-scale traffic. Keep volume low; respect each site's terms.
 
 ## Repository layout
