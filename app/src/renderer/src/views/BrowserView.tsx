@@ -4,9 +4,11 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  Columns2,
   Globe,
   MoreHorizontal,
   Play,
+  Plus,
   RefreshCw,
   Star,
   Trash2,
@@ -16,10 +18,11 @@ import type { WebviewElement } from '../types.d'
 import { call } from '../api'
 import { useApp } from '../store'
 
-// Last visited URL survives tab switches and renderer reloads without a store
-// slice; cleared when the app quits. Bookmarks and history are browser-local
-// convenience data, so they live in localStorage rather than the main store.
-const LAST_URL_KEY = 'browser.lastUrl'
+// Tabs (id + last URL + layout) survive renderer reloads via sessionStorage;
+// cleared when the app quits. Bookmarks and browsing history are shared across
+// all panes and persist in localStorage as browser-local convenience data.
+const LAST_URL_KEY = 'browser.lastUrl' // pre-tabs key, read once as migration
+const TABS_KEY = 'browser.tabs'
 const BOOKMARKS_KEY = 'browser.bookmarks'
 const HISTORY_KEY = 'browser.history'
 const BOOKMARK_CAP = 100
@@ -29,6 +32,16 @@ interface SavedLink {
   url: string
   title: string
   at: string
+}
+
+interface TabMeta {
+  id: string
+  url: string
+  title: string
+}
+
+function newTabMeta(url = ''): TabMeta {
+  return { id: crypto.randomUUID().slice(0, 8), url, title: '' }
 }
 
 function loadLinks(key: string): SavedLink[] {
@@ -49,6 +62,36 @@ function saveLinks(key: string, links: SavedLink[]): void {
   }
 }
 
+function restoreLayout(): { tabs: TabMeta[]; visible: string[]; focused: string } {
+  try {
+    const raw = sessionStorage.getItem(TABS_KEY)
+    if (raw) {
+      const p = JSON.parse(raw) as { tabs?: unknown; visible?: unknown; focused?: unknown }
+      const tabs = (Array.isArray(p.tabs) ? p.tabs : [])
+        .filter((t): t is TabMeta => typeof (t as TabMeta)?.id === 'string')
+        .map((t) => ({
+          id: t.id,
+          url: typeof t.url === 'string' ? t.url : '',
+          title: typeof t.title === 'string' ? t.title : ''
+        }))
+      if (tabs.length) {
+        const ids = new Set(tabs.map((t) => t.id))
+        let visible = (Array.isArray(p.visible) ? p.visible : [])
+          .filter((v): v is string => typeof v === 'string' && ids.has(v))
+          .slice(0, 2)
+        if (!visible.length) visible = [tabs[0].id]
+        const focused =
+          typeof p.focused === 'string' && visible.includes(p.focused) ? p.focused : visible[0]
+        return { tabs, visible, focused }
+      }
+    }
+  } catch {
+    /* corrupt layout — start fresh below */
+  }
+  const first = newTabMeta(sessionStorage.getItem(LAST_URL_KEY) ?? '')
+  return { tabs: [first], visible: [first.id], focused: first.id }
+}
+
 function hostOf(url: string): string {
   try {
     return new URL(url).hostname
@@ -61,7 +104,9 @@ function hostOf(url: string): string {
  *  CSP allows); falls back to a globe glyph when the site has none. */
 function Favicon({ url }: { url: string }): JSX.Element {
   const [failed, setFailed] = useState(false)
-  if (failed) return <Globe size={14} className="shrink-0 text-gray-500" />
+  if (failed || !/^https?:/i.test(url)) {
+    return <Globe size={14} className="shrink-0 text-gray-500" />
+  }
   return (
     <img
       src={`https://icons.duckduckgo.com/ip3/${hostOf(url)}.ico`}
@@ -95,26 +140,56 @@ function LinkRow({
   )
 }
 
-/** Standalone in-app browser tab. Shares the Apply view's persist partition so
- *  one board/ATS login serves both surfaces. */
-export default function BrowserView(): JSX.Element {
+interface PaneProps {
+  initialUrl: string
+  visible: boolean
+  focused: boolean
+  split: boolean
+  /** 0 = left slot, 1 = right slot; drives CSS order (never DOM order — moving
+   *  a webview node in the DOM reloads its guest). */
+  slot: number
+  bookmarks: SavedLink[]
+  history: SavedLink[]
+  onFocus: () => void
+  onMeta: (patch: { url?: string; title?: string }) => void
+  onVisit: (url: string) => void
+  onRetitle: (url: string, title: string) => void
+  onToggleBookmark: (url: string, title: string) => void
+  onRemoveBookmark: (url: string) => void
+  onClearHistory: () => void
+}
+
+/** One browser pane: toolbar (back/forward/reload, URL + bookmark star, Build,
+ *  overflow menu), the webview, its own history sidebar, and the bookmarks
+ *  blank state. Stays mounted while hidden so the guest keeps its history. */
+function BrowserPane({
+  initialUrl,
+  visible,
+  focused,
+  split,
+  slot,
+  bookmarks,
+  history,
+  onFocus,
+  onMeta,
+  onVisit,
+  onRetitle,
+  onToggleBookmark,
+  onRemoveBookmark,
+  onClearHistory
+}: PaneProps): JSX.Element {
   const toast = useApp((s) => s.toast)
   const webviewRef = useRef<WebviewElement | null>(null)
-  const [src, setSrc] = useState(() => sessionStorage.getItem(LAST_URL_KEY) ?? '')
-  const [urlInput, setUrlInput] = useState(src)
-  const [currentUrl, setCurrentUrl] = useState(src)
+  const [src, setSrc] = useState(initialUrl)
+  const [urlInput, setUrlInput] = useState(initialUrl)
+  const [currentUrl, setCurrentUrl] = useState(initialUrl)
   const [canBack, setCanBack] = useState(false)
   const [canFwd, setCanFwd] = useState(false)
   const [building, setBuilding] = useState(false)
   const [pageTitle, setPageTitle] = useState('')
-  const [bookmarks, setBookmarks] = useState<SavedLink[]>(() => loadLinks(BOOKMARKS_KEY))
-  const [history, setHistory] = useState<SavedLink[]>(() => loadLinks(HISTORY_KEY))
   const [menuOpen, setMenuOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
-
-  useEffect(() => saveLinks(BOOKMARKS_KEY, bookmarks), [bookmarks])
-  useEffect(() => saveLinks(HISTORY_KEY, history), [history])
 
   useEffect(() => {
     const wv = webviewRef.current
@@ -127,31 +202,22 @@ export default function BrowserView(): JSX.Element {
         setCanBack(wv.canGoBack())
         setCanFwd(wv.canGoForward())
         if (/^https?:/i.test(u)) {
-          sessionStorage.setItem(LAST_URL_KEY, u)
-          // Consecutive-dedupe: finish-load re-fires for the same URL.
-          setHistory((h) =>
-            h[0]?.url === u
-              ? h
-              : [{ url: u, title: '', at: new Date().toISOString() }, ...h].slice(0, HISTORY_CAP)
-          )
+          onMeta({ url: u })
+          onVisit(u)
         }
       } catch {
         /* webview not ready */
       }
     }
-    // Titles arrive after navigation — retitle the newest matching entry.
+    // Titles arrive after navigation — retitle the matching history entry.
     const onTitle = (e: Event): void => {
       const title = (e as unknown as { title?: string }).title ?? ''
       setPageTitle(title)
       if (!title) return
       try {
         const u = wv.getURL()
-        setHistory((h) => {
-          if (!h.length || h[0].url !== u || h[0].title === title) return h
-          const next = [...h]
-          next[0] = { ...next[0], title }
-          return next
-        })
+        onMeta({ title })
+        onRetitle(u, title)
       } catch {
         /* webview not ready */
       }
@@ -172,6 +238,9 @@ export default function BrowserView(): JSX.Element {
       )
     }
     const onGone = (): void => setLoadError('The page crashed — reload to try again.')
+    // Clicks inside the guest never bubble to our DOM; the webview's focus
+    // event is the only signal that the user is working in this pane.
+    const onGuestFocus = (): void => onFocus()
     wv.addEventListener('did-navigate', onNav)
     wv.addEventListener('did-navigate-in-page', onNav)
     wv.addEventListener('did-finish-load', onNav)
@@ -179,6 +248,7 @@ export default function BrowserView(): JSX.Element {
     wv.addEventListener('did-start-loading', onStart)
     wv.addEventListener('did-fail-load', onFail)
     wv.addEventListener('render-process-gone', onGone)
+    wv.addEventListener('focus', onGuestFocus)
     return () => {
       wv.removeEventListener('did-navigate', onNav)
       wv.removeEventListener('did-navigate-in-page', onNav)
@@ -187,13 +257,15 @@ export default function BrowserView(): JSX.Element {
       wv.removeEventListener('did-start-loading', onStart)
       wv.removeEventListener('did-fail-load', onFail)
       wv.removeEventListener('render-process-gone', onGone)
+      wv.removeEventListener('focus', onGuestFocus)
     }
-  }, [src])
+    // Handlers close over stable setters plus parent callbacks kept fresh via
+    // the deps below; src gates on webview mount.
+  }, [src, onMeta, onVisit, onRetitle, onFocus])
 
   const navigateTo = (u: string): void => {
     setUrlInput(u)
     setCurrentUrl(u)
-    sessionStorage.setItem(LAST_URL_KEY, u)
     // First navigation mounts the webview via src; after that loadURL keeps
     // the element stable so src changes never restart the guest.
     if (webviewRef.current) void webviewRef.current.loadURL(u).catch(() => undefined)
@@ -208,17 +280,6 @@ export default function BrowserView(): JSX.Element {
   }
 
   const bookmarked = bookmarks.some((b) => b.url === currentUrl)
-  const toggleBookmark = (): void => {
-    if (!currentUrl) return
-    setBookmarks((bs) =>
-      bs.some((b) => b.url === currentUrl)
-        ? bs.filter((b) => b.url !== currentUrl)
-        : [
-            { url: currentUrl, title: pageTitle || hostOf(currentUrl), at: new Date().toISOString() },
-            ...bs
-          ].slice(0, BOOKMARK_CAP)
-    )
-  }
 
   // One-click build from the open listing: the guest page's rendered DOM is
   // handed to the main process, which extracts the posting, files an intake
@@ -246,7 +307,17 @@ export default function BrowserView(): JSX.Element {
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div
+      className={
+        visible
+          ? `flex min-h-0 min-w-0 flex-1 basis-0 flex-col ${slot === 1 ? 'border-l border-edge' : ''} ${
+              split && focused ? 'ring-1 ring-inset ring-cyan-800' : ''
+            }`
+          : 'hidden'
+      }
+      style={{ order: slot }}
+      onMouseDownCapture={onFocus}
+    >
       <div className="flex items-center gap-2 border-b border-edge bg-panel px-3 py-2">
         <button className="btn px-2" disabled={!canBack} onClick={() => webviewRef.current?.goBack()}>
           <ChevronLeft size={14} />
@@ -269,7 +340,7 @@ export default function BrowserView(): JSX.Element {
             className="absolute right-1 top-1/2 -translate-y-1/2 p-1 text-gray-500 hover:text-amber-300 disabled:opacity-30"
             disabled={!currentUrl}
             title={bookmarked ? 'Remove bookmark' : 'Bookmark this page'}
-            onClick={toggleBookmark}
+            onClick={() => onToggleBookmark(currentUrl, pageTitle || hostOf(currentUrl))}
           >
             <Star size={13} className={bookmarked ? 'fill-amber-300 text-amber-300' : ''} />
           </button>
@@ -376,7 +447,7 @@ export default function BrowserView(): JSX.Element {
                       <button
                         className="p-1 opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-100"
                         title="Remove bookmark"
-                        onClick={() => setBookmarks((bs) => bs.filter((x) => x.url !== b.url))}
+                        onClick={() => onRemoveBookmark(b.url)}
                       >
                         <Star size={13} className="fill-amber-300 text-amber-300" />
                       </button>
@@ -389,14 +460,14 @@ export default function BrowserView(): JSX.Element {
         )}
 
         {historyOpen && (
-          <div className="absolute bottom-0 right-0 top-0 z-10 flex w-80 flex-col border-l border-edge bg-panel">
+          <div className="absolute bottom-0 right-0 top-0 z-10 flex w-80 max-w-full flex-col border-l border-edge bg-panel">
             <div className="flex items-center justify-between border-b border-edge px-3 py-2">
               <span className="text-xs font-semibold text-gray-100">History</span>
               <div className="flex items-center gap-1">
                 <button
                   className="p-1 text-gray-500 hover:text-red-300"
                   title="Clear history"
-                  onClick={() => setHistory([])}
+                  onClick={onClearHistory}
                 >
                   <Trash2 size={13} />
                 </button>
@@ -419,6 +490,184 @@ export default function BrowserView(): JSX.Element {
             </div>
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+/** Browser workspace: any number of tabs, one or two visible at a time
+ *  (split view). Every tab's pane stays mounted — hiding uses display:none so
+ *  webview guests keep their navigation history and page state. */
+export default function BrowserView(): JSX.Element {
+  const [init] = useState(restoreLayout)
+  const [tabs, setTabs] = useState<TabMeta[]>(init.tabs)
+  const [visible, setVisible] = useState<string[]>(init.visible)
+  const [focused, setFocused] = useState(init.focused)
+  const [bookmarks, setBookmarks] = useState<SavedLink[]>(() => loadLinks(BOOKMARKS_KEY))
+  const [history, setHistory] = useState<SavedLink[]>(() => loadLinks(HISTORY_KEY))
+
+  useEffect(() => saveLinks(BOOKMARKS_KEY, bookmarks), [bookmarks])
+  useEffect(() => saveLinks(HISTORY_KEY, history), [history])
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(TABS_KEY, JSON.stringify({ tabs, visible, focused }))
+    } catch {
+      /* layout just doesn't survive a reload */
+    }
+  }, [tabs, visible, focused])
+
+  const split = visible.length === 2
+
+  const updateMeta = (id: string, patch: { url?: string; title?: string }): void => {
+    setTabs((ts) => ts.map((t) => (t.id === id ? { ...t, ...patch } : t)))
+  }
+
+  const recordVisit = (url: string): void => {
+    setHistory((h) =>
+      h[0]?.url === url
+        ? h
+        : [{ url, title: '', at: new Date().toISOString() }, ...h].slice(0, HISTORY_CAP)
+    )
+  }
+
+  const retitleVisit = (url: string, title: string): void => {
+    setHistory((h) => {
+      const i = h.findIndex((e) => e.url === url)
+      if (i < 0 || h[i].title === title) return h
+      const next = [...h]
+      next[i] = { ...next[i], title }
+      return next
+    })
+  }
+
+  const toggleBookmark = (url: string, title: string): void => {
+    if (!url) return
+    setBookmarks((bs) =>
+      bs.some((b) => b.url === url)
+        ? bs.filter((b) => b.url !== url)
+        : [{ url, title, at: new Date().toISOString() }, ...bs].slice(0, BOOKMARK_CAP)
+    )
+  }
+
+  const selectTab = (id: string): void => {
+    if (visible.includes(id)) {
+      setFocused(id)
+      return
+    }
+    // Not on screen: the focused slot switches to it, split partner stays.
+    setVisible(visible.map((x) => (x === focused ? id : x)))
+    setFocused(id)
+  }
+
+  const newTab = (): void => {
+    const t = newTabMeta()
+    setTabs([...tabs, t])
+    setVisible(visible.map((x) => (x === focused ? t.id : x)))
+    setFocused(t.id)
+  }
+
+  const closeTab = (id: string): void => {
+    const remaining = tabs.filter((t) => t.id !== id)
+    if (!remaining.length) {
+      const fresh = newTabMeta()
+      setTabs([fresh])
+      setVisible([fresh.id])
+      setFocused(fresh.id)
+      return
+    }
+    let nextVisible = visible.filter((x) => x !== id)
+    // Closing the only visible tab: show the first remaining one instead.
+    if (!nextVisible.length) nextVisible = [remaining[0].id]
+    setTabs(remaining)
+    setVisible(nextVisible)
+    setFocused(nextVisible.includes(focused) ? focused : nextVisible[0])
+  }
+
+  const toggleSplit = (): void => {
+    if (split) {
+      setVisible([focused])
+      return
+    }
+    const other = tabs.find((t) => !visible.includes(t.id))
+    if (other) {
+      setVisible([...visible, other.id])
+    } else {
+      const t = newTabMeta()
+      setTabs([...tabs, t])
+      setVisible([...visible, t.id])
+    }
+  }
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-center gap-1 border-b border-edge bg-panel px-2 py-1.5">
+        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+          {tabs.map((t) => {
+            const isVisible = visible.includes(t.id)
+            const isFocused = focused === t.id
+            return (
+              <div
+                key={t.id}
+                className={`group flex max-w-[180px] shrink-0 cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 ${
+                  isFocused
+                    ? 'border-cyan-700 bg-cyan-950/40 text-cyan-200'
+                    : isVisible
+                      ? 'border-edge bg-panel2 text-gray-300'
+                      : 'border-edge text-gray-500 hover:text-gray-300'
+                }`}
+                title={t.url || 'New tab'}
+                onClick={() => selectTab(t.id)}
+              >
+                <Favicon url={t.url} />
+                <span className="min-w-0 truncate text-[11px]">
+                  {t.title || (t.url ? hostOf(t.url) : 'New tab')}
+                </span>
+                <button
+                  className="shrink-0 opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-100"
+                  title="Close tab"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    closeTab(t.id)
+                  }}
+                >
+                  <X size={11} />
+                </button>
+              </div>
+            )
+          })}
+        </div>
+        <button className="btn px-2" title="New tab" onClick={newTab}>
+          <Plus size={13} />
+        </button>
+        <button
+          className={`btn px-2 ${split ? 'text-cyan-300' : ''}`}
+          title={split ? 'Close split view' : 'Split view'}
+          onClick={toggleSplit}
+        >
+          <Columns2 size={13} />
+        </button>
+      </div>
+
+      <div className="flex min-h-0 flex-1">
+        {tabs.map((t) => (
+          <BrowserPane
+            key={t.id}
+            initialUrl={t.url}
+            visible={visible.includes(t.id)}
+            focused={focused === t.id}
+            split={split}
+            slot={Math.max(0, visible.indexOf(t.id))}
+            bookmarks={bookmarks}
+            history={history}
+            onFocus={() => setFocused(t.id)}
+            onMeta={(patch) => updateMeta(t.id, patch)}
+            onVisit={recordVisit}
+            onRetitle={retitleVisit}
+            onToggleBookmark={toggleBookmark}
+            onRemoveBookmark={(url) => setBookmarks((bs) => bs.filter((b) => b.url !== url))}
+            onClearHistory={() => setHistory([])}
+          />
+        ))}
       </div>
     </div>
   )

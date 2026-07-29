@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import Sidebar from './components/Sidebar'
 import ToastHost from './components/Toast'
 import ApplyView from './views/ApplyView'
@@ -19,6 +20,10 @@ import { useApp } from './store'
 export default function App(): JSX.Element {
   const route = useApp((s) => s.route)
   const config = useApp((s) => s.config)
+  // The browser stays mounted once visited: unmounting destroys its webview
+  // guests, and with them per-tab navigation history and page state.
+  const browserVisited = useRef(false)
+  if (route.view === 'browser') browserVisited.current = true
 
   // First-run gate: setup wizard until a workspace exists AND onboarding finished.
   if (config && (!config.workspacePath || !config.onboardedAt)) {
@@ -38,7 +43,11 @@ export default function App(): JSX.Element {
         {route.view === 'scout' && <ScoutView />}
         {route.view === 'intake' && <IntakeView />}
         {route.view === 'history' && <HistoryView />}
-        {route.view === 'browser' && <BrowserView />}
+        {browserVisited.current && (
+          <div className={route.view === 'browser' ? 'h-full' : 'hidden'}>
+            <BrowserView />
+          </div>
+        )}
         {route.view === 'email' && <EmailView />}
         {route.view === 'runs' && <RunsView runId={route.runId} />}
         {route.view === 'library' && <LibraryView />}
