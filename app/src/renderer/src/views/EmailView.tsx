@@ -1,5 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, Eye, EyeOff, Mail, RefreshCw, Settings, Star, Tag, X } from 'lucide-react'
+import {
+  Check,
+  Copy,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  Mail,
+  RefreshCw,
+  Reply,
+  Settings,
+  Sparkles,
+  Star,
+  Tag,
+  X
+} from 'lucide-react'
 import type { EmailClassification, EmailFilter, EmailMessage, EmailStatus } from '@shared/types'
 import { call, onPush } from '../api'
 import { useApp } from '../store'
@@ -167,6 +181,13 @@ export default function EmailView(): JSX.Element {
   const [body, setBody] = useState<string | null>(null)
   const [bodyErr, setBodyErr] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  // AI reply composer for the selected message. Nothing is ever sent — the
+  // draft is copied or opened in a Gmail compose window (read-only scope).
+  const [replyOpen, setReplyOpen] = useState(false)
+  const [replyDraft, setReplyDraft] = useState('')
+  const [replyMeta, setReplyMeta] = useState<{ to: string; subject: string } | null>(null)
+  const [replyInstructions, setReplyInstructions] = useState('')
+  const [replyLoading, setReplyLoading] = useState(false)
   // Inline banner for a failed refresh whose error carries 403 guidance —
   // toasts vanish, but this failure needs the console link to stay visible.
   const [syncHint, setSyncHint] = useState<string | null>(null)
@@ -203,6 +224,11 @@ export default function EmailView(): JSX.Element {
   useEffect(() => {
     setBody(null)
     setBodyErr(null)
+    // A new message clears any open reply composer from the previous one.
+    setReplyOpen(false)
+    setReplyDraft('')
+    setReplyMeta(null)
+    setReplyInstructions('')
     if (!selectedId) return
     let alive = true
     void call('email:getBody', { id: selectedId })
@@ -280,6 +306,43 @@ export default function EmailView(): JSX.Element {
     } catch (err) {
       toast(String(err), 'error')
     }
+  }
+
+  const generateReply = async (): Promise<void> => {
+    if (!selectedId) return
+    setReplyOpen(true)
+    setReplyLoading(true)
+    try {
+      const res = await call('email:draftReply', {
+        id: selectedId,
+        instructions: replyInstructions.trim() || undefined
+      })
+      setReplyDraft(res.draft)
+      setReplyMeta({ to: res.to, subject: res.subject })
+    } catch (err) {
+      toast(String(err), 'error')
+    } finally {
+      setReplyLoading(false)
+    }
+  }
+
+  const copyReply = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(replyDraft)
+      toast('Reply copied', 'success')
+    } catch {
+      toast('Could not copy — select and copy manually', 'error')
+    }
+  }
+
+  const composeInGmail = (): void => {
+    if (!replyMeta) return
+    const url =
+      'https://mail.google.com/mail/?view=cm&fs=1' +
+      `&to=${encodeURIComponent(replyMeta.to)}` +
+      `&su=${encodeURIComponent(replyMeta.subject)}` +
+      `&body=${encodeURIComponent(replyDraft)}`
+    void call('app:openExternal', { url }).catch((err) => toast(String(err), 'error'))
   }
 
   if (!status) {
@@ -520,6 +583,13 @@ export default function EmailView(): JSX.Element {
                   <h2 className="min-w-0 truncate text-sm font-semibold text-gray-100">
                     {selected.subject || '(no subject)'}
                   </h2>
+                  <button
+                    className="btn ml-auto shrink-0 px-2 py-0.5 text-[11px]"
+                    title="Draft an AI reply as you (nothing is sent — you copy it or open Gmail)"
+                    onClick={() => void generateReply()}
+                  >
+                    <Reply size={12} className="mr-1 inline" /> Draft reply
+                  </button>
                 </div>
                 <div className="mt-1 text-[11px] text-gray-500">
                   {selected.from} · {new Date(selected.date).toLocaleString()}
@@ -534,6 +604,71 @@ export default function EmailView(): JSX.Element {
                   <LinkifiedBody text={body} />
                 )}
               </div>
+
+              {replyOpen && (
+                <div className="shrink-0 border-t border-edge bg-panel">
+                  <div className="flex items-center gap-2 px-5 py-2">
+                    <Sparkles size={12} className="text-cyan-300" />
+                    <span className="text-xs font-semibold text-gray-200">AI reply draft</span>
+                    <span className="text-[10px] text-gray-500">
+                      read-only — nothing is sent; copy it or open Gmail
+                    </span>
+                    <button
+                      className="ml-auto p-1 text-gray-500 hover:text-gray-300"
+                      title="Close"
+                      onClick={() => setReplyOpen(false)}
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                  <div className="px-5 pb-3">
+                    {replyLoading && !replyDraft ? (
+                      <div className="flex items-center gap-2 py-6 text-xs text-gray-500">
+                        <RefreshCw size={12} className="animate-spin" /> Drafting a reply…
+                      </div>
+                    ) : (
+                      <textarea
+                        className="input h-40 w-full resize-y whitespace-pre-wrap font-sans text-[13px] leading-relaxed"
+                        value={replyDraft}
+                        onChange={(e) => setReplyDraft(e.target.value)}
+                        placeholder="The draft will appear here."
+                      />
+                    )}
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <input
+                        className="input min-w-0 flex-1 text-[11px]"
+                        placeholder="Tweak it — e.g. 'shorter', 'offer Tue/Wed afternoons', 'ask about the team'"
+                        value={replyInstructions}
+                        onChange={(e) => setReplyInstructions(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && !replyLoading && void generateReply()}
+                      />
+                      <button
+                        className="btn shrink-0 px-2 py-1 text-[11px]"
+                        disabled={replyLoading}
+                        onClick={() => void generateReply()}
+                      >
+                        <RefreshCw size={11} className={`mr-1 inline ${replyLoading ? 'animate-spin' : ''}`} />
+                        {replyDraft ? 'Regenerate' : 'Generate'}
+                      </button>
+                      <button
+                        className="btn shrink-0 px-2 py-1 text-[11px]"
+                        disabled={!replyDraft}
+                        onClick={() => void copyReply()}
+                      >
+                        <Copy size={11} className="mr-1 inline" /> Copy
+                      </button>
+                      <button
+                        className="btn btn-primary shrink-0 px-2 py-1 text-[11px]"
+                        disabled={!replyDraft || !replyMeta?.to}
+                        title="Open a Gmail compose window with this draft"
+                        onClick={composeInGmail}
+                      >
+                        <ExternalLink size={11} className="mr-1 inline" /> Open in Gmail
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </>
           ) : (
             <div className="flex flex-1 items-center justify-center text-sm text-gray-600">

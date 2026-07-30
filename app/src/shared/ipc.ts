@@ -191,6 +191,13 @@ export interface IpcInvokeContract {
   'email:list': { req: { filter: EmailFilter }; res: EmailMessage[] }
   /** Body text fetched live from Gmail (never cached on disk). */
   'email:getBody': { req: { id: string }; res: { text: string } }
+  /** AI-draft a reply to one message as the candidate. Read-only Gmail scope
+   *  means nothing is sent — the draft is returned for the user to copy or
+   *  open in a Gmail compose window. */
+  'email:draftReply': {
+    req: { id: string; instructions?: string }
+    res: { draft: string; to: string; subject: string }
+  }
   'email:refresh': { req: void; res: EmailStatus }
   'email:applySuggestion': { req: { emailId: string }; res: void }
   'email:dismissSuggestion': { req: { emailId: string }; res: void }
@@ -326,6 +333,7 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'email:signOut',
   'email:list',
   'email:getBody',
+  'email:draftReply',
   'email:refresh',
   'email:applySuggestion',
   'email:dismissSuggestion',

@@ -55,6 +55,7 @@ import {
   setGmailClientId
 } from './email/gmailAuth'
 import { getMessageBody } from './email/gmailClient'
+import { draftEmailReply } from './email/emailReply'
 import {
   clearEmailCache,
   createTag,
@@ -763,6 +764,9 @@ export function registerIpc(services: Services): void {
   })
   handle('email:list', ({ filter }) => listCachedMessages(filter))
   handle('email:getBody', async ({ id }) => ({ text: await getMessageBody(id) }))
+  handle('email:draftReply', ({ id, instructions }) =>
+    draftEmailReply(id, instructions, store.state.settings.model)
+  )
   handle('email:refresh', async () => {
     await emailSync.syncNow()
     return emailStatus()
