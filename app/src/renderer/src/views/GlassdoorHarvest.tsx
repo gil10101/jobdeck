@@ -38,19 +38,34 @@ const EXTRACTOR = `(function(){
         try { out.push(JSON.parse(t)); } catch(e){}
       }
     }
-    // Collect id -> jobLink (the job's tracking path) so the detail API can be
-    // called with the same queryString the Glassdoor frontend sends.
+    // Collect id -> jobLink so the detail API can be called with the same
+    // queryString the frontend sends. Two sources: (1) embedded payloads (older
+    // server-rendered pages), (2) the rendered result-card anchors — Glassdoor's
+    // current search page is a client-side SPA that embeds NO job JSON, so the
+    // DOM links are the only ids there, and the detail API returns 400 without a
+    // queryString, so the href is REQUIRED (verified against the live site).
     var links = {};
+    var setLink = function(id, link){
+      if (!/^[0-9]{6,}$/.test(String(id))) return;
+      id = String(id);
+      if (!(id in links) || (link && !links[id])) links[id] = String(link || '');
+    };
     (function collect(n,d){
       if (!n || typeof n !== 'object' || d > 8) return;
       var lid = n.jobListingId != null ? n.jobListingId : n.listingId;
-      if (lid != null && /^[0-9]+$/.test(String(lid))) {
-        var link = n.jobLink || (n.header && n.header.jobLink) || n.serpUrlForJobListing || '';
-        if (!(String(lid) in links) || (link && !links[String(lid)])) links[String(lid)] = String(link || '');
-      }
+      if (lid != null) setLink(lid, n.jobLink || (n.header && n.header.jobLink) || n.serpUrlForJobListing || '');
       for (var k in n) { try { collect(n[k], d+1); } catch(e){} }
     })(out, 0);
-    return JSON.stringify({ status: out.length ? 'ok' : 'empty', payloads: out, links: links });
+    try {
+      var anchors = document.querySelectorAll('a[href*="jobListingId="], a[href*="jl="], a[href*="/job-listing/"]');
+      for (var a=0; a<anchors.length; a++){
+        var h = anchors[a].getAttribute('href') || '';
+        var m = h.match(/[?&](?:jobListingId|jl)=([0-9]{6,})/) || h.match(/JV[^"']*?jl=([0-9]{6,})/);
+        if (m) setLink(m[1], h);
+      }
+    } catch(e){}
+    var idCount = 0; for (var kk in links) idCount++;
+    return JSON.stringify({ status: (out.length || idCount) ? 'ok' : 'empty', payloads: out, links: links });
   } catch(e) { return JSON.stringify({ status: 'error', message: String(e) }); }
 })()`
 
@@ -211,8 +226,16 @@ export default function GlassdoorHarvest({
           await sleep(SETTLE_MS)
           result = await extract()
         }
-        if (result.status === 'ok' && result.payloads?.length) {
-          addPayloads(result.payloads)
+        // The current search page is a client-side SPA — result cards render a
+        // beat after load, so an empty first pass gets one retry.
+        if (result.status === 'empty') {
+          await sleep(2500)
+          result = await extract()
+        }
+        if (result.status === 'ok') {
+          // Embedded payloads (older pages) feed rows directly; DOM-scraped ids
+          // (SPA pages) feed rows via the enrichment pass below.
+          if (result.payloads?.length) addPayloads(result.payloads)
           for (const [id, link] of Object.entries(result.links ?? {})) {
             if (!linkById.has(id) || (link && !linkById.get(id))) linkById.set(id, link)
           }
