@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   Check,
+  ChevronDown,
   Copy,
   ExternalLink,
   Eye,
   EyeOff,
+  ListFilter,
   Mail,
   RefreshCw,
   Reply,
+  Search,
   Settings,
   Sparkles,
   Star,
@@ -27,6 +30,7 @@ const CLASS_STYLE: Record<EmailClassification, string> = {
   recruiter: 'border-cyan-900 text-cyan-400',
   other: 'border-edge text-gray-500'
 }
+const ALL_CLASSES = Object.keys(CLASS_STYLE) as EmailClassification[]
 
 function relTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime()
@@ -168,6 +172,88 @@ function TagMenu({
   )
 }
 
+/** Multi-select classification filter. Edits a draft set; nothing takes effect
+ *  until Apply. Selecting all (or none) means "no filter" — every class shows. */
+function ClassFilterDropdown({
+  selected,
+  onApply
+}: {
+  selected: EmailClassification[]
+  onApply: (next: EmailClassification[]) => void
+}): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState<Set<EmailClassification>>(new Set(selected))
+  const active = selected.length > 0
+  const openMenu = (): void => {
+    setDraft(new Set(selected.length ? selected : ALL_CLASSES))
+    setOpen(true)
+  }
+  const toggle = (c: EmailClassification): void => {
+    const next = new Set(draft)
+    if (next.has(c)) next.delete(c)
+    else next.add(c)
+    setDraft(next)
+  }
+  const apply = (): void => {
+    onApply(draft.size === 0 || draft.size === ALL_CLASSES.length ? [] : [...draft])
+    setOpen(false)
+  }
+  return (
+    <div className="relative">
+      <button
+        className={`chip ${active ? 'border-cyan-700 bg-cyan-950/60 text-cyan-200' : ''}`}
+        title="Filter by type"
+        onClick={() => (open ? setOpen(false) : openMenu())}
+      >
+        <ListFilter size={9} aria-hidden="true" />
+        {active ? `Types (${selected.length})` : 'Types'}
+        <ChevronDown size={9} aria-hidden="true" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 z-50 mt-1 w-48 rounded-md border border-edge bg-panel2 shadow-xl">
+            <div className="flex items-center justify-between border-b border-edge px-2 py-1.5 text-[10px] text-gray-400">
+              <button className="hover:text-gray-200" onClick={() => setDraft(new Set(ALL_CLASSES))}>
+                Select all
+              </button>
+              <button className="hover:text-gray-200" onClick={() => setDraft(new Set())}>
+                Clear
+              </button>
+            </div>
+            <div className="max-h-56 overflow-auto py-1">
+              {ALL_CLASSES.map((c) => {
+                const checked = draft.has(c)
+                return (
+                  <button
+                    key={c}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-200 hover:bg-panel"
+                    onClick={() => toggle(c)}
+                  >
+                    <span
+                      className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border ${
+                        checked ? 'border-cyan-500 bg-cyan-950/60 text-cyan-300' : 'border-edge'
+                      }`}
+                    >
+                      {checked && <Check size={10} strokeWidth={3} aria-hidden="true" />}
+                    </span>
+                    <span className="capitalize">{c}</span>
+                  </button>
+                )
+              })}
+            </div>
+            <div className="border-t border-edge p-1.5">
+              <button className="btn btn-primary w-full py-1 text-[11px]" onClick={apply}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 export default function EmailView(): JSX.Element {
   const navigate = useApp((s) => s.navigate)
   const toast = useApp((s) => s.toast)
@@ -176,6 +262,8 @@ export default function EmailView(): JSX.Element {
   const [filter, setFilter] = useState<EmailFilter>('job')
   const [allTags, setAllTags] = useState<string[]>([])
   const [tagFilter, setTagFilter] = useState<string | null>(null)
+  const [classFilter, setClassFilter] = useState<EmailClassification[]>([])
+  const [search, setSearch] = useState('')
   const [tagMenuId, setTagMenuId] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [body, setBody] = useState<string | null>(null)
@@ -375,7 +463,14 @@ export default function EmailView(): JSX.Element {
   const assignedTags = [...new Set(messages.flatMap((m) => m.tags))].sort()
   const tagChips =
     tagFilter && !assignedTags.includes(tagFilter) ? [tagFilter, ...assignedTags] : assignedTags
-  const shown = tagFilter ? messages.filter((m) => m.tags.includes(tagFilter)) : messages
+  const q = search.trim().toLowerCase()
+  const shown = messages.filter((m) => {
+    if (tagFilter && !m.tags.includes(tagFilter)) return false
+    if (classFilter.length && !classFilter.includes(m.classification)) return false
+    if (q && !`${fromName(m.from)} ${m.subject} ${m.snippet}`.toLowerCase().includes(q)) return false
+    return true
+  })
+  const narrowed = q !== '' || classFilter.length > 0 || tagFilter !== null
 
   return (
     <div className="flex h-full flex-col">
@@ -396,6 +491,8 @@ export default function EmailView(): JSX.Element {
               {f.label}
             </button>
           ))}
+          <span className="mx-1 h-4 w-px bg-edge" aria-hidden="true" />
+          <ClassFilterDropdown selected={classFilter} onApply={setClassFilter} />
           {tagChips.length > 0 && <span className="mx-1 h-4 w-px bg-edge" aria-hidden="true" />}
           {tagChips.map((t) => (
             <button
@@ -468,9 +565,33 @@ export default function EmailView(): JSX.Element {
 
       <div className="flex min-h-0 flex-1">
         <div className="w-96 shrink-0 overflow-auto border-r border-edge bg-panel">
+          <div className="sticky top-0 z-10 border-b border-edge bg-panel p-2">
+            <div className="relative">
+              <Search
+                size={12}
+                className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-gray-500"
+                aria-hidden="true"
+              />
+              <input
+                className="input w-full px-7 text-[11px]"
+                placeholder="Search sender, subject, preview…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              {search && (
+                <button
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-gray-500 hover:text-gray-300"
+                  title="Clear search"
+                  onClick={() => setSearch('')}
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+          </div>
           {shown.length === 0 && (
             <div className="p-4 text-xs text-gray-600">
-              {tagFilter ? `No messages tagged "${tagFilter}" here.` : EMPTY_HINT[filter]}
+              {narrowed ? 'No messages match your search or filters.' : EMPTY_HINT[filter]}
             </div>
           )}
           {shown.map((m) => (
