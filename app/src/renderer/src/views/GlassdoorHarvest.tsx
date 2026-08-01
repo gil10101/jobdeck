@@ -38,30 +38,34 @@ const EXTRACTOR = `(function(){
         try { out.push(JSON.parse(t)); } catch(e){}
       }
     }
-    var ids = {};
+    // Collect id -> jobLink (the job's tracking path) so the detail API can be
+    // called with the same queryString the Glassdoor frontend sends.
+    var links = {};
     (function collect(n,d){
       if (!n || typeof n !== 'object' || d > 8) return;
       var lid = n.jobListingId != null ? n.jobListingId : n.listingId;
-      if (lid != null && /^[0-9]+$/.test(String(lid))) ids[String(lid)] = 1;
+      if (lid != null && /^[0-9]+$/.test(String(lid))) {
+        var link = n.jobLink || (n.header && n.header.jobLink) || n.serpUrlForJobListing || '';
+        if (!(String(lid) in links) || (link && !links[String(lid)])) links[String(lid)] = String(link || '');
+      }
       for (var k in n) { try { collect(n[k], d+1); } catch(e){} }
     })(out, 0);
-    return JSON.stringify({ status: out.length ? 'ok' : 'empty', payloads: out, ids: Object.keys(ids) });
+    return JSON.stringify({ status: out.length ? 'ok' : 'empty', payloads: out, links: links });
   } catch(e) { return JSON.stringify({ status: 'error', message: String(e) }); }
 })()`
 
 // Fetch one job's full detail JSON from the SAME origin the logged-in session is
 // on — Glassdoor's own frontend uses this endpoint, so replaying it in-page
 // inherits the cleared session and returns the denormalized posting (with the
-// description the search rows lack).
-function detailFetchJs(id: string): string {
+// description the search rows lack). Params mirror the real request the browser
+// makes (no CSRF header — it is a plain cookie'd GET): jobListingId, the job's
+// jobLink as queryString, pageTypeEnum, countryId.
+function detailFetchJs(id: string, jobLink: string): string {
+  const qs = jobLink ? `&queryString=${encodeURIComponent(jobLink)}` : ''
+  const url = `/job-listing/api/job-details?jobListingId=${id}&pageTypeEnum=SERP${qs}&countryId=1`
   return `(async function(){
     try {
-      var csrf = '';
-      try { var mt = document.querySelector('meta[name="gd-csrf-token"]'); if (mt) csrf = mt.content || ''; } catch(e){}
-      try { if (!csrf && window.__CSRF_TOKEN__) csrf = window.__CSRF_TOKEN__; } catch(e){}
-      var headers = { accept: 'application/json' };
-      if (csrf) headers['gd-csrf-token'] = csrf;
-      var r = await fetch('/job-listing/api/job-details?jobListingId=${id}', { headers: headers, credentials: 'include' });
+      var r = await fetch(${JSON.stringify(url)}, { credentials: 'include' });
       if (!r.ok) return JSON.stringify({ ok: false });
       var j = await r.json();
       return JSON.stringify({ ok: true, data: j });
@@ -140,7 +144,11 @@ export default function GlassdoorHarvest({
   const [manualUrl, setManualUrl] = useState('')
   const [capturing, setCapturing] = useState(false)
 
-  const extract = async (): Promise<{ status: string; payloads?: unknown[]; ids?: string[] }> => {
+  const extract = async (): Promise<{
+    status: string
+    payloads?: unknown[]
+    links?: Record<string, string>
+  }> => {
     const wv = webviewRef.current
     if (!wv) return { status: 'error' }
     try {
@@ -176,7 +184,7 @@ export default function GlassdoorHarvest({
       })
     const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
-    const idSet = new Set<string>()
+    const linkById = new Map<string, string>()
     const run = async (): Promise<void> => {
       await once('dom-ready', 3000) // let the <webview> attach
       for (let i = 0; i < targets.length && !cancelled; i++) {
@@ -205,7 +213,9 @@ export default function GlassdoorHarvest({
         }
         if (result.status === 'ok' && result.payloads?.length) {
           addPayloads(result.payloads)
-          for (const id of result.ids ?? []) idSet.add(id)
+          for (const [id, link] of Object.entries(result.links ?? {})) {
+            if (!linkById.has(id) || (link && !linkById.get(id))) linkById.set(id, link)
+          }
           setRow(i, 'done')
         } else {
           setRow(i, result.status === 'error' ? 'error' : 'empty')
@@ -215,13 +225,14 @@ export default function GlassdoorHarvest({
       // Enrich: pull each listing's full detail JSON (with the description the
       // search rows lack) from the same-origin API the logged-in session can
       // reach. Best-effort and capped; failures just leave that row metadata-only.
-      const ids = [...idSet].slice(0, ENRICH_CAP)
+      const ids = [...linkById.keys()].slice(0, ENRICH_CAP)
       if (ids.length && !cancelled) {
         setPhase('enriching')
         setEnrich({ done: 0, total: ids.length })
         for (let j = 0; j < ids.length && !cancelled; j++) {
           try {
-            const res = JSON.parse((await wv.executeJavaScript(detailFetchJs(ids[j]))) as string)
+            const js = detailFetchJs(ids[j], linkById.get(ids[j]) ?? '')
+            const res = JSON.parse((await wv.executeJavaScript(js)) as string)
             if (res.ok && res.data) addPayloads([res.data])
           } catch {
             /* skip this one */
