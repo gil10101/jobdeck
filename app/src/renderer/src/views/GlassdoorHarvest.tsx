@@ -38,9 +38,39 @@ const EXTRACTOR = `(function(){
         try { out.push(JSON.parse(t)); } catch(e){}
       }
     }
-    return JSON.stringify({ status: out.length ? 'ok' : 'empty', payloads: out });
+    var ids = {};
+    (function collect(n,d){
+      if (!n || typeof n !== 'object' || d > 8) return;
+      var lid = n.jobListingId != null ? n.jobListingId : n.listingId;
+      if (lid != null && /^[0-9]+$/.test(String(lid))) ids[String(lid)] = 1;
+      for (var k in n) { try { collect(n[k], d+1); } catch(e){} }
+    })(out, 0);
+    return JSON.stringify({ status: out.length ? 'ok' : 'empty', payloads: out, ids: Object.keys(ids) });
   } catch(e) { return JSON.stringify({ status: 'error', message: String(e) }); }
 })()`
+
+// Fetch one job's full detail JSON from the SAME origin the logged-in session is
+// on — Glassdoor's own frontend uses this endpoint, so replaying it in-page
+// inherits the cleared session and returns the denormalized posting (with the
+// description the search rows lack).
+function detailFetchJs(id: string): string {
+  return `(async function(){
+    try {
+      var csrf = '';
+      try { var mt = document.querySelector('meta[name="gd-csrf-token"]'); if (mt) csrf = mt.content || ''; } catch(e){}
+      try { if (!csrf && window.__CSRF_TOKEN__) csrf = window.__CSRF_TOKEN__; } catch(e){}
+      var headers = { accept: 'application/json' };
+      if (csrf) headers['gd-csrf-token'] = csrf;
+      var r = await fetch('/job-listing/api/job-details?jobListingId=${id}', { headers: headers, credentials: 'include' });
+      if (!r.ok) return JSON.stringify({ ok: false });
+      var j = await r.json();
+      return JSON.stringify({ ok: true, data: j });
+    } catch(e) { return JSON.stringify({ ok: false }); }
+  })()`
+}
+
+const ENRICH_CAP = 60
+const ENRICH_PACE_MS = 500
 
 type SearchState = 'pending' | 'loading' | 'done' | 'empty' | 'challenge' | 'error'
 
@@ -50,9 +80,28 @@ interface Row {
   state: SearchState
 }
 
+function titleCase(s: string): string {
+  return s
+    .replace(/-/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+/** Human label for a Glassdoor search URL: "Role · Location" from a SRCH URL's
+ *  slug offsets, the keyword from an ?sc.keyword= URL, else the location alone. */
 function searchLabel(url: string): string {
   try {
-    return new URL(url).searchParams.get('sc.keyword') || new URL(url).pathname
+    const u = new URL(url)
+    const kw = u.searchParams.get('sc.keyword')
+    if (kw) return titleCase(kw)
+    const m = u.pathname.match(/\/Job\/(.+?)-SRCH_IL\.(\d+),(\d+)(?:_IC\d+)?(?:_KO(\d+),(\d+))?/)
+    if (m) {
+      const slug = m[1]
+      const loc = titleCase(slug.slice(Number(m[2]), Number(m[3])))
+      const role = m[4] ? titleCase(slug.slice(Number(m[4]), Number(m[5]))) : ''
+      return role ? `${role} · ${loc}` : loc
+    }
+    return u.pathname
   } catch {
     return url
   }
@@ -83,12 +132,15 @@ export default function GlassdoorHarvest({
   const [rows, setRows] = useState<Row[]>(
     targets.map((u) => ({ url: u, label: searchLabel(u), state: 'pending' as SearchState }))
   )
-  const [phase, setPhase] = useState<'running' | 'challenge' | 'idle' | 'writing'>('running')
+  const [phase, setPhase] = useState<'running' | 'challenge' | 'enriching' | 'idle' | 'writing'>(
+    'running'
+  )
   const [captured, setCaptured] = useState(0)
+  const [enrich, setEnrich] = useState({ done: 0, total: 0 })
   const [manualUrl, setManualUrl] = useState('')
   const [capturing, setCapturing] = useState(false)
 
-  const extract = async (): Promise<{ status: string; payloads?: unknown[] }> => {
+  const extract = async (): Promise<{ status: string; payloads?: unknown[]; ids?: string[] }> => {
     const wv = webviewRef.current
     if (!wv) return { status: 'error' }
     try {
@@ -124,6 +176,7 @@ export default function GlassdoorHarvest({
       })
     const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
+    const idSet = new Set<string>()
     const run = async (): Promise<void> => {
       await once('dom-ready', 3000) // let the <webview> attach
       for (let i = 0; i < targets.length && !cancelled; i++) {
@@ -152,11 +205,30 @@ export default function GlassdoorHarvest({
         }
         if (result.status === 'ok' && result.payloads?.length) {
           addPayloads(result.payloads)
+          for (const id of result.ids ?? []) idSet.add(id)
           setRow(i, 'done')
         } else {
           setRow(i, result.status === 'error' ? 'error' : 'empty')
         }
         if (i < targets.length - 1) await sleep(PACE_MS)
+      }
+      // Enrich: pull each listing's full detail JSON (with the description the
+      // search rows lack) from the same-origin API the logged-in session can
+      // reach. Best-effort and capped; failures just leave that row metadata-only.
+      const ids = [...idSet].slice(0, ENRICH_CAP)
+      if (ids.length && !cancelled) {
+        setPhase('enriching')
+        setEnrich({ done: 0, total: ids.length })
+        for (let j = 0; j < ids.length && !cancelled; j++) {
+          try {
+            const res = JSON.parse((await wv.executeJavaScript(detailFetchJs(ids[j]))) as string)
+            if (res.ok && res.data) addPayloads([res.data])
+          } catch {
+            /* skip this one */
+          }
+          setEnrich({ done: j + 1, total: ids.length })
+          await sleep(ENRICH_PACE_MS)
+        }
       }
       if (!cancelled) setPhase('idle')
     }
@@ -197,7 +269,7 @@ export default function GlassdoorHarvest({
     }
   }
 
-  const busy = phase === 'running' || phase === 'writing'
+  const busy = phase === 'running' || phase === 'writing' || phase === 'enriching'
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-6">
@@ -249,7 +321,9 @@ export default function GlassdoorHarvest({
             <div className="mt-auto border-t border-edge p-2 text-[10px] leading-relaxed text-gray-500">
               {phase === 'running'
                 ? 'Auto-harvesting your searches — paced and sequential.'
-                : 'Auto pass done. Not enough? Type a Glassdoor search below, browse it, and Capture.'}
+                : phase === 'enriching'
+                  ? `Reading full postings for descriptions… ${enrich.done}/${enrich.total}`
+                  : 'Auto pass done. Not enough? Type a Glassdoor search below, browse it, and Capture.'}
             </div>
           </div>
 

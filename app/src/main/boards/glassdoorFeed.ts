@@ -30,11 +30,31 @@ export function glassdoorFeedPath(): string {
 
 /** Normalize the raw job objects the browser captured across all searches and
  *  write the feed (deduped by listingId, newest-capture wins, capped). */
+/** Merge two rows for the same listing, preferring non-empty fields — so a
+ *  detail-page capture (full description) fills in what a search row lacked
+ *  without dropping the search row's location/salary. */
+function mergeRows(a: GlassdoorRow, b: GlassdoorRow): GlassdoorRow {
+  const prefer = <K extends keyof GlassdoorRow>(k: K): GlassdoorRow[K] =>
+    (b[k] as unknown) ? b[k] : a[k]
+  return {
+    listingId: a.listingId,
+    title: prefer('title'),
+    company: prefer('company'),
+    location: prefer('location'),
+    salary: prefer('salary'),
+    url: prefer('url'),
+    postedAt: prefer('postedAt'),
+    rating: b.rating ?? a.rating,
+    description: prefer('description')
+  }
+}
+
 export function writeGlassdoorFeed(searches: string[], rawPayloads: unknown[], nowMs: number): GlassdoorFeed {
   const byId = new Map<string, GlassdoorRow>()
   for (const payload of rawPayloads) {
     for (const row of extractGlassdoorRows(payload, nowMs)) {
-      byId.set(row.listingId, row)
+      const prev = byId.get(row.listingId)
+      byId.set(row.listingId, prev ? mergeRows(prev, row) : row)
     }
   }
   const feed: GlassdoorFeed = {

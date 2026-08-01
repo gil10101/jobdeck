@@ -732,7 +732,7 @@ export default function SettingsView(): JSX.Element {
                 <>
                   <textarea
                     className="input h-20 w-72 resize-y text-[11px]"
-                    placeholder="Paste your Glassdoor LOCATION base URL (…/Job/new-york-jobs-SRCH_IL…IC1132348.htm) to auto-build a precise search per role at that location. Append filters and they carry to every role: ?fromAge=3 (posted <=3d), &jobType=internship. Or paste full search URLs, one per line. Blank = keyword-only default."
+                    placeholder="Paste your Glassdoor LOCATION base URL (…/Job/new-york-jobs-SRCH_IL…IC1132348.htm) to auto-build a precise search per role at that location. Append filters and they carry to every role: ?fromAge=3 (posted <=3d), &seniorityType=internship (or entrylevel). Or paste full search URLs, one per line. Blank = keyword-only default."
                     value={gdSearchesDraft}
                     onChange={(e) => {
                       setGdSearchesDraft(e.target.value)
