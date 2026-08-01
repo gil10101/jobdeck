@@ -362,7 +362,10 @@ export default function GlassdoorHarvest({
             <div className="relative min-h-0 flex-1 bg-white">
               <webview
                 ref={webviewRef as React.RefObject<HTMLElement>}
-                src="https://www.glassdoor.com/Job/index.htm"
+                // about:blank loads instantly; the run loop drives it to the
+                // first search — starting on a real URL just gets aborted
+                // mid-load (the harmless GUEST_VIEW_MANAGER -3 in the console).
+                src="about:blank"
                 partition="persist:apply"
                 allowpopups={'true' as unknown as boolean}
                 className="h-full w-full"
