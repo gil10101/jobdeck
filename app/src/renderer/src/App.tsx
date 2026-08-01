@@ -1,5 +1,6 @@
 import { useRef } from 'react'
 import Sidebar from './components/Sidebar'
+import GlassdoorHarvest from './views/GlassdoorHarvest'
 import ToastHost from './components/Toast'
 import ApplyView from './views/ApplyView'
 import AssistantFab from './views/assistant/AssistantFab'
@@ -58,6 +59,32 @@ export default function App(): JSX.Element {
       </main>
       <ToastHost />
       <AssistantFab />
+      <ScoutHarvestHost />
     </div>
+  )
+}
+
+/** App-level host for the pre-scout Glassdoor harvest, so any scout launch
+ *  (Scout button OR History rerun) runs it — driven by store state. */
+function ScoutHarvestHost(): JSX.Element | null {
+  const harvest = useApp((s) => s.scoutHarvest)
+  const clear = useApp((s) => s.clearScoutHarvest)
+  const launch = useApp((s) => s.launchScout)
+  if (!harvest) return null
+  const finish = (): void => {
+    const instructions = harvest.instructions
+    clear()
+    void launch(instructions)
+  }
+  return (
+    <GlassdoorHarvest
+      searches={harvest.searches}
+      onDone={(count) => {
+        if (count > 0) useApp.getState().toast(`Harvested ${count} Glassdoor jobs`, 'success')
+        finish()
+      }}
+      onSkip={finish}
+      onCancel={clear}
+    />
   )
 }

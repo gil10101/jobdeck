@@ -107,6 +107,9 @@ interface AppState {
   toasts: Toast[]
   assistant: AssistantSlice
   detailChat: DetailChatSlice
+  /** Non-null while the pre-scout Glassdoor harvest overlay runs; carries the
+   *  scout instructions to launch once the harvest finishes. */
+  scoutHarvest: { searches: string[]; instructions?: string } | null
   navigate: (route: Route) => void
   refreshConfig: () => Promise<void>
   refreshRows: () => Promise<void>
@@ -132,6 +135,12 @@ interface AppState {
   openDetailChat: (rowId: string) => Promise<void>
   sendDetailChat: (text: string) => Promise<void>
   stopDetailChat: () => void
+  /** Every scout entry point (Scout button, History rerun) goes through here,
+   *  so the Glassdoor harvest runs first wherever the scout was launched. */
+  requestScout: (instructions?: string) => Promise<void>
+  /** Launch the scout run itself (after any harvest). */
+  launchScout: (instructions?: string) => Promise<void>
+  clearScoutHarvest: () => void
 }
 
 let toastSeq = 1
@@ -149,8 +158,40 @@ export const useApp = create<AppState>((set, get) => ({
   toasts: [],
   assistant: initialAssistantSlice(),
   detailChat: { rowId: null, conversationId: null, messages: [], streaming: null, status: 'idle' },
+  scoutHarvest: null,
 
   navigate: (route) => set({ route }),
+
+  requestScout: async (instructions) => {
+    // Glassdoor (when on) is harvested from the logged-in in-app browser first,
+    // wherever the scout was launched from — the overlay lives at app level so
+    // the History rerun triggers it too, not just the Scout button.
+    if (get().settings?.scoutGlassdoor) {
+      try {
+        const { searches } = await call('glassdoor:searches', undefined)
+        if (searches.length) {
+          set({ scoutHarvest: { searches, instructions } })
+          return
+        }
+      } catch {
+        /* fall through to a plain scout */
+      }
+    }
+    await get().launchScout(instructions)
+  },
+
+  launchScout: async (instructions) => {
+    try {
+      const meta = await call('scout:start', { instructions: instructions?.trim() || undefined })
+      get().toast('Scout agent launched — watch it work in Runs', 'success')
+      void get().refreshRuns()
+      get().navigate({ view: 'runs', runId: meta.id })
+    } catch (err) {
+      get().toast(String(err), 'error')
+    }
+  },
+
+  clearScoutHarvest: () => set({ scoutHarvest: null }),
 
   refreshConfig: async () => {
     try {

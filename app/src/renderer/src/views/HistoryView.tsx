@@ -463,15 +463,10 @@ export default function HistoryView(): JSX.Element {
     void refresh()
   }, [scoutFingerprint])
 
+  // Goes through requestScout so the Glassdoor harvest runs first when enabled
+  // (same path as the Scout button).
   const startScout = async (instructions: string): Promise<void> => {
-    try {
-      const meta = await call('scout:start', { instructions: instructions.trim() || undefined })
-      toast('Scout agent launched — watch it work in Runs', 'success')
-      void useApp.getState().refreshRuns()
-      navigate({ view: 'runs', runId: meta.id })
-    } catch (err) {
-      toast(String(err), 'error')
-    }
+    await useApp.getState().requestScout(instructions.trim() || undefined)
   }
 
   const selected = entries?.find((e) => e.runId === selectedId) ?? null
