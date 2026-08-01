@@ -104,19 +104,23 @@ function slugify(s: string): string {
 // IL.a,b marks the location text, IC is the internal location id, KO marks the
 // keyword. From a base we can synthesize a precise per-role search at that exact
 // location by splicing the keyword slug in and recomputing the KO offsets.
-const BASE_LOCATION_RE = /glassdoor\.[^/]*\/Job\/(.+?)-jobs-SRCH_IL\.(\d+),(\d+)_IC(\d+)\.htm/i
+// The trailing (\?\S*)? captures any filter query the user appended to the base
+// (e.g. ?seniorityType=internship&fromAge=3) so it rides onto every generated
+// per-role search — that is how internship/recency filtering reaches the harvest.
+const BASE_LOCATION_RE = /glassdoor\.[^/]*\/Job\/(.+?)-jobs-SRCH_IL\.(\d+),(\d+)_IC(\d+)\.htm(\?\S*)?/i
 
-/** Expand a location base URL into one precise search per term; null if `url`
- *  is not a bare location base (a full keyworded search is used as-is). */
+/** Expand a location base URL into one precise search per term (preserving any
+ *  filter query); null if `url` is not a bare location base (a full keyworded
+ *  search is used as-is). */
 function expandLocationBase(url: string, terms: string[]): string[] | null {
   const m = url.match(BASE_LOCATION_RE)
   if (!m) return null
-  const [, locSlug, ilStart, ilEnd, locId] = m
+  const [, locSlug, ilStart, ilEnd, locId, query = ''] = m
   const koStart = Number(ilEnd) + 1 // the hyphen after the location slug
   return terms.map((term) => {
     const kw = slugify(term)
     const slug = `${locSlug}-${kw}-jobs`
-    return `https://www.glassdoor.com/Job/${slug}-SRCH_IL.${ilStart},${ilEnd}_IC${locId}_KO${koStart},${koStart + kw.length}.htm`
+    return `https://www.glassdoor.com/Job/${slug}-SRCH_IL.${ilStart},${ilEnd}_IC${locId}_KO${koStart},${koStart + kw.length}.htm${query}`
   })
 }
 
