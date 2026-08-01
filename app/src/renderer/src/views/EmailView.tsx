@@ -477,9 +477,13 @@ export default function EmailView(): JSX.Element {
             <div
               key={m.id}
               onClick={() => setSelectedId(m.id)}
-              className={`group flex w-full cursor-pointer flex-col gap-0.5 border-b border-edge/50 px-3 py-2 text-left hover:bg-panel2 ${
-                selectedId === m.id ? 'bg-panel2' : ''
-              }`}
+              className={`group flex w-full cursor-pointer flex-col gap-0.5 border-b border-l-2 border-edge/50 px-3 py-2 text-left hover:bg-panel2 ${
+                m.classification === 'assessment'
+                  ? 'border-l-amber-400'
+                  : m.classification === 'interview'
+                    ? 'border-l-cyan-500'
+                    : 'border-l-transparent'
+              } ${selectedId === m.id ? 'bg-panel2' : ''}`}
             >
               <div className="flex items-center gap-2">
                 <span className="min-w-0 truncate text-[11px] font-medium text-gray-300">

@@ -66,17 +66,37 @@ export function allCachedMessages(): EmailMessage[] {
   return [...load().messages].sort((a, b) => b.date.localeCompare(a.date))
 }
 
-/** Newest first; 'job' = job-search-query matches, 'primary' = Gmail's
- *  Primary sweep, 'starred'/'hidden' = the user's own sets. Hidden messages
- *  only ever appear under 'hidden'. */
+/** Time-sensitive job actions float to the top of every list so a deadline is
+ *  never buried under newer mail. Lower rank = higher. Only recent, still-
+ *  actionable items are pinned — an assessment handled weeks ago drops back to
+ *  date order. */
+const PRIORITY: Record<string, number> = { assessment: 0, interview: 1, offer: 2 }
+const PIN_WINDOW_MS = 21 * 24 * 60 * 60 * 1000
+
+function priorityRank(m: EmailMessage): number {
+  const base = PRIORITY[m.classification]
+  if (base === undefined) return 9
+  if (m.suggestionState === 'applied' || m.suggestionState === 'dismissed') return 9
+  if (Date.now() - new Date(m.date).getTime() > PIN_WINDOW_MS) return 9
+  return base
+}
+
+/** Priority first (time-sensitive on top), then newest within each tier. */
+function prioritize(list: EmailMessage[]): EmailMessage[] {
+  return [...list].sort((a, b) => priorityRank(a) - priorityRank(b) || b.date.localeCompare(a.date))
+}
+
+/** 'job' = job-search-query matches, 'primary' = Gmail's Primary sweep,
+ *  'starred'/'hidden' = the user's own sets. Hidden messages only ever appear
+ *  under 'hidden'. Assessment/interview/offer mail is pinned to the top. */
 export function listCachedMessages(filter: EmailFilter): EmailMessage[] {
   const all = allCachedMessages()
   if (filter === 'hidden') return all.filter((m) => m.hidden)
   const visible = all.filter((m) => !m.hidden)
-  if (filter === 'job') return visible.filter((m) => m.jobRelated)
-  if (filter === 'primary') return visible.filter((m) => m.primary)
-  if (filter === 'starred') return visible.filter((m) => m.favorite)
-  return visible
+  if (filter === 'job') return prioritize(visible.filter((m) => m.jobRelated))
+  if (filter === 'primary') return prioritize(visible.filter((m) => m.primary))
+  if (filter === 'starred') return prioritize(visible.filter((m) => m.favorite))
+  return prioritize(visible)
 }
 
 export function getCachedMessage(id: string): EmailMessage | null {

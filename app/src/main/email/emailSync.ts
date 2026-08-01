@@ -19,20 +19,27 @@ const ASSESSMENT_DOMAINS = [
   'hirevue.com',
   'testgorilla.com'
 ]
-/** ATS notification senders — always job mail, but the subject picks the class. */
+/** ATS notification senders — always job mail, but the subject picks the class.
+ *  Workable routes candidate mail (incl. calendar invites) through
+ *  inbound.workablemail.com, which is why interview invites slipped past. */
 const ATS_DOMAINS = [
   'greenhouse.io',
   'lever.co',
   'ashbyhq.com',
   'myworkday.com',
   'icims.com',
-  'smartrecruiters.com'
+  'smartrecruiters.com',
+  'workable.com',
+  'workablemail.com',
+  'jobvite.com'
 ]
 
 /** Job-search mail, ~30 days back: subject terms OR a known assessment/ATS
- *  sender — assessment invites often carry no keyword in the subject at all. */
+ *  sender — assessment invites often carry no keyword in the subject at all.
+ *  Bare "offer" is deliberately absent (it pulled in retail "50% off" promos);
+ *  only "job offer"/"offer letter" qualify. */
 const JOB_QUERY =
-  'newer_than:30d (subject:(application OR applied OR applying OR interview OR assessment OR offer OR OA OR HackerRank OR Codility OR CodeSignal OR "take-home" OR "coding challenge" OR "online assessment" OR "next steps" OR "technical screen" OR invitation OR "complete your" OR schedule OR candidacy OR recruiter)' +
+  'newer_than:30d (subject:(application OR applied OR applying OR interview OR assessment OR "job offer" OR "offer letter" OR OA OR HackerRank OR Codility OR CodeSignal OR "take-home" OR "coding challenge" OR "online assessment" OR "personality assessment" OR "next steps" OR "technical screen" OR "phone screen" OR "phone conversation" OR invitation OR availability OR "complete your" OR schedule OR candidacy OR recruiter)' +
   ` OR from:(${[...ASSESSMENT_DOMAINS, ...ATS_DOMAINS].join(' OR ')}))`
 /** The "Primary" toggle set: Gmail's Primary category, recent. */
 const PRIMARY_QUERY = 'category:primary newer_than:7d'
@@ -50,39 +57,90 @@ function fromDomainMatch(from: string, domains: string[]): boolean {
   return hosts.some((h) => domains.some((d) => h === d || h.endsWith(`.${d}`)))
 }
 
-/** Deterministic classification from headers (+ snippet for the two classes
- *  whose subjects are usually generic, e.g. "Update on your application").
- *  Order matters: assessment invites mention interviews, rejections mention
- *  everything — most specific signals first. Assessment-platform senders are
- *  'assessment' outright; ATS senders fall through the subject rules first,
- *  then default by whether the subject mentions the application. */
+/** Deterministic classification from the subject AND snippet. Order matters:
+ *  assessment invites mention interviews, rejections mention everything — most
+ *  specific signals first. Assessment-platform senders are 'assessment'
+ *  outright; ATS senders that hit no rule default by whether the text mentions
+ *  the application. The snippet is included throughout because the decisive
+ *  word often lives in the body ("...take the Rembrandt Personality
+ *  Assessment", a calendar invite's "When:/Attendees:" block), not the subject. */
 export function classifyEmail(from: string, subject: string, snippet: string): EmailClassification {
   const s = subject
+  const text = `${subject}\n${snippet}`
+  // Retail/marketing blasts keyword-collide with job terms ("your OFFER ends
+  // soon", "schedule your visit") — unless they come from a real ATS or
+  // assessment sender, they are never job mail. Guard first so those terms
+  // never reach the class rules below.
   if (
-    /assessment|hackerrank|codility|codesignal|coding (challenge|test|exercise)|take[- ]home|\boa\b/i.test(s) ||
-    fromDomainMatch(from, ASSESSMENT_DOMAINS)
+    !fromDomainMatch(from, [...ASSESSMENT_DOMAINS, ...ATS_DOMAINS]) &&
+    looksPromotional(from, subject, snippet)
+  ) {
+    return 'other'
+  }
+  if (
+    fromDomainMatch(from, ASSESSMENT_DOMAINS) ||
+    /\bassessment\b|hackerrank|codility|codesignal|coding (challenge|test|exercise)|take[- ]home|\bonline assessment\b|personality (test|assessment)|\boa\b/i.test(
+      text
+    )
   ) {
     return 'assessment'
   }
-  if (/offer letter|job offer|offer of employment|pleased to (extend|offer)|your offer/i.test(s)) {
+  if (/offer letter|job offer|offer of employment|employment offer|pleased to (extend|offer)|extend(ing)? (you )?an offer|excited to offer you|we('d| would) (be happy to |like to )?offer you/i.test(text)) {
     return 'offer'
   }
   const rejection =
-    /unfortunately|we regret|not (be )?(moving|proceeding) forward|other candidates|not (been )?selected|no longer under consideration|pursue other (applicants|candidates)|position has been filled/i
-  if (rejection.test(s) || rejection.test(snippet)) return 'rejection'
-  if (/interview|technical screen|phone screen|screening call|next steps|invitation|schedule (a|your) (call|chat|conversation|meeting)|your availability|meet the team/i.test(s)) {
-    return 'interview'
-  }
+    /unfortunately|we regret|regret to inform|not (be )?(moving|proceeding) forward|will not be moving forward|decided (not )?to (move|proceed)|other candidates|not (been )?selected|no longer under consideration|pursue other (applicants|candidates)|position has been filled/i
+  if (rejection.test(text)) return 'rejection'
+  // Interview / call scheduling / calendar invites. Calendar markers
+  // ("When:", "Attendees:", "reschedule", "needs-action") and phrasings like
+  // "invite you for a call" carry no "interview" keyword, so match them too.
+  const interview =
+    /interview|technical screen|phone screen|screening call|next steps|invit(e|ation) (you )?(to|for)|schedule (a|your|some) (call|chat|conversation|meeting|time)|set up (a )?(call|time|chat)|book (a )?time|your availability|meet (the|with) (team|us)|phone (call|conversation)|hop on a call|speak with you|calendar (invite|invitation)|\bwhen:\s|\battendees:\b|\breschedule\b|needs-action|will call you|call (for|with|regarding).{0,40}\b(job|role|position|opportunity)\b/i
+  if (interview.test(text)) return 'interview'
   const confirmation =
     /application (was |has been )?(received|submitted)|(thank you|thanks) for (applying|your application)|we('ve| have) received your application|application confirmation|successfully (applied|submitted)/i
-  if (confirmation.test(s) || confirmation.test(snippet)) return 'confirmation'
+  if (confirmation.test(text)) return 'confirmation'
   if (fromDomainMatch(from, ATS_DOMAINS)) {
-    return /application/i.test(s) ? 'confirmation' : 'other'
+    return /application/i.test(text) ? 'confirmation' : 'other'
   }
   if (/recruit|talent acquisition|sourcing|hiring team/i.test(from) || /\b(opportunity|opening|role at|position at)\b/i.test(s)) {
     return 'recruiter'
   }
   return 'other'
+}
+
+/** Marketing/promotional mail that keyword-matched the job sweep by accident
+ *  ("your half price OFFER ends soon"). Only an unambiguous marketing sender
+ *  subdomain, or a clearly promo-shaped subject/snippet, counts — generic
+ *  labels (mail., email., news.) are excluded because real companies send
+ *  legitimate hiring mail from them. */
+function looksPromotional(from: string, subject: string, snippet: string): boolean {
+  const host = from.toLowerCase().match(/@([a-z0-9.-]+)/)?.[1] ?? ''
+  if (/(^|\.)(offers?|usoffers|deals?|promo|promotions?|marketing|newsletters?|eblast)\./.test(host)) {
+    return true
+  }
+  const text = `${subject} ${snippet}`.toLowerCase()
+  return /\b\d+%\s*(off|discount)\b|half price|\bcoupon\b|promo code|limited[- ]time|(offer|deal|sale|discount) ends|flash sale|shop now|free (month|trial|shipping)/.test(
+    text
+  )
+}
+
+/** True if a message belongs in the Job tab. ATS/assessment senders are always
+ *  job mail. Otherwise it must have hit the job sweep — and mail the classifier
+ *  could only call 'other' is dropped when it looks promotional, so a retail
+ *  "offer"/"schedule" blast that snuck into the sweep does not pollute the tab.
+ *  A message the classifier recognized as a real job class (interview, offer,
+ *  rejection, …) is never demoted. */
+export function deriveJobRelated(
+  from: string,
+  subject: string,
+  snippet: string,
+  jobHit: boolean,
+  classification: EmailClassification
+): boolean {
+  if (fromDomainMatch(from, [...ATS_DOMAINS, ...ASSESSMENT_DOMAINS])) return true
+  if (classification === 'other' && looksPromotional(from, subject, snippet)) return false
+  return jobHit
 }
 
 /** Lowercase, punctuation → spaces, collapsed — the comparable form. */
@@ -102,18 +160,22 @@ const SUGGEST_STATUS: Partial<Record<EmailClassification, StatusKey>> = {
 }
 
 /** Tracker match: normalized company name (≥ 4 chars — "hp" would match half
- *  the inbox) contained token-aligned in From+Subject; longest match wins.
+ *  the inbox) contained token-aligned in From+Subject+snippet; longest match
+ *  wins. The snippet is searched because ATS mail (Lever/Greenhouse) hides the
+ *  company in the body, not the from-address or subject, so a rejection like
+ *  "...role at Veeva" only matches once the body text is in scope.
  *  Confirmations only ever suggest applied from not_applied, and a suggestion
  *  matching the row's current status is noise, not news. */
 export function suggestForMessage(
   classification: EmailClassification,
   from: string,
   subject: string,
+  snippet: string,
   rows: TrackerRow[]
 ): EmailSuggestion | null {
   const status = SUGGEST_STATUS[classification]
   if (!status) return null
-  const haystack = ` ${normalizeText(`${from} ${subject}`)} `
+  const haystack = ` ${normalizeText(`${from} ${subject} ${snippet}`)} `
   let best: TrackerRow | null = null
   let bestLen = 0
   for (const row of rows) {
@@ -247,23 +309,40 @@ export class EmailSync {
       for (const id of wantedIds) {
         const known = cached.get(id)
         if (!known) continue
-        const jobRelated = known.jobRelated || jobIds.has(id)
         const inPrimary = known.primary === true || primaryIds.has(id)
+        // The classifier improved too — recompute the class for still-open mail
+        // so a re-listed message reflects the current rules.
+        const classification =
+          known.suggestionState === 'applied' || known.suggestionState === 'dismissed'
+            ? known.classification
+            : classifyEmail(known.from, known.subject, known.snippet)
+        // Re-derive (not sticky-OR) so the promo demotion and better sender
+        // rules heal messages the old logic mis-flagged.
+        const jobRelated = deriveJobRelated(
+          known.from,
+          known.subject,
+          known.snippet,
+          jobIds.has(id),
+          classification
+        )
         let { suggestion, suggestionState } = known
         if (suggestionState === 'open' || suggestionState === null) {
           // Hidden = the user says the classifier got this one wrong, so never
           // hold a suggestion on it. Unhiding re-derives on the next sync.
           suggestion = known.hidden
             ? null
-            : suggestForMessage(known.classification, known.from, known.subject, rows)
+            : suggestForMessage(classification, known.from, known.subject, known.snippet, rows)
           suggestionState = suggestion ? 'open' : null
         }
         const changed =
           jobRelated !== known.jobRelated ||
           inPrimary !== known.primary ||
+          classification !== known.classification ||
           suggestionState !== known.suggestionState ||
           JSON.stringify(suggestion) !== JSON.stringify(known.suggestion)
-        if (changed) batch.push({ ...known, jobRelated, primary: inPrimary, suggestion, suggestionState })
+        if (changed) {
+          batch.push({ ...known, classification, jobRelated, primary: inPrimary, suggestion, suggestionState })
+        }
       }
 
       if (autoApply) {
@@ -301,12 +380,13 @@ export class EmailSync {
 
   private buildMessage(
     meta: GmailMessageMeta,
-    jobRelated: boolean,
+    jobHit: boolean,
     primary: boolean,
     rows: TrackerRow[]
   ): EmailMessage {
     const classification = classifyEmail(meta.from, meta.subject, meta.snippet)
-    const suggestion = suggestForMessage(classification, meta.from, meta.subject, rows)
+    const jobRelated = deriveJobRelated(meta.from, meta.subject, meta.snippet, jobHit, classification)
+    const suggestion = suggestForMessage(classification, meta.from, meta.subject, meta.snippet, rows)
     return {
       ...meta,
       classification,
