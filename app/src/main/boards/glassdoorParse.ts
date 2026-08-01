@@ -155,6 +155,25 @@ export function normalizeGlassdoorJob(raw: Record<string, unknown>, nowMs: numbe
   return row
 }
 
+/** Pull job rows out of a page's raw HTML by parsing its embedded
+ *  `<script type="application/json">` / `__NEXT_DATA__` blobs (where Glassdoor
+ *  ships its app state). Used by the single-job Build path, which only has the
+ *  outer HTML. Empty when no parseable job data is embedded. */
+export function extractGlassdoorRowsFromHtml(html: string, nowMs: number): GlassdoorRow[] {
+  const byId = new Map<string, GlassdoorRow>()
+  const scriptRe = /<script[^>]*type=["']application\/json["'][^>]*>([\s\S]*?)<\/script>/gi
+  for (const m of html.matchAll(scriptRe)) {
+    const t = m[1].trim()
+    if (!/jobListing|jobTitleText|listingId/.test(t)) continue
+    try {
+      for (const row of extractGlassdoorRows(JSON.parse(t), nowMs)) byId.set(row.listingId, row)
+    } catch {
+      /* not valid JSON — skip this blob */
+    }
+  }
+  return [...byId.values()]
+}
+
 /** Walk an arbitrary payload (single job, results array, Apollo cache, nested
  *  page state) and return every job row found, deduped by listingId. Bounded
  *  recursion so a huge app-state blob can't runaway. */

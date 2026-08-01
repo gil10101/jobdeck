@@ -8,6 +8,7 @@ import type { RunInput } from './agent/AgentRunner'
 import { buildApplicationDetail } from './parsers/detail'
 import { parseCandidatesFile } from './parsers/report'
 import { extractJobPosting, fetchPostingFromUrl } from './parsers/jobPostingUrl'
+import { extractGlassdoorRowsFromHtml } from './boards/glassdoorParse'
 import { scanApplications } from './fsops/FolderScanner'
 import { copyText, openExternal, openFolder, showItem } from './fsops/reveal'
 import { importFromXlsx } from './xlsx/importXlsx'
@@ -225,7 +226,26 @@ export function registerIpc(services: Services): void {
     // structured data at all. Page content is untrusted third-party data —
     // it flows into postingText, which the build pipeline already treats as
     // untrusted.
+    // Glassdoor emits no JSON-LD (non-indexable pages), so extract its embedded
+    // job JSON directly — cleaner than the visible-text fallback would manage.
     let posting = extractJobPosting(html.slice(0, 3_000_000), url)
+    if (!posting && /glassdoor\./i.test(url)) {
+      const rows = extractGlassdoorRowsFromHtml(html, Date.now())
+      const job = rows.find((r) => r.description) ?? rows[0]
+      if (job) {
+        const lines = [
+          job.title,
+          job.company ? `Company: ${job.company}` : '',
+          job.location ? `Location: ${job.location}` : '',
+          job.salary ? `Salary: ${job.salary}` : '',
+          job.postedAt ? `Posted: ${job.postedAt}` : '',
+          `Source: ${job.url || url}`,
+          '',
+          job.description ?? ''
+        ].filter((l) => l !== '')
+        posting = { role: job.title, company: job.company, text: lines.join('\n') }
+      }
+    }
     if (!posting) posting = await fetchPostingFromUrl(url).catch(() => null)
     if (!posting) {
       const text = bodyText.trim().slice(0, 30_000)

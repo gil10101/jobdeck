@@ -13,6 +13,7 @@ import { call } from '../api'
 import { useApp, companyKey } from '../store'
 import { candidateSections, leadingProse } from '../lib/postingSections'
 import RatingBadge from '../components/RatingBadge'
+import GlassdoorHarvest from './GlassdoorHarvest'
 
 function scoreColor(score: number | null): string {
   if (score === null) return 'var(--muted)'
@@ -373,6 +374,9 @@ export default function ScoutView(): JSX.Element {
   const runs = useApp((s) => s.runs)
   const toast = useApp((s) => s.toast)
   const navigate = useApp((s) => s.navigate)
+  const settings = useApp((s) => s.settings)
+  // Non-null while the Glassdoor harvest overlay runs ahead of a scout launch.
+  const [harvestSearches, setHarvestSearches] = useState<string[] | null>(null)
   const [filter, setFilter] = useState<'new' | 'accepted' | 'rejected'>('new')
   const [sourceFilter, setSourceFilter] = useState('all')
   const [minFit, setMinFit] = useState(0)
@@ -429,7 +433,7 @@ export default function ScoutView(): JSX.Element {
   }
 
   // Standard sweep — custom instructions are composed in the History tab.
-  const startScout = async (): Promise<void> => {
+  const launchScout = async (): Promise<void> => {
     try {
       const meta = await call('scout:start', { instructions: undefined })
       toast('Scout agent launched — watch it work in Runs', 'success')
@@ -438,6 +442,24 @@ export default function ScoutView(): JSX.Element {
     } catch (err) {
       toast(String(err), 'error')
     }
+  }
+
+  // Glassdoor (when enabled) is harvested from the logged-in in-app browser
+  // right before the scout, so the agent gets a fresh feed. Everything else
+  // scouts as before.
+  const startScout = async (): Promise<void> => {
+    if (settings?.scoutGlassdoor) {
+      try {
+        const { searches } = await call('glassdoor:searches', undefined)
+        if (searches.length) {
+          setHarvestSearches(searches)
+          return
+        }
+      } catch {
+        /* fall through to a plain scout */
+      }
+    }
+    void launchScout()
   }
 
   const sources = [...new Set(candidates.map((c) => c.source))].sort()
@@ -474,6 +496,21 @@ export default function ScoutView(): JSX.Element {
 
   return (
     <div className="flex h-full flex-col">
+      {harvestSearches && (
+        <GlassdoorHarvest
+          searches={harvestSearches}
+          onDone={(count) => {
+            setHarvestSearches(null)
+            if (count > 0) toast(`Harvested ${count} Glassdoor jobs`, 'success')
+            void launchScout()
+          }}
+          onSkip={() => {
+            setHarvestSearches(null)
+            void launchScout()
+          }}
+          onCancel={() => setHarvestSearches(null)}
+        />
+      )}
       <div className="flex items-center gap-2 border-b border-edge bg-panel px-4 py-2.5">
         <h1 className="text-sm font-semibold text-gray-100">Scout</h1>
         {liveScout ? (

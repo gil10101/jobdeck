@@ -77,6 +77,9 @@ export default function SettingsView(): JSX.Element {
   const [customUrl, setCustomUrl] = useState('')
   const [customTest, setCustomTest] = useState<{ ok: boolean; text: string } | null>(null)
   const [customBusy, setCustomBusy] = useState<'test' | 'add' | null>(null)
+  const [gdFeed, setGdFeed] = useState<{ count: number; fetchedAt: string; stale: boolean } | null>(null)
+  const [gdSearchesDraft, setGdSearchesDraft] = useState('')
+  const [gdSaved, setGdSaved] = useState(true)
 
   useEffect(() => {
     void call('master:getContext', undefined)
@@ -105,7 +108,14 @@ export default function SettingsView(): JSX.Element {
     void call('boards:listCustom', undefined)
       .then(setCustomBoards)
       .catch(() => undefined)
+    void call('glassdoor:feedStatus', undefined)
+      .then(setGdFeed)
+      .catch(() => undefined)
   }, [])
+
+  useEffect(() => {
+    if (settings) setGdSearchesDraft((settings.glassdoorSearches ?? []).join('\n'))
+  }, [settings?.glassdoorSearches])
 
   useEffect(() => {
     if (settings) {
@@ -708,6 +718,51 @@ export default function SettingsView(): JSX.Element {
             >
               {backfillBusy ? 'Fetching…' : 'Fetch ratings for all companies'}
             </button>
+          </Row>
+          <Row
+            label="Glassdoor jobs (browser session)"
+            hint="When on, the scout button first harvests your target Glassdoor searches through the in-app browser using YOUR logged-in session — no stored password, nothing sent. Safe because you drive it (and solve any bot check); it does automate your session, a gray zone on Glassdoor's ToS, so keep it low-volume. Sign into Glassdoor once in the Browser tab first."
+          >
+            <div className="flex flex-col items-end gap-1.5">
+              <Toggle
+                value={settings.scoutGlassdoor}
+                onChange={(v) => patch({ scoutGlassdoor: v })}
+              />
+              {settings.scoutGlassdoor && (
+                <>
+                  <textarea
+                    className="input h-20 w-72 resize-y text-[11px]"
+                    placeholder="Optional: paste tuned Glassdoor search URLs, one per line (with your location/salary/date filters). Leave blank to auto-derive from your target roles."
+                    value={gdSearchesDraft}
+                    onChange={(e) => {
+                      setGdSearchesDraft(e.target.value)
+                      setGdSaved(false)
+                    }}
+                  />
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-muted">
+                      {gdFeed
+                        ? `Feed: ${gdFeed.count} jobs${gdFeed.stale ? ' (stale)' : ''}`
+                        : 'No feed yet — runs on your next scout'}
+                    </span>
+                    <button
+                      className="btn px-2 py-1 text-[10px]"
+                      disabled={gdSaved}
+                      onClick={() => {
+                        const list = gdSearchesDraft
+                          .split('\n')
+                          .map((l) => l.trim())
+                          .filter(Boolean)
+                        patch({ glassdoorSearches: list })
+                        setGdSaved(true)
+                      }}
+                    >
+                      {gdSaved ? 'Saved' : 'Save searches'}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </Row>
         </div>
 
