@@ -72,16 +72,24 @@ export function clearGlassdoorFeed(): void {
   fs.rmSync(feedFile(), { force: true })
 }
 
-/** Default Glassdoor search URLs derived from the profile's target roles —
- *  keyword-only (location is hard to encode reliably), so the user is nudged to
- *  paste location-tuned search URLs of their own for precision. */
+/** Default Glassdoor search URLs derived from the profile's search terms and
+ *  primary location. Glassdoor's precise location filter needs an internal
+ *  locId, so the location is folded into the keyword (biases results toward it)
+ *  — good enough for a default; the user pastes locId-tuned URLs for precision. */
 export function defaultGlassdoorSearches(profile: ProfileFile | null): string[] {
-  const roles = profile?.searchConfig.targetRoles ?? []
-  return roles
+  const cfg = profile?.searchConfig
+  const terms = cfg?.boards.linkedin.queries.length
+    ? cfg.boards.linkedin.queries
+    : (cfg?.targetRoles ?? []).map((r) => r.title)
+  const location = cfg?.boards.linkedin.location?.trim() ?? ''
+  return terms
     .slice(0, 4)
-    .map((r) => r.title.trim())
+    .map((t) => t.trim())
     .filter(Boolean)
-    .map((title) => `https://www.glassdoor.com/Job/jobs.htm?sc.keyword=${encodeURIComponent(title)}`)
+    .map((term) => {
+      const keyword = location ? `${term} ${location}` : term
+      return `https://www.glassdoor.com/Job/jobs.htm?sc.keyword=${encodeURIComponent(keyword)}`
+    })
 }
 
 /** The searches to harvest: the user's pasted URLs if any, else auto-derived. */
