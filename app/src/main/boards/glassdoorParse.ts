@@ -1,53 +1,153 @@
-// Normalize Glassdoor's proprietary job JSON (from the in-app browser session)
-// into the same row shape the scout agent already reads for custom boards.
-// Glassdoor emits no JSON-LD on its job pages (they are marked non-indexable),
-// so this parses the app-state / API objects the logged-in page loads instead.
-// The exact object shape shifts over time, so every field is pulled defensively
-// from several known paths and missing ones degrade to '' rather than throwing.
+// Normalize Glassdoor's job JSON (captured from the in-app browser session)
+// into the row shape the scout agent already reads for custom boards.
+//
+// Two data shapes occur and both are handled:
+//  1. Denormalized API responses (what the Network tab shows) — every field
+//     inline: jobTitle, employerName, payPeriodAdjustedPay, seoJobLink, …
+//  2. Apollo's NORMALIZED cache (window.__APOLLO_STATE__) — a flat map of
+//     "Type:id" → object, where a job's employer/location/pay live in SEPARATE
+//     entries reached through `{ __ref: "Employer:123" }` pointers, and the
+//     job's own fields sit under `header`/`job` sub-objects. Reading (2) without
+//     following the refs is why rows came back with blank company/location/pay.
+//
+// So a `__ref` resolver is built from the whole payload and threaded through
+// field extraction, with a key-name deep-search fallback for shape drift.
 
 export interface GlassdoorRow {
   listingId: string
   title: string
   company: string
   location: string
-  /** Formatted pay range, '' when the posting lists none. */
   salary: string
-  /** Absolute glassdoor.com job URL. */
   url: string
-  /** ISO date derived from the posting age, when known. */
   postedAt?: string
-  /** Company overall rating, when the object carried it. */
   rating?: number
-  /** Full description text (present on single job views, usually absent in a
-   *  search result row); HTML flattened to text. */
   description?: string
 }
+
+type Obj = Record<string, unknown>
+type Resolve = (v: unknown) => unknown
+const IDENTITY: Resolve = (v) => v
 
 function str(v: unknown): string {
   return typeof v === 'string' ? v.trim() : ''
 }
-
 function num(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null
 }
-
-/** Ids arrive as numbers or strings in Glassdoor's JSON — coerce to a string. */
 function idStr(v: unknown): string {
   if (typeof v === 'number' && Number.isFinite(v)) return String(v)
   return str(v)
 }
+function isObj(v: unknown): v is Obj {
+  return !!v && typeof v === 'object'
+}
 
-/** First non-empty string among several candidate paths. */
-function pick(obj: Record<string, unknown>, paths: string[]): string {
+/** Build a "Type:id" → object map from every Apollo-cache-shaped object in the
+ *  payload (keys containing ':' whose values are objects), so `{__ref}` pointers
+ *  can be dereferenced wherever the cache actually sits. */
+function buildRefMap(payload: unknown): Map<string, Obj> {
+  const map = new Map<string, Obj>()
+  const seen = new Set<unknown>()
+  const walk = (node: unknown, depth: number): void => {
+    if (!isObj(node) || depth > 8 || seen.has(node)) return
+    seen.add(node)
+    for (const [k, v] of Object.entries(node)) {
+      if (k.includes(':') && isObj(v) && !Array.isArray(v)) map.set(k, v)
+      walk(v, depth + 1)
+    }
+  }
+  walk(payload, 0)
+  return map
+}
+
+function makeResolve(map: Map<string, Obj>): Resolve {
+  return (v: unknown): unknown => {
+    if (isObj(v) && typeof (v as Obj).__ref === 'string') {
+      return map.get((v as Obj).__ref as string) ?? v
+    }
+    return v
+  }
+}
+
+/** Traverse `paths` on `obj`, dereferencing an Apollo `{__ref}` at each hop, and
+ *  return the first non-empty string found. */
+function pick(obj: Obj, paths: string[], resolve: Resolve): string {
   for (const p of paths) {
-    const val = p.split('.').reduce<unknown>((acc, k) => (acc as Record<string, unknown>)?.[k], obj)
-    const s = str(val)
+    let cur: unknown = obj
+    for (const key of p.split('.')) {
+      cur = resolve(cur)
+      if (!isObj(cur)) {
+        cur = undefined
+        break
+      }
+      cur = (cur as Obj)[key]
+    }
+    const s = str(resolve(cur))
     if (s) return s
   }
   return ''
 }
 
-/** Flatten Glassdoor's HTML description to readable text (no deps). */
+/** Like pick, but for id fields — coerces a numeric value to a string (Glassdoor
+ *  listing ids are numbers, which str() would drop). */
+function pickId(obj: Obj, paths: string[], resolve: Resolve): string {
+  for (const p of paths) {
+    let cur: unknown = obj
+    for (const key of p.split('.')) {
+      cur = resolve(cur)
+      if (!isObj(cur)) {
+        cur = undefined
+        break
+      }
+      cur = (cur as Obj)[key]
+    }
+    const s = idStr(resolve(cur))
+    if (s) return s
+  }
+  return ''
+}
+
+/** First string anywhere under `root` (refs resolved, depth-bounded) whose key
+ *  matches `keyRe`. The last-resort fallback when known paths miss. */
+function deepFindString(root: Obj, keyRe: RegExp, resolve: Resolve, maxDepth = 5): string {
+  const seen = new Set<unknown>()
+  const walk = (node: unknown, depth: number): string => {
+    const r = resolve(node)
+    if (!isObj(r) || depth > maxDepth || seen.has(r)) return ''
+    seen.add(r)
+    for (const [k, v] of Object.entries(r)) {
+      if (keyRe.test(k)) {
+        const s = str(resolve(v))
+        if (s) return s
+      }
+    }
+    for (const v of Object.values(r)) {
+      const found = walk(v, depth + 1)
+      if (found) return found
+    }
+    return ''
+  }
+  return walk(root, 0)
+}
+
+/** First object anywhere under `root` (refs resolved) that satisfies `pred`. */
+function deepFindObj(root: Obj, pred: (o: Obj) => boolean, resolve: Resolve, maxDepth = 5): Obj | null {
+  const seen = new Set<unknown>()
+  const walk = (node: unknown, depth: number): Obj | null => {
+    const r = resolve(node)
+    if (!isObj(r) || depth > maxDepth || seen.has(r)) return null
+    seen.add(r)
+    if (pred(r)) return r
+    for (const v of Object.values(r)) {
+      const found = walk(v, depth + 1)
+      if (found) return found
+    }
+    return null
+  }
+  return walk(root, 0)
+}
+
 function htmlToText(html: string): string {
   return html
     .replace(/<\s*br\s*\/?>/gi, '\n')
@@ -75,29 +175,53 @@ const PERIOD_SUFFIX: Record<string, string> = {
   YEARLY: '/yr'
 }
 
-/** Format `payPeriodAdjustedPay` (p10/p50/p90) into a human range. */
-function formatSalary(job: Record<string, unknown>): string {
-  const pay = (job.payPeriodAdjustedPay ?? {}) as Record<string, unknown>
+/** Find the pay object (inline or under header/job) and format a range. */
+function formatSalary(job: Obj, resolve: Resolve): string {
+  const holder =
+    deepFindObj(
+      job,
+      (o) => isObj(o.payPeriodAdjustedPay) || (!!str(o.payPeriod) && (num(o.payMin) !== null || isObj(o.payPeriodAdjustedPay))),
+      resolve,
+      4
+    ) ?? job
+  const pay = (resolve(holder.payPeriodAdjustedPay) ?? {}) as Obj
   const lo = num(pay.p10)
   const mid = num(pay.p50)
   const hi = num(pay.p90)
-  const low = lo ?? mid
-  const high = hi ?? mid
+  const low = lo ?? mid ?? num(holder.payMin)
+  const high = hi ?? mid ?? num(holder.payMax)
   if (low === null && high === null) return ''
-  const currency = str(job.payCurrency) === 'USD' ? '$' : `${str(job.payCurrency)} `
-  const period = str(job.payPeriod).toUpperCase()
-  const suffix = PERIOD_SUFFIX[period] ?? ''
+  const currency = str(holder.payCurrency) === 'USD' || !str(holder.payCurrency) ? '$' : `${str(holder.payCurrency)} `
+  const suffix = PERIOD_SUFFIX[str(holder.payPeriod).toUpperCase()] ?? ''
   const fmt = (n: number): string => `${currency}${Math.round(n).toLocaleString('en-US')}`
-  const range = low !== null && high !== null && low !== high ? `${fmt(low)}-${fmt(high)}` : fmt((high ?? low) as number)
+  const range =
+    low !== null && high !== null && low !== high ? `${fmt(low)}-${fmt(high)}` : fmt((high ?? low) as number)
   return `${range}${suffix}`
 }
 
-/** ISO date `ageInDays` before `nowMs`, or undefined when age is unknown. */
-function postedAtFrom(job: Record<string, unknown>, nowMs: number): string | undefined {
-  const details = (job.jobListingDetails ?? {}) as Record<string, unknown>
-  const age = num(job.ageInDays) ?? num(details.ageInDays)
+function postedAtFrom(job: Obj, resolve: Resolve, nowMs: number): string | undefined {
+  const holder = deepFindObj(job, (o) => num(o.ageInDays) !== null, resolve, 4) ?? job
+  const age = num(holder.ageInDays)
   if (age === null) return undefined
   return new Date(nowMs - age * 86_400_000).toISOString().slice(0, 10)
+}
+
+function ratingFrom(job: Obj, resolve: Resolve): number | null {
+  const holder = deepFindObj(job, (o) => num(o.overallRating) !== null || num(o.employerRating) !== null, resolve, 4)
+  if (!holder) return null
+  return num(holder.overallRating) ?? num(holder.employerRating)
+}
+
+function descriptionFrom(job: Obj, resolve: Resolve): string {
+  const html = pick(job, ['jobDescription', 'job.description', 'jobOverview.description', 'description'], resolve)
+  if (html) return htmlToText(html)
+  // Normalized cache sometimes ships the body split into fragments.
+  const frag = deepFindObj(job, (o) => Array.isArray(o.descriptionFragments), resolve, 4)
+  if (frag && Array.isArray(frag.descriptionFragments)) {
+    const text = (frag.descriptionFragments as unknown[]).map((f) => str(f)).filter(Boolean).join('\n')
+    if (text) return htmlToText(text)
+  }
+  return ''
 }
 
 function absoluteUrl(link: string): string {
@@ -106,59 +230,102 @@ function absoluteUrl(link: string): string {
   return `https://www.glassdoor.com${link.startsWith('/') ? '' : '/'}${link}`
 }
 
-/** A raw object is a job listing if it carries an id AND a title under any of
- *  the shapes Glassdoor uses (job view, search row, Apollo cache entry). */
-export function isGlassdoorJob(node: unknown): node is Record<string, unknown> {
-  if (!node || typeof node !== 'object') return false
-  const o = node as Record<string, unknown>
-  const details = (o.jobListingDetails ?? {}) as Record<string, unknown>
-  const hasId = !!(o.listingId ?? o.jobListingId ?? details.jobListingId ?? o.jobId)
-  const hasTitle = !!(o.jobTitle ?? o.jobTitleText ?? details.jobTitleText ?? o.normalizedJobTitle)
+/** A job listing carries an id AND a title under one of the shapes Glassdoor
+ *  uses (denormalized response, normalized JobListing/JobView/SearchResult). */
+export function isGlassdoorJob(node: unknown): node is Obj {
+  if (!isObj(node)) return false
+  const o = node
+  const header = isObj(o.header) ? o.header : {}
+  const details = isObj(o.jobListingDetails) ? o.jobListingDetails : {}
+  const jobSub = isObj(o.job) ? o.job : {}
+  const hasId = !!(o.listingId ?? o.jobListingId ?? details.jobListingId ?? jobSub.listingId ?? o.jobId)
+  const hasTitle = !!(
+    o.jobTitle ??
+    o.jobTitleText ??
+    header.jobTitleText ??
+    details.jobTitleText ??
+    jobSub.jobTitleText ??
+    o.normalizedJobTitle
+  )
   return hasId && hasTitle
 }
 
-/** Normalize one raw Glassdoor job object into a row (nowMs must be supplied —
- *  the caller stamps a real clock; this stays deterministic for testing). */
-export function normalizeGlassdoorJob(raw: Record<string, unknown>, nowMs: number): GlassdoorRow | null {
-  const details = (raw.jobListingDetails ?? {}) as Record<string, unknown>
-  const overview = (raw.jobOverview ?? {}) as Record<string, unknown>
-  const listingId =
-    idStr(raw.listingId) ||
-    idStr(raw.jobListingId) ||
-    idStr(details.jobListingId) ||
-    idStr(overview.listingId) ||
-    idStr(raw.jobId)
-  const title = pick(raw, ['jobTitle', 'jobTitleText', 'jobListingDetails.jobTitleText', 'jobOverview.jobTitleText'])
+/** Normalize one raw job object into a row. `resolve` dereferences Apollo refs;
+ *  pass IDENTITY for already-denormalized objects. */
+export function normalizeGlassdoorJob(raw: Obj, nowMs: number, resolve: Resolve = IDENTITY): GlassdoorRow | null {
+  const listingId = pickId(
+    raw,
+    [
+      'listingId',
+      'jobListingId',
+      'job.listingId',
+      'jobListingDetails.jobListingId',
+      'jobOverview.listingId',
+      'header.jobListingId',
+      'jobId'
+    ],
+    resolve
+  )
+  const title =
+    pick(
+      raw,
+      [
+        'jobTitle',
+        'jobTitleText',
+        'header.jobTitleText',
+        'job.jobTitleText',
+        'jobListingDetails.jobTitleText',
+        'jobOverview.jobTitleText'
+      ],
+      resolve
+    ) || deepFindString(raw, /^(jobTitleText|jobTitle|normalizedJobTitle)$/, resolve)
   if (!listingId || !title) return null
-  const company = pick(raw, [
-    'employerName',
-    'jobListingDetails.employer.name',
-    'jobListingDetails.employerNameFromSearch',
-    'employerOverview.name',
-    'employer.name'
-  ])
-  const location = pick(raw, ['locationName', 'location.name', 'jobListingDetails.locationName'])
-  const descHtml = pick(raw, ['jobDescription', 'jobOverview.description'])
-  const rating = num(raw.employerRating) ?? num((raw.employerOverview as Record<string, unknown>)?.overallRating)
+
+  const company =
+    pick(
+      raw,
+      [
+        'employerName',
+        'header.employerNameFromSearch',
+        'header.employer.name',
+        'header.employer.shortName',
+        'jobListingDetails.employer.name',
+        'jobListingDetails.employerNameFromSearch',
+        'employerOverview.name',
+        'employer.name',
+        'employer.shortName'
+      ],
+      resolve
+    ) || deepFindString(raw, /^(employerName|employerNameFromSearch|shortName)$/, resolve)
+
+  const location =
+    pick(raw, ['locationName', 'header.locationName', 'location.name', 'jobListingDetails.locationName'], resolve) ||
+    deepFindString(raw, /^(locationName|cityName)$/, resolve)
+
+  const url = absoluteUrl(
+    pick(raw, ['seoJobLink', 'header.seoJobLink', 'jobListingDetails.seoJobLink', 'jobLink', 'header.jobLink'], resolve) ||
+      deepFindString(raw, /^(seoJobLink|jobLink)$/, resolve)
+  )
+
   const row: GlassdoorRow = {
     listingId,
     title,
     company,
     location,
-    salary: formatSalary(raw),
-    url: absoluteUrl(str(raw.seoJobLink) || str(details.seoJobLink) || str(raw.jobLink))
+    salary: formatSalary(raw, resolve),
+    url
   }
-  const postedAt = postedAtFrom(raw, nowMs)
+  const postedAt = postedAtFrom(raw, resolve, nowMs)
   if (postedAt) row.postedAt = postedAt
+  const rating = ratingFrom(raw, resolve)
   if (rating !== null) row.rating = rating
-  if (descHtml) row.description = htmlToText(descHtml)
+  const desc = descriptionFrom(raw, resolve)
+  if (desc) row.description = desc
   return row
 }
 
 /** Pull job rows out of a page's raw HTML by parsing its embedded
- *  `<script type="application/json">` / `__NEXT_DATA__` blobs (where Glassdoor
- *  ships its app state). Used by the single-job Build path, which only has the
- *  outer HTML. Empty when no parseable job data is embedded. */
+ *  `<script type="application/json">` / `__NEXT_DATA__` blobs. */
 export function extractGlassdoorRowsFromHtml(html: string, nowMs: number): GlassdoorRow[] {
   const byId = new Map<string, GlassdoorRow>()
   const scriptRe = /<script[^>]*type=["']application\/json["'][^>]*>([\s\S]*?)<\/script>/gi
@@ -175,25 +342,23 @@ export function extractGlassdoorRowsFromHtml(html: string, nowMs: number): Glass
 }
 
 /** Walk an arbitrary payload (single job, results array, Apollo cache, nested
- *  page state) and return every job row found, deduped by listingId. Bounded
- *  recursion so a huge app-state blob can't runaway. */
+ *  page state) and return every job row found, deduped by listingId, with
+ *  Apollo `__ref` pointers resolved against the whole payload. */
 export function extractGlassdoorRows(payload: unknown, nowMs: number, cap = 500): GlassdoorRow[] {
+  const resolve = makeResolve(buildRefMap(payload))
   const rows = new Map<string, GlassdoorRow>()
   const seen = new Set<unknown>()
   const walk = (node: unknown, depth: number): void => {
-    if (rows.size >= cap || depth > 8 || !node || typeof node !== 'object') return
-    if (seen.has(node)) return
+    if (rows.size >= cap || depth > 8 || !isObj(node) || seen.has(node)) return
     seen.add(node)
     if (isGlassdoorJob(node)) {
-      const row = normalizeGlassdoorJob(node as Record<string, unknown>, nowMs)
+      const row = normalizeGlassdoorJob(node, nowMs, resolve)
       if (row && !rows.has(row.listingId)) rows.set(row.listingId, row)
-      // Do not return — a job object may nest another (jobListingDetails), but
-      // the dedupe by id keeps that harmless.
     }
     if (Array.isArray(node)) {
       for (const el of node) walk(el, depth + 1)
     } else {
-      for (const val of Object.values(node as Record<string, unknown>)) walk(val, depth + 1)
+      for (const val of Object.values(node)) walk(val, depth + 1)
     }
   }
   walk(payload, 0)
