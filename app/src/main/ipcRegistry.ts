@@ -31,6 +31,11 @@ import {
   setCustomBoardEnabled,
   testCustomBoard
 } from './boards/customBoards'
+import {
+  glassdoorFeedStatus,
+  resolveGlassdoorSearches,
+  writeGlassdoorFeed
+} from './boards/glassdoorFeed'
 import { APP_DATA_DIR, REPO_ROOT } from './paths'
 import { validateProfile } from './profile/profileSchema'
 import { loadProfile, saveProfile } from './profile/profileStore'
@@ -667,6 +672,16 @@ export function registerIpc(services: Services): void {
   handle('boards:removeCustom', ({ id }) => removeCustomBoard(id))
   handle('boards:setCustomEnabled', ({ id, enabled }) => setCustomBoardEnabled(id, enabled))
   handle('boards:listCustom', () => listCustomBoards())
+  handle('glassdoor:searches', () => {
+    const pasted = store.state.settings.glassdoorSearches ?? []
+    const searches = resolveGlassdoorSearches(pasted, loadProfile())
+    return { searches, autoDerived: pasted.length === 0 }
+  })
+  handle('glassdoor:writeFeed', ({ searches, payloads }) => {
+    const feed = writeGlassdoorFeed(searches, payloads, Date.now())
+    return { count: feed.rows.length, fetchedAt: feed.fetchedAt }
+  })
+  handle('glassdoor:feedStatus', () => glassdoorFeedStatus(Date.now()))
 
   // ---- app info ----
   handle('app:info', () => ({ repoRoot: REPO_ROOT, appDataDir: APP_DATA_DIR }))

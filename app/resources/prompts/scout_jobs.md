@@ -24,6 +24,7 @@ Run these with the Bash tool from the repo root (bun at `{{BUN}}`). All support 
 3. **freehire (optional, remote-heavy):**
    `"{{BUN}}" run ".agents/skills/freehire-search/cli/src/cli.ts" search -q "<role>" --jobage 14 -n 25 --format json`
 {{CUSTOM_BOARDS_SECTION}}
+{{GLASSDOOR_SECTION}}
 4. You MAY also use WebSearch for public-sector / Indeed postings if the CLIs come up thin — but verify any government posting is OPEN and its stated minimum qualifications actually fit the candidate's degree.
 
 If a CLI errors (auth/session), note it in `problems` and continue with the others.

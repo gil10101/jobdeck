@@ -15,6 +15,7 @@ import {
 } from '../paths'
 import { assertScoutable, prefetchJobrightFeed } from '../boards/boardsBridge'
 import { prefetchCustomBoards } from '../boards/customBoards'
+import { glassdoorFeedPath, readGlassdoorFeed } from '../boards/glassdoorFeed'
 import { scanApplications } from '../fsops/FolderScanner'
 import { parseCandidatesFile, parseReport, validateReport } from '../parsers/report'
 import { validateProfile } from '../profile/profileSchema'
@@ -71,6 +72,9 @@ interface ActiveRun {
   customBoards?: { relPath: string; boards: { label: string; ats: string; count: number }[] } | null
   /** Scout runs: enabled custom boards whose prefetch failed (named in the prompt). */
   customBoardsUnavailable?: string[]
+  /** Scout runs: browser-harvested Glassdoor feed (written before the run by the
+   *  renderer's harvest), read from its stable path at scout prep. */
+  glassdoorFeed?: { relPath: string; count: number } | null
 }
 
 type SendFn = (channel: 'push:runEvent' | 'push:runChanged', payload: unknown) => void
@@ -289,7 +293,8 @@ export class AgentRunner {
           jobrightFeed: run.jobrightFeed ?? null,
           jobrightUnavailable: run.jobrightUnavailable ?? null,
           customBoards: run.customBoards ?? null,
-          customBoardsUnavailable: run.customBoardsUnavailable ?? []
+          customBoardsUnavailable: run.customBoardsUnavailable ?? [],
+          glassdoorFeed: run.glassdoorFeed ?? null
         },
         profile
       )
@@ -356,6 +361,15 @@ export class AgentRunner {
       run.customBoardsUnavailable = custom.unavailable
       if (custom.unavailable.length) {
         console.warn('[runner] custom board prefetch failures:', custom.unavailable.join('; '))
+      }
+      // Glassdoor is harvested by the renderer's browser session into a stable
+      // file BEFORE this run starts (only a real session clears its bot check),
+      // so here we just read whatever the harvest left. Stale/empty = skipped.
+      if (this.store.state.settings.scoutGlassdoor) {
+        const feed = readGlassdoorFeed()
+        run.glassdoorFeed = feed?.rows.length
+          ? { relPath: toRel(glassdoorFeedPath()), count: feed.rows.length }
+          : null
       }
     }
     if (run.meta.kind === 'onboard') {

@@ -360,6 +360,13 @@ export interface AppSettings {
    *  Email tab shows one-click suggestions instead (status flips from
    *  heuristic classification are too consequential to silently apply). */
   emailAutoApply: boolean
+  /** Harvest Glassdoor via the in-app browser session before each scout run.
+   *  Off by default: it drives the user's logged-in browser (real session, no
+   *  stored creds), which is a gray zone on Glassdoor's ToS. */
+  scoutGlassdoor: boolean
+  /** User-pasted Glassdoor search URLs to harvest; empty = auto-derive from the
+   *  profile's target roles. */
+  glassdoorSearches: string[]
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -370,7 +377,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   insertTextEnabled: false,
   theme: 'dark',
   emailPollMinutes: 5,
-  emailAutoApply: false
+  emailAutoApply: false,
+  scoutGlassdoor: false,
+  glassdoorSearches: []
 }
 
 // ---- Gmail integration ----

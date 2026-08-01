@@ -134,6 +134,15 @@ export interface IpcInvokeContract {
   'boards:removeCustom': { req: { id: string }; res: CustomBoard[] }
   'boards:setCustomEnabled': { req: { id: string; enabled: boolean }; res: CustomBoard[] }
   'boards:listCustom': { req: void; res: CustomBoard[] }
+  /** The Glassdoor search URLs to harvest (pasted, else auto-derived). */
+  'glassdoor:searches': { req: void; res: { searches: string[]; autoDerived: boolean } }
+  /** Persist raw job JSON the browser harvested into the scout feed. */
+  'glassdoor:writeFeed': {
+    req: { searches: string[]; payloads: unknown[] }
+    res: { count: number; fetchedAt: string }
+  }
+  /** Feed summary for the Settings card; null when never harvested. */
+  'glassdoor:feedStatus': { req: void; res: { count: number; fetchedAt: string; stale: boolean } | null }
   'app:info': { req: void; res: { repoRoot: string; appDataDir: string } }
   'config:get': { req: void; res: { workspacePath: string | null; onboardedAt: string | null } }
   'env:check': {
@@ -303,6 +312,9 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'boards:removeCustom',
   'boards:setCustomEnabled',
   'boards:listCustom',
+  'glassdoor:searches',
+  'glassdoor:writeFeed',
+  'glassdoor:feedStatus',
   'app:info',
   'config:get',
   'env:check',
