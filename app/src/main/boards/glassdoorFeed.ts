@@ -92,8 +92,57 @@ export function defaultGlassdoorSearches(profile: ProfileFile | null): string[] 
     })
 }
 
-/** The searches to harvest: the user's pasted URLs if any, else auto-derived. */
+function slugify(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '')
+}
+
+// A Glassdoor LOCATION base URL: /Job/<loc>-jobs-SRCH_IL.<a>,<b>_IC<locId>.htm
+// (no keyword). Glassdoor's SRCH URLs encode character offsets into the slug —
+// IL.a,b marks the location text, IC is the internal location id, KO marks the
+// keyword. From a base we can synthesize a precise per-role search at that exact
+// location by splicing the keyword slug in and recomputing the KO offsets.
+const BASE_LOCATION_RE = /glassdoor\.[^/]*\/Job\/(.+?)-jobs-SRCH_IL\.(\d+),(\d+)_IC(\d+)\.htm/i
+
+/** Expand a location base URL into one precise search per term; null if `url`
+ *  is not a bare location base (a full keyworded search is used as-is). */
+function expandLocationBase(url: string, terms: string[]): string[] | null {
+  const m = url.match(BASE_LOCATION_RE)
+  if (!m) return null
+  const [, locSlug, ilStart, ilEnd, locId] = m
+  const koStart = Number(ilEnd) + 1 // the hyphen after the location slug
+  return terms.map((term) => {
+    const kw = slugify(term)
+    const slug = `${locSlug}-${kw}-jobs`
+    return `https://www.glassdoor.com/Job/${slug}-SRCH_IL.${ilStart},${ilEnd}_IC${locId}_KO${koStart},${koStart + kw.length}.htm`
+  })
+}
+
+function searchTerms(profile: ProfileFile | null): string[] {
+  const cfg = profile?.searchConfig
+  const terms = cfg?.boards.linkedin.queries.length
+    ? cfg.boards.linkedin.queries
+    : (cfg?.targetRoles ?? []).map((r) => r.title)
+  return terms
+    .slice(0, 5)
+    .map((t) => t.trim())
+    .filter(Boolean)
+}
+
+/** The searches to harvest. A pasted Glassdoor LOCATION base URL is expanded
+ *  into a precise search per target role at that location; a pasted full search
+ *  URL is used verbatim; with nothing pasted, fall back to the keyword-embedded
+ *  default. */
 export function resolveGlassdoorSearches(pasted: string[], profile: ProfileFile | null): string[] {
-  const clean = pasted.map((u) => u.trim()).filter((u) => /^https?:\/\/[^\s]*glassdoor\./i.test(u))
-  return clean.length ? clean : defaultGlassdoorSearches(profile)
+  const terms = searchTerms(profile)
+  const out: string[] = []
+  for (const raw of pasted.map((u) => u.trim()).filter(Boolean)) {
+    if (!/^https?:\/\/[^\s]*glassdoor\./i.test(raw)) continue
+    const expanded = expandLocationBase(raw, terms)
+    if (expanded) out.push(...expanded)
+    else out.push(raw)
+  }
+  return out.length ? out : defaultGlassdoorSearches(profile)
 }

@@ -732,7 +732,7 @@ export default function SettingsView(): JSX.Element {
                 <>
                   <textarea
                     className="input h-20 w-72 resize-y text-[11px]"
-                    placeholder="Optional: paste tuned Glassdoor search URLs, one per line (with your location/salary/date filters). Leave blank to auto-derive from your target roles."
+                    placeholder="Paste your Glassdoor LOCATION base URL (e.g. .../Job/new-york-jobs-SRCH_IL...IC1132348.htm) and it auto-builds a precise search per role at that location. Or paste full search URLs, one per line. Blank = keyword-only default."
                     value={gdSearchesDraft}
                     onChange={(e) => {
                       setGdSearchesDraft(e.target.value)
