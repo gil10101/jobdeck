@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
-import type { EmailFilter, EmailMessage } from '@shared/types'
+import type { EmailClassification, EmailFilter, EmailMessage, EmailSuggestion } from '@shared/types'
 
 // Header/snippet cache for synced Gmail messages, in the app-data dir (0600 —
 // mail is personal and must never land in the workspace agents can read; the
@@ -137,6 +137,35 @@ export function updateMessage(
   }
   persist()
   return msg
+}
+
+/** Overwrite the derived fields (classification/job-related/suggestion) of one
+ *  cached message — used when a full-body reclassification supersedes the
+ *  snippet-based one made at sync. No-op for an unknown id; returns whether
+ *  anything actually changed. User state (star/hide/tags) is untouched. */
+export function applyReclassification(
+  id: string,
+  fields: {
+    classification: EmailClassification
+    jobRelated: boolean
+    suggestion: EmailSuggestion | null
+    suggestionState: EmailMessage['suggestionState']
+  }
+): boolean {
+  const msg = load().messages.find((m) => m.id === id)
+  if (!msg) return false
+  const changed =
+    msg.classification !== fields.classification ||
+    msg.jobRelated !== fields.jobRelated ||
+    msg.suggestionState !== fields.suggestionState ||
+    JSON.stringify(msg.suggestion) !== JSON.stringify(fields.suggestion)
+  if (!changed) return false
+  msg.classification = fields.classification
+  msg.jobRelated = fields.jobRelated
+  msg.suggestion = fields.suggestion
+  msg.suggestionState = fields.suggestionState
+  persist()
+  return true
 }
 
 function normalizeTag(name: string): string {

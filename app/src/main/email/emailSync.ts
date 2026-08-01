@@ -2,8 +2,14 @@ import type { EmailClassification, EmailMessage, EmailSuggestion, StatusKey, Tra
 import type { Store } from '../store/Store'
 import type { TrackerRepo } from '../store/trackerRepo'
 import { gmailConfigured } from './gmailAuth'
-import { getMessageMeta, listMessages, type GmailMessageMeta } from './gmailClient'
-import { allCachedMessages, openSuggestionCount, upsertMessages } from './emailStore'
+import { getMessageBody, getMessageMeta, listMessages, type GmailMessageMeta } from './gmailClient'
+import {
+  allCachedMessages,
+  applyReclassification,
+  getCachedMessage,
+  openSuggestionCount,
+  upsertMessages
+} from './emailStore'
 
 // Main-process poll loop (TodoWatcher sibling): every N minutes pull
 // job-search-shaped mail + Primary-category and recent-inbox sweeps, classify
@@ -299,8 +305,32 @@ export class EmailSync {
       const autoApply = this.deps.store.state.settings.emailAutoApply
       const batch: EmailMessage[] = []
 
+      // Classify job mail from the FULL body, not just the snippet: the
+      // decisive line often sits past Gmail's ~200-char preview ("we have
+      // decided not to move forward..."). Only job-sweep or ATS/assessment
+      // senders get a body fetch, so the extra calls stay bounded; the body is
+      // used for classification then discarded (never cached — mail bodies
+      // must not touch disk).
+      const bodyWorthy = (m: GmailMessageMeta): boolean =>
+        jobIds.has(m.id) || fromDomainMatch(m.from, [...ATS_DOMAINS, ...ASSESSMENT_DOMAINS])
+      const bodies = new Map<string, string>()
+      await mapLimit(
+        metas.filter(bodyWorthy),
+        FETCH_CONCURRENCY,
+        async (m) => {
+          try {
+            bodies.set(m.id, await getMessageBody(m.id))
+          } catch {
+            /* fall back to the snippet for classification */
+          }
+        }
+      )
+      if (gen !== this.generation) return { fetched: 0 }
+
       for (const meta of metas) {
-        batch.push(this.buildMessage(meta, jobIds.has(meta.id), primaryIds.has(meta.id), rows))
+        batch.push(
+          this.buildMessage(meta, jobIds.has(meta.id), primaryIds.has(meta.id), rows, bodies.get(meta.id))
+        )
       }
       // Re-listed known messages: refresh the job/primary flags (a message can
       // enter either set later; caches from before the primary flag existed
@@ -310,14 +340,11 @@ export class EmailSync {
         const known = cached.get(id)
         if (!known) continue
         const inPrimary = known.primary === true || primaryIds.has(id)
-        // The classifier improved too — recompute the class for still-open mail
-        // so a re-listed message reflects the current rules.
-        const classification =
-          known.suggestionState === 'applied' || known.suggestionState === 'dismissed'
-            ? known.classification
-            : classifyEmail(known.from, known.subject, known.snippet)
-        // Re-derive (not sticky-OR) so the promo demotion and better sender
-        // rules heal messages the old logic mis-flagged.
+        // Classification was set at ingest from the full body; the body is not
+        // cached, so re-deriving here (snippet only) would DOWNGRADE a
+        // body-detected rejection back to "other". Keep the stored class; a
+        // stale one heals when the message is opened (reclassifyFromBody).
+        const classification = known.classification
         const jobRelated = deriveJobRelated(
           known.from,
           known.subject,
@@ -329,19 +356,24 @@ export class EmailSync {
         if (suggestionState === 'open' || suggestionState === null) {
           // Hidden = the user says the classifier got this one wrong, so never
           // hold a suggestion on it. Unhiding re-derives on the next sync.
-          suggestion = known.hidden
-            ? null
-            : suggestForMessage(classification, known.from, known.subject, known.snippet, rows)
+          if (known.hidden) {
+            suggestion = null
+          } else {
+            // Re-match against the current tracker (rows change over time). But
+            // don't drop an existing open suggestion just because the company
+            // lives in the body we no longer have — keep the ingest match.
+            const rematch = suggestForMessage(classification, known.from, known.subject, known.snippet, rows)
+            suggestion = rematch ?? (suggestionState === 'open' ? suggestion : null)
+          }
           suggestionState = suggestion ? 'open' : null
         }
         const changed =
           jobRelated !== known.jobRelated ||
           inPrimary !== known.primary ||
-          classification !== known.classification ||
           suggestionState !== known.suggestionState ||
           JSON.stringify(suggestion) !== JSON.stringify(known.suggestion)
         if (changed) {
-          batch.push({ ...known, classification, jobRelated, primary: inPrimary, suggestion, suggestionState })
+          batch.push({ ...known, jobRelated, primary: inPrimary, suggestion, suggestionState })
         }
       }
 
@@ -382,11 +414,15 @@ export class EmailSync {
     meta: GmailMessageMeta,
     jobHit: boolean,
     primary: boolean,
-    rows: TrackerRow[]
+    rows: TrackerRow[],
+    body?: string
   ): EmailMessage {
-    const classification = classifyEmail(meta.from, meta.subject, meta.snippet)
-    const jobRelated = deriveJobRelated(meta.from, meta.subject, meta.snippet, jobHit, classification)
-    const suggestion = suggestForMessage(classification, meta.from, meta.subject, meta.snippet, rows)
+    // Classify against the body when we fetched it (job mail), else the snippet.
+    // meta.snippet is still stored for the list preview.
+    const scan = body ?? meta.snippet
+    const classification = classifyEmail(meta.from, meta.subject, scan)
+    const jobRelated = deriveJobRelated(meta.from, meta.subject, scan, jobHit, classification)
+    const suggestion = suggestForMessage(classification, meta.from, meta.subject, scan, rows)
     return {
       ...meta,
       classification,
@@ -397,6 +433,28 @@ export class EmailSync {
       favorite: false,
       hidden: false,
       tags: []
+    }
+  }
+
+  /** Reclassify one cached message from its full body (fetched for display).
+   *  Heals a message the snippet-based sync mis-classified — the FIRST-style
+   *  rejection whose decisive line sits past the snippet — and refreshes its
+   *  tracker suggestion. Applied/dismissed suggestions and hidden mail are left
+   *  alone. Pushes so the list + badge update live. */
+  reclassifyFromBody(id: string, body: string): void {
+    const msg = getCachedMessage(id)
+    if (!msg || msg.hidden) return
+    const rows = this.deps.tracker.listRows()
+    const classification = classifyEmail(msg.from, msg.subject, body)
+    const jobRelated = deriveJobRelated(msg.from, msg.subject, body, msg.jobRelated, classification)
+    let suggestion = msg.suggestion
+    let suggestionState = msg.suggestionState
+    if (suggestionState === 'open' || suggestionState === null) {
+      suggestion = suggestForMessage(classification, msg.from, msg.subject, body, rows)
+      suggestionState = suggestion ? 'open' : null
+    }
+    if (applyReclassification(id, { classification, jobRelated, suggestion, suggestionState })) {
+      this.deps.send('push:emailChanged', { suggestions: openSuggestionCount() })
     }
   }
 

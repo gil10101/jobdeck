@@ -763,7 +763,14 @@ export function registerIpc(services: Services): void {
     return emailStatus()
   })
   handle('email:list', ({ filter }) => listCachedMessages(filter))
-  handle('email:getBody', async ({ id }) => ({ text: await getMessageBody(id) }))
+  handle('email:getBody', async ({ id }) => {
+    const text = await getMessageBody(id)
+    // Opening a message is the chance to reclassify it from the full body,
+    // healing a snippet-based miss (e.g. a rejection whose decisive line sat
+    // past the preview) and refreshing its tracker suggestion.
+    emailSync.reclassifyFromBody(id, text)
+    return { text }
+  })
   handle('email:draftReply', ({ id, instructions }) =>
     draftEmailReply(id, instructions, store.state.settings.model)
   )
