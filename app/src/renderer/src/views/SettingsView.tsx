@@ -610,14 +610,29 @@ export default function SettingsView(): JSX.Element {
                 label="Gemini model"
                 hint={
                   provStatus?.geminiModels.length
-                    ? `${provStatus.geminiModels.length} chat models available to your key — the list comes from the live catalog.`
+                    ? `All ${provStatus.geminiModels.length} chat models your key can use, from the live catalog.`
                     : 'Flash models are fast and cheap. Save a key to list what it can use.'
                 }
               >
-                <>
+                {provStatus?.geminiModels.length ? (
+                  <select
+                    className="input w-52"
+                    value={settings.geminiModel}
+                    onChange={(e) => patch({ geminiModel: e.target.value })}
+                  >
+                    {(provStatus.geminiModels.includes(settings.geminiModel)
+                      ? provStatus.geminiModels
+                      : [settings.geminiModel, ...provStatus.geminiModels]
+                    ).map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
                   <input
                     className="input w-52"
-                    list="gemini-model-presets"
+                    placeholder="gemini-3.6-flash"
                     value={geminiModelDraft}
                     onChange={(e) => setGeminiModelDraft(e.target.value)}
                     onBlur={() => {
@@ -626,15 +641,7 @@ export default function SettingsView(): JSX.Element {
                       else setGeminiModelDraft(settings.geminiModel)
                     }}
                   />
-                  <datalist id="gemini-model-presets">
-                    {(provStatus?.geminiModels.length
-                      ? provStatus.geminiModels
-                      : ['gemini-3.6-flash', 'gemini-3.5-flash-lite']
-                    ).map((m) => (
-                      <option key={m} value={m} />
-                    ))}
-                  </datalist>
-                </>
+                )}
               </Row>
             </>
           )}
@@ -661,21 +668,30 @@ export default function SettingsView(): JSX.Element {
                 label="Ollama model"
                 hint="Must already be pulled (ollama pull …). Pick a tool-capable model — agents depend on function calling."
               >
-                <>
+                {provStatus?.ollama.models.length ? (
+                  <select
+                    className="input w-52"
+                    value={settings.ollamaModel}
+                    onChange={(e) => patch({ ollamaModel: e.target.value })}
+                  >
+                    {(settings.ollamaModel && !provStatus.ollama.models.includes(settings.ollamaModel)
+                      ? [settings.ollamaModel, ...provStatus.ollama.models]
+                      : ['', ...provStatus.ollama.models]
+                    ).map((m) => (
+                      <option key={m} value={m}>
+                        {m || 'Pick a model…'}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
                   <input
                     className="input w-52"
-                    list="ollama-model-list"
                     placeholder="qwen3:14b"
                     value={ollamaModelDraft}
                     onChange={(e) => setOllamaModelDraft(e.target.value)}
                     onBlur={() => patch({ ollamaModel: ollamaModelDraft.trim() })}
                   />
-                  <datalist id="ollama-model-list">
-                    {(provStatus?.ollama.models ?? []).map((m) => (
-                      <option key={m} value={m} />
-                    ))}
-                  </datalist>
-                </>
+                )}
               </Row>
               <Row
                 label="Context window"
