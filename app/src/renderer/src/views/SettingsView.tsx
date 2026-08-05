@@ -768,6 +768,12 @@ export default function SettingsView(): JSX.Element {
                 )}
               </Row>
               <Row
+                label="Model reasoning"
+                hint="Thinking on capable models (qwen3…) can improve tool use but costs minutes of reasoning tokens per turn on laptop hardware."
+              >
+                <Toggle value={settings.ollamaThink} onChange={(v) => patch({ ollamaThink: v })} />
+              </Row>
+              <Row
                 label="Context window"
                 hint={
                   ollamaInfo?.contextLength

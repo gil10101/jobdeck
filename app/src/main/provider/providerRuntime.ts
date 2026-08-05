@@ -45,7 +45,8 @@ export function currentProviderConfig(): ProviderConfig {
     geminiUrl: GEMINI_URL,
     ollamaUrl: s.ollamaUrl,
     ollamaKey: ollamaKey(),
-    ollamaNumCtx: s.ollamaNumCtx
+    ollamaNumCtx: s.ollamaNumCtx,
+    ollamaThink: s.ollamaThink
   }
 }
 

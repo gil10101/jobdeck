@@ -281,6 +281,9 @@ export interface ProviderConfig {
   ollamaKey: string | null
   /** Ollama defaults to a tiny context; agent prompts need far more. */
   ollamaNumCtx: number
+  /** Reasoning on thinking-capable models (qwen3…): minutes of thinking
+   *  tokens per turn on laptop hardware, so off by default. */
+  ollamaThink: boolean
 }
 
 export type Backend = (

@@ -112,6 +112,9 @@ export async function* ollamaBackend(
     model: config.model,
     messages: toMessages(req),
     stream: true,
+    // Explicit false disables reasoning on thinking models; models without
+    // thinking ignore the field.
+    think: config.ollamaThink,
     options: {
       num_ctx: config.ollamaNumCtx,
       ...(req.max_tokens ? { num_predict: req.max_tokens } : {}),

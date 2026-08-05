@@ -379,6 +379,8 @@ export interface AppSettings {
   /** Ollama context window per request — model defaults are far too small
    *  for agent prompts; lower it if the machine runs out of memory. */
   ollamaNumCtx: number
+  /** Reasoning on thinking-capable local models — much slower per turn. */
+  ollamaThink: boolean
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -396,7 +398,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   geminiModel: 'gemini-3.6-flash',
   ollamaUrl: 'http://127.0.0.1:11434',
   ollamaModel: '',
-  ollamaNumCtx: 32768
+  ollamaNumCtx: 32768,
+  ollamaThink: false
 }
 
 // ---- Gmail integration ----
