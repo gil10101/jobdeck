@@ -277,7 +277,9 @@ export function startShim(getConfig: () => ProviderConfig): Promise<ShimHandle> 
       // including under the Ollama provider (local models have no search).
       // Without a key they get an explicit unavailable result.
       if (webSearchTool(body) && !(body.tools ?? []).some((t) => t.input_schema)) {
-        backend = config.geminiKey ? geminiBackend : (r): AsyncGenerator<BackendEvent> => searchUnavailable(r)
+        backend = config.geminiKey
+          ? geminiBackend
+          : (r, _config, _signal): AsyncGenerator<BackendEvent> => searchUnavailable(r)
       }
       // Kill the backend fetch when the CLI drops the connection (abort/stop).
       const controller = new AbortController()
