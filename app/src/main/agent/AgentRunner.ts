@@ -21,7 +21,12 @@ import { parseCandidatesFile, parseReport, validateReport } from '../parsers/rep
 import { validateProfile } from '../profile/profileSchema'
 import { loadProfile } from '../profile/profileStore'
 import { ensureRatingBg } from '../companies/ratingService'
-import { providerEnv, providerPromptAddendum, resolveAgentModel } from '../provider/providerRuntime'
+import {
+  providerDisallowedTools,
+  providerEnv,
+  providerPromptAddendum,
+  resolveAgentModel
+} from '../provider/providerRuntime'
 import type { Store } from '../store/Store'
 import type { TrackerRepo } from '../store/trackerRepo'
 import type { TodoWatcher } from '../fsops/TodoWatcher'
@@ -403,6 +408,7 @@ export class AgentRunner {
           includePartialMessages: settings.includePartialMessages,
           stderr: (data: string) => this.runStore.appendStderr(run.meta.id, data),
           env: await providerEnv(),
+          ...(providerDisallowedTools().length ? { disallowedTools: providerDisallowedTools() } : {}),
           ...(model ? { model } : {})
         }
       })

@@ -38,8 +38,8 @@ import {
   writeGlassdoorFeed
 } from './boards/glassdoorFeed'
 import { APP_DATA_DIR, REPO_ROOT } from './paths'
-import { clearGeminiKey, setGeminiKey } from './provider/geminiKeyStore'
-import { providerStatus, testProvider } from './provider/providerRuntime'
+import { clearGeminiKey, clearOllamaKey, setGeminiKey, setOllamaKey } from './provider/providerKeyStore'
+import { ollamaModelDetails, providerStatus, testProvider } from './provider/providerRuntime'
 import { validateProfile } from './profile/profileSchema'
 import { loadProfile, saveProfile } from './profile/profileStore'
 import type { ProfileFile } from '@shared/profile'
@@ -715,7 +715,17 @@ export function registerIpc(services: Services): void {
     clearGeminiKey()
     return { keySet: false }
   })
+  handle('provider:setOllamaKey', ({ key }) => {
+    if (!key.trim()) throw new Error('empty API key')
+    setOllamaKey(key)
+    return { keySet: true }
+  })
+  handle('provider:clearOllamaKey', () => {
+    clearOllamaKey()
+    return { keySet: false }
+  })
   handle('provider:status', () => providerStatus())
+  handle('provider:ollamaShow', ({ model }) => ollamaModelDetails(model))
   handle('provider:test', () => testProvider())
 
   // ---- app info ----

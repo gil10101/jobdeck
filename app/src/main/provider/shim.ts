@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import http from 'node:http'
-import { geminiBackend } from './geminiBackend'
+import { geminiBackend, rememberToolSignature } from './geminiBackend'
 import { ollamaBackend } from './ollamaBackend'
 import {
   estimateTokens,
@@ -43,15 +43,21 @@ function readBody(req: http.IncomingMessage): Promise<string> {
   })
 }
 
-function sendError(res: http.ServerResponse, status: number, message: string): void {
+function sendError(
+  res: http.ServerResponse,
+  status: number,
+  message: string,
+  headers: Record<string, string> = {}
+): void {
   if (res.headersSent) {
     // Mid-stream failure: surface it as an SSE error event, then end.
     res.write(`event: error\ndata: ${JSON.stringify({ type: 'error', error: { type: 'api_error', message } })}\n\n`)
     res.end()
     return
   }
-  res.writeHead(status, { 'content-type': 'application/json' })
-  res.end(JSON.stringify({ type: 'error', error: { type: 'api_error', message } }))
+  const type = status === 429 ? 'rate_limit_error' : status === 529 ? 'overloaded_error' : 'api_error'
+  res.writeHead(status, { 'content-type': 'application/json', ...headers })
+  res.end(JSON.stringify({ type: 'error', error: { type, message } }))
 }
 
 function blockId(prefix: string): string {
@@ -138,9 +144,13 @@ async function streamResponse(
         textOpen = false
       }
       index++
+      const toolId = blockId('toolu')
+      // The CLI echoes this id back in history; the signature rejoins the
+      // functionCall there (Gemini 3 rejects unsigned calls).
+      if (ev.signature) rememberToolSignature(toolId, ev.signature)
       emit('content_block_start', {
         index,
-        content_block: { type: 'tool_use', id: blockId('toolu'), name: ev.name, input: {} }
+        content_block: { type: 'tool_use', id: toolId, name: ev.name, input: {} }
       })
       emit('content_block_delta', {
         index,
@@ -198,7 +208,9 @@ async function jsonResponse(
   for await (const ev of backend(req, config, signal)) {
     if (ev.kind === 'text') collected.text += ev.delta
     else if (ev.kind === 'tool') {
-      collected.tools.push({ id: blockId('toolu'), name: ev.name, input: ev.input })
+      const id = blockId('toolu')
+      if (ev.signature) rememberToolSignature(id, ev.signature)
+      collected.tools.push({ id, name: ev.name, input: ev.input })
     } else if (ev.kind === 'web_search') {
       collected.searches.push(ev)
     } else {
@@ -290,9 +302,13 @@ export function startShim(getConfig: () => ProviderConfig): Promise<ShimHandle> 
       } catch (err) {
         if (!controller.signal.aborted) {
           console.error('[provider] shim request failed:', err)
-          // 500 (not 4xx) so the CLI's retry logic gets a chance on flaky
-          // local backends; the message still carries the real cause.
-          sendError(res, 500, String(err instanceof Error ? err.message : err))
+          const message = String(err instanceof Error ? err.message : err)
+          // The backend's real status matters to the CLI: 429/5xx are
+          // retried with backoff, 400s are surfaced immediately. Unknown
+          // failures stay 500 so the retry logic gets a chance.
+          const status = (err as { status?: number }).status ?? 500
+          const retryIn = /retry in ([0-9.]+)s/i.exec(message)?.[1]
+          sendError(res, status, message, retryIn ? { 'retry-after': String(Math.ceil(Number(retryIn))) } : {})
         } else {
           res.destroy()
         }

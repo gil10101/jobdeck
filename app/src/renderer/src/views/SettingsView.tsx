@@ -100,10 +100,13 @@ export default function SettingsView(): JSX.Element {
     provider: 'claude' | 'gemini' | 'ollama'
     geminiKeySet: boolean
     geminiModels: string[]
+    ollamaKeySet: boolean
     ollama: { reachable: boolean; models: string[]; message: string }
   } | null>(null)
-  // Never echoes the stored key back; holds only fresh input until saved.
+  // Never echoes the stored keys back; these hold only fresh input until saved.
   const [geminiKeyDraft, setGeminiKeyDraft] = useState('')
+  const [ollamaKeyDraft, setOllamaKeyDraft] = useState('')
+  const [ollamaInfo, setOllamaInfo] = useState<{ contextLength: number | null; tools: boolean | null } | null>(null)
   const [geminiModelDraft, setGeminiModelDraft] = useState('')
   const [ollamaUrlDraft, setOllamaUrlDraft] = useState('')
   const [ollamaModelDraft, setOllamaModelDraft] = useState('')
@@ -155,6 +158,22 @@ export default function SettingsView(): JSX.Element {
     }
   }, [settings?.geminiModel, settings?.ollamaUrl, settings?.ollamaModel, settings?.ollamaNumCtx])
 
+  // Per-model metadata (context ceiling, tool support) for the hints below.
+  useEffect(() => {
+    setOllamaInfo(null)
+    const model = settings?.ollamaModel
+    if (!model || settings?.provider !== 'ollama') return
+    let stale = false
+    void call('provider:ollamaShow', { model })
+      .then((info) => {
+        if (!stale) setOllamaInfo(info)
+      })
+      .catch(() => undefined)
+    return () => {
+      stale = true
+    }
+  }, [settings?.ollamaModel, settings?.ollamaUrl, settings?.provider])
+
   useEffect(() => {
     if (settings) setGdSearchesDraft((settings.glassdoorSearches ?? []).join('\n'))
   }, [settings?.glassdoorSearches])
@@ -198,6 +217,27 @@ export default function SettingsView(): JSX.Element {
       await call('provider:clearGeminiKey', undefined)
       await refreshProviderStatus()
       toast('Gemini key removed', 'success')
+    } catch (err) {
+      toast(String(err), 'error')
+    }
+  }
+
+  const saveOllamaKey = async (): Promise<void> => {
+    try {
+      await call('provider:setOllamaKey', { key: ollamaKeyDraft })
+      setOllamaKeyDraft('')
+      await refreshProviderStatus()
+      toast('Ollama key saved (encrypted with the OS keychain)', 'success')
+    } catch (err) {
+      toast(String(err), 'error')
+    }
+  }
+
+  const clearOllamaKeyNow = async (): Promise<void> => {
+    try {
+      await call('provider:clearOllamaKey', undefined)
+      await refreshProviderStatus()
+      toast('Ollama key removed', 'success')
     } catch (err) {
       toast(String(err), 'error')
     }
@@ -616,7 +656,7 @@ export default function SettingsView(): JSX.Element {
               >
                 {provStatus?.geminiModels.length ? (
                   <select
-                    className="input w-52"
+                    className="input h-8 w-52 py-0"
                     value={settings.geminiModel}
                     onChange={(e) => patch({ geminiModel: e.target.value })}
                   >
@@ -665,12 +705,46 @@ export default function SettingsView(): JSX.Element {
                 />
               </Row>
               <Row
+                label="Ollama API key"
+                hint={
+                  provStatus?.ollamaKeySet
+                    ? 'A key is stored, encrypted with the OS keychain. Only needed for ollama.com cloud models.'
+                    : 'Optional — only for ollama.com cloud models (marked "cloud" below). Local models need no key.'
+                }
+              >
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="password"
+                    className="input w-52"
+                    placeholder={provStatus?.ollamaKeySet ? '(key set)' : 'ollama.com key'}
+                    value={ollamaKeyDraft}
+                    onChange={(e) => setOllamaKeyDraft(e.target.value)}
+                  />
+                  <button
+                    className="btn px-2 py-1 text-[10px]"
+                    disabled={!ollamaKeyDraft.trim()}
+                    onClick={() => void saveOllamaKey()}
+                  >
+                    Save
+                  </button>
+                  {provStatus?.ollamaKeySet && (
+                    <button className="btn px-2 py-1 text-[10px]" onClick={() => void clearOllamaKeyNow()}>
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </Row>
+              <Row
                 label="Ollama model"
-                hint="Must already be pulled (ollama pull …). Pick a tool-capable model — agents depend on function calling."
+                hint={
+                  ollamaInfo?.tools === false
+                    ? 'This model does NOT advertise tool support — agents will not work with it. Pick a tool-capable model.'
+                    : 'Must already be pulled (ollama pull …) or a cloud model. Pick a tool-capable model — agents depend on function calling.'
+                }
               >
                 {provStatus?.ollama.models.length ? (
                   <select
-                    className="input w-52"
+                    className="input h-8 w-52 py-0"
                     value={settings.ollamaModel}
                     onChange={(e) => patch({ ollamaModel: e.target.value })}
                   >
@@ -679,7 +753,7 @@ export default function SettingsView(): JSX.Element {
                       : ['', ...provStatus.ollama.models]
                     ).map((m) => (
                       <option key={m} value={m}>
-                        {m || 'Pick a model…'}
+                        {m ? `${m}${/[-:]cloud$/.test(m) ? '  (cloud)' : ''}` : 'Pick a model…'}
                       </option>
                     ))}
                   </select>
@@ -695,18 +769,31 @@ export default function SettingsView(): JSX.Element {
               </Row>
               <Row
                 label="Context window"
-                hint="Tokens per request (num_ctx). Agent prompts are large — keep this high; lower it only if the machine runs out of memory."
+                hint={
+                  ollamaInfo?.contextLength
+                    ? `Tokens per request (num_ctx). This model supports up to ${Math.round(ollamaInfo.contextLength / 1024)}k${
+                        settings.ollamaNumCtx > ollamaInfo.contextLength
+                          ? ' — your setting exceeds it and will be capped by the server'
+                          : ''
+                      }.`
+                    : 'Tokens per request (num_ctx). Agent prompts are large — keep this high; lower it only if the machine runs out of memory.'
+                }
               >
-                <input
-                  className="input w-24 text-right"
-                  value={ollamaCtxDraft}
-                  onChange={(e) => setOllamaCtxDraft(e.target.value.replace(/\D/g, ''))}
-                  onBlur={() => {
-                    const n = parseInt(ollamaCtxDraft, 10)
-                    if (n >= 4096 && n <= 1_048_576) patch({ ollamaNumCtx: n })
-                    else setOllamaCtxDraft(String(settings.ollamaNumCtx))
-                  }}
-                />
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-gray-500">
+                    ≈{Math.round(parseInt(ollamaCtxDraft || '0', 10) / 1024)}k
+                  </span>
+                  <input
+                    className="input w-24 text-right"
+                    value={ollamaCtxDraft}
+                    onChange={(e) => setOllamaCtxDraft(e.target.value.replace(/\D/g, ''))}
+                    onBlur={() => {
+                      const n = parseInt(ollamaCtxDraft, 10)
+                      if (n >= 4096 && n <= 1_048_576) patch({ ollamaNumCtx: n })
+                      else setOllamaCtxDraft(String(settings.ollamaNumCtx))
+                    }}
+                  />
+                </div>
               </Row>
             </>
           )}
@@ -738,7 +825,7 @@ export default function SettingsView(): JSX.Element {
               hint="Model used by agent runs. Default = your Claude Code default."
             >
               <select
-                className="input w-44"
+                className="input h-8 w-44 py-0"
                 value={modelDraft}
                 onChange={(e) => {
                   setModelDraft(e.target.value)

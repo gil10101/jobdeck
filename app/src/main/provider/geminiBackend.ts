@@ -16,8 +16,28 @@ import {
 const MAX_OUTPUT_TOKENS = 65536
 const MAX_STOP_SEQUENCES = 5
 
+// Gemini 3 hard-rejects (HTTP 400) history functionCall parts without their
+// thought signature. Real signatures are remembered per tool_use id (the CLI
+// echoes our ids back verbatim); anything unknown — claude-era transcripts,
+// app restarts — falls back to the documented validation-skip value at the
+// cost of some reasoning context.
+const SIGNATURE_FALLBACK = 'skip_thought_signature_validator'
+const SIGNATURE_CAP = 1000
+const toolSignatures = new Map<string, string>()
+
+export function rememberToolSignature(toolUseId: string, signature: string): void {
+  toolSignatures.set(toolUseId, signature)
+  if (toolSignatures.size > SIGNATURE_CAP) {
+    const oldest = toolSignatures.keys().next().value
+    if (oldest !== undefined) toolSignatures.delete(oldest)
+  }
+}
+
 interface GeminiPart {
   text?: string
+  /** Reasoning parts stream with thought:true — internal, never user-visible. */
+  thought?: boolean
+  thoughtSignature?: string
   inlineData?: { mimeType: string; data: string }
   functionCall?: { name: string; args: Record<string, unknown> }
   functionResponse?: { name: string; response: Record<string, unknown> }
@@ -43,8 +63,12 @@ function toContents(req: AnthropicRequest): GeminiContent[] {
     for (const b of msg.blocks) {
       if (b.kind === 'text') parts.push({ text: b.text })
       else if (b.kind === 'image') parts.push({ inlineData: { mimeType: b.mimeType, data: b.base64 } })
-      else if (b.kind === 'tool_use') parts.push({ functionCall: { name: b.name, args: b.input } })
-      else {
+      else if (b.kind === 'tool_use') {
+        parts.push({
+          functionCall: { name: b.name, args: b.input },
+          thoughtSignature: toolSignatures.get(b.id) ?? SIGNATURE_FALLBACK
+        })
+      } else {
         parts.push({
           functionResponse: { name: b.toolName, response: { result: b.text || '(no output)' } }
         })
@@ -148,7 +172,11 @@ export async function* geminiBackend(
     } catch {
       /* non-JSON error body */
     }
-    throw new Error(`Gemini API error (HTTP ${res.status})${detail ? `: ${detail}` : ''}`)
+    const err = new Error(`Gemini API error (HTTP ${res.status})${detail ? `: ${detail}` : ''}`) as Error & { status?: number }
+    // Kept so the shim can answer with the true status — the CLI backs off
+    // correctly on 429/503 but treats other statuses differently.
+    err.status = res.status
+    throw err
   }
 
   let sawTool = false
@@ -173,10 +201,19 @@ export async function* geminiBackend(
     if (chunk.error?.message) throw new Error(`Gemini stream error: ${chunk.error.message}`)
     const cand = chunk.candidates?.[0]
     for (const part of cand?.content?.parts ?? []) {
-      if (typeof part.text === 'string' && part.text) yield { kind: 'text', delta: part.text }
+      // Reasoning parts are internal — leaking them would show chain-of-thought
+      // as assistant prose.
+      if (typeof part.text === 'string' && part.text && !part.thought) {
+        yield { kind: 'text', delta: part.text }
+      }
       if (part.functionCall?.name) {
         sawTool = true
-        yield { kind: 'tool', name: part.functionCall.name, input: part.functionCall.args ?? {} }
+        yield {
+          kind: 'tool',
+          name: part.functionCall.name,
+          input: part.functionCall.args ?? {},
+          ...(part.thoughtSignature ? { signature: part.thoughtSignature } : {})
+        }
       }
     }
     const gm = cand?.groundingMetadata

@@ -143,18 +143,27 @@ export interface IpcInvokeContract {
   }
   /** Feed summary for the Settings card; null when never harvested. */
   'glassdoor:feedStatus': { req: void; res: { count: number; fetchedAt: string; stale: boolean } | null }
-  // ---- BYO model providers (Gemini key via safeStorage; Ollama local) ----
+  // ---- BYO model providers (keys via safeStorage; Ollama local or cloud) ----
   'provider:setGeminiKey': { req: { key: string }; res: { keySet: boolean } }
   'provider:clearGeminiKey': { req: void; res: { keySet: boolean } }
-  /** Gemini key presence + live model catalogs (Gemini per-key, Ollama local). */
+  /** ollama.com key — only needed for cloud models. */
+  'provider:setOllamaKey': { req: { key: string }; res: { keySet: boolean } }
+  'provider:clearOllamaKey': { req: void; res: { keySet: boolean } }
+  /** Key presence + live model catalogs (Gemini per-key, Ollama local/cloud). */
   'provider:status': {
     req: void
     res: {
       provider: 'claude' | 'gemini' | 'ollama'
       geminiKeySet: boolean
       geminiModels: string[]
+      ollamaKeySet: boolean
       ollama: { reachable: boolean; models: string[]; message: string }
     }
+  }
+  /** Metadata for one Ollama model: context ceiling + tool support. */
+  'provider:ollamaShow': {
+    req: { model: string }
+    res: { contextLength: number | null; tools: boolean | null }
   }
   /** Live round-trip against the active provider's backend. */
   'provider:test': { req: void; res: { ok: boolean; message: string } }
@@ -332,7 +341,10 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'glassdoor:feedStatus',
   'provider:setGeminiKey',
   'provider:clearGeminiKey',
+  'provider:setOllamaKey',
+  'provider:clearOllamaKey',
   'provider:status',
+  'provider:ollamaShow',
   'provider:test',
   'app:info',
   'config:get',

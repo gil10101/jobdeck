@@ -102,7 +102,7 @@ export async function* ollamaBackend(
 
   const res = await fetch(`${config.ollamaUrl.replace(/\/$/, '')}/api/chat`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...authHeader(config.ollamaKey) },
     body: JSON.stringify(body),
     signal
   })
@@ -113,7 +113,9 @@ export async function* ollamaBackend(
     } catch {
       /* non-JSON error body */
     }
-    throw new Error(`Ollama error (HTTP ${res.status})${detail ? `: ${detail}` : ''}`)
+    const err = new Error(`Ollama error (HTTP ${res.status})${detail ? `: ${detail}` : ''}`) as Error & { status?: number }
+    err.status = res.status
+    throw err
   }
 
   let sawTool = false
@@ -173,10 +175,53 @@ export async function* ollamaBackend(
   }
 }
 
+/** Bearer auth for ollama.com cloud models; local daemons ignore it. */
+function authHeader(key: string | null): Record<string, string> {
+  return key ? { authorization: `Bearer ${key}` } : {}
+}
+
 /** Reachability + installed-models probe for the Settings card. */
-export async function ollamaModels(url: string): Promise<string[]> {
-  const res = await fetch(`${url.replace(/\/$/, '')}/api/tags`, { signal: AbortSignal.timeout(3000) })
+export async function ollamaModels(url: string, key: string | null = null): Promise<string[]> {
+  const res = await fetch(`${url.replace(/\/$/, '')}/api/tags`, {
+    headers: authHeader(key),
+    signal: AbortSignal.timeout(5000)
+  })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   const parsed = (await res.json()) as { models?: { name?: string }[] }
   return (parsed.models ?? []).map((m) => m.name ?? '').filter(Boolean)
+}
+
+export interface OllamaModelInfo {
+  /** Trained context length from model metadata; null when not reported. */
+  contextLength: number | null
+  /** Whether the model advertises tool/function calling; null when unknown. */
+  tools: boolean | null
+}
+
+/** Model metadata for the Settings hints (context ceiling, tool support). */
+export async function ollamaModelInfo(
+  url: string,
+  key: string | null,
+  model: string
+): Promise<OllamaModelInfo> {
+  const res = await fetch(`${url.replace(/\/$/, '')}/api/show`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...authHeader(key) },
+    body: JSON.stringify({ model }),
+    signal: AbortSignal.timeout(5000)
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const parsed = (await res.json()) as {
+    model_info?: Record<string, unknown>
+    capabilities?: string[]
+  }
+  let contextLength: number | null = null
+  for (const [k, v] of Object.entries(parsed.model_info ?? {})) {
+    if (k.endsWith('.context_length') && typeof v === 'number') {
+      contextLength = v
+      break
+    }
+  }
+  const tools = Array.isArray(parsed.capabilities) ? parsed.capabilities.includes('tools') : null
+  return { contextLength, tools }
 }

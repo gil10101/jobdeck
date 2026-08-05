@@ -210,7 +210,13 @@ export function geminiSchema(schema: unknown): Record<string, unknown> | null {
 /** What a backend yields; the shim renders these as Anthropic SSE or JSON. */
 export type BackendEvent =
   | { kind: 'text'; delta: string }
-  | { kind: 'tool'; name: string; input: Record<string, unknown> }
+  | {
+      kind: 'tool'
+      name: string
+      input: Record<string, unknown>
+      /** Gemini 3 thought signature — must ride back with this call in history. */
+      signature?: string
+    }
   | {
       // One executed (or failed) web search → a server_tool_use +
       // web_search_tool_result block pair in the Anthropic response.
@@ -237,6 +243,8 @@ export interface ProviderConfig {
   /** Override for tests; production uses the public endpoint. */
   geminiUrl: string
   ollamaUrl: string
+  /** ollama.com key for cloud models; local daemons need none. */
+  ollamaKey: string | null
   /** Ollama defaults to a tiny context; agent prompts need far more. */
   ollamaNumCtx: number
 }

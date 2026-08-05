@@ -1,7 +1,7 @@
 import type { AppSettings } from '@shared/types'
 import { listGeminiModels, testGemini } from './geminiBackend'
-import { geminiKey, geminiKeySet } from './geminiKeyStore'
-import { ollamaModels } from './ollamaBackend'
+import { geminiKey, geminiKeySet, ollamaKey, ollamaKeySet } from './providerKeyStore'
+import { ollamaModelInfo, ollamaModels, type OllamaModelInfo } from './ollamaBackend'
 import { startShim, type ShimHandle } from './shim'
 import type { ProviderConfig } from './translate'
 
@@ -44,6 +44,7 @@ export function currentProviderConfig(): ProviderConfig {
     geminiModel: s.geminiModel,
     geminiUrl: GEMINI_URL,
     ollamaUrl: s.ollamaUrl,
+    ollamaKey: ollamaKey(),
     ollamaNumCtx: s.ollamaNumCtx
   }
 }
@@ -105,15 +106,24 @@ export function resolveAgentModel(requested?: string | null): string | undefined
 /** Extra prompt discipline for third-party models: Claude models are tuned
  *  for this harness; others need the contract spelled out. Empty for claude. */
 export function providerPromptAddendum(): string {
-  if (currentProviderConfig().provider === 'claude') return ''
+  const provider = currentProviderConfig().provider
+  if (provider === 'claude') return ''
   return [
     '',
     'MODEL DISCIPLINE (you are running via a compatibility layer):',
     '- Call tools with strict JSON arguments that match the schema exactly; never invent tool or field names.',
     '- Prefer one tool call at a time; read results before the next call.',
     '- When asked to write a file, use the Write tool with the COMPLETE file content.',
+    '- Do the work directly with Read/Write/Bash-style tools — never launch subagents or name agent types.',
     '- Finish with exactly the output format the task specifies — no extra commentary after it.'
   ].join('\n')
+}
+
+/** Tools withheld from agent runs per provider. Local models reliably
+ *  hallucinate Task/agent-type arguments; withholding the tool beats hoping
+ *  the prompt is obeyed. */
+export function providerDisallowedTools(): string[] {
+  return currentProviderConfig().provider === 'ollama' ? ['Task'] : []
 }
 
 export interface ProviderStatus {
@@ -121,17 +131,18 @@ export interface ProviderStatus {
   geminiKeySet: boolean
   /** Chat models this key can use, from the live catalog ([] without a key). */
   geminiModels: string[]
+  ollamaKeySet: boolean
   ollama: { reachable: boolean; models: string[]; message: string }
 }
 
 export async function providerStatus(): Promise<ProviderStatus> {
   const s = settings()
   const [ollama, geminiModels] = await Promise.all([
-    ollamaModels(s.ollamaUrl)
+    ollamaModels(s.ollamaUrl, ollamaKey())
       .then((models) => ({
         reachable: true,
         models,
-        message: `${models.length} model${models.length === 1 ? '' : 's'} installed`
+        message: `${models.length} model${models.length === 1 ? '' : 's'} available`
       }))
       .catch((err: unknown) => ({
         reachable: false,
@@ -140,7 +151,20 @@ export async function providerStatus(): Promise<ProviderStatus> {
       })),
     listGeminiModels(currentProviderConfig()).catch(() => [] as string[])
   ])
-  return { provider: s.provider ?? 'claude', geminiKeySet: geminiKeySet(), geminiModels, ollama }
+  return {
+    provider: s.provider ?? 'claude',
+    geminiKeySet: geminiKeySet(),
+    geminiModels,
+    ollamaKeySet: ollamaKeySet(),
+    ollama
+  }
+}
+
+/** Metadata for one Ollama model (context ceiling, tool support) — Settings
+ *  hint material; null fields when the server does not report them. */
+export async function ollamaModelDetails(model: string): Promise<OllamaModelInfo> {
+  const s = settings()
+  return ollamaModelInfo(s.ollamaUrl, ollamaKey(), model)
 }
 
 /** One live round-trip against the ACTIVE provider's backend (not the SDK —
@@ -152,7 +176,7 @@ export async function testProvider(): Promise<{ ok: boolean; message: string }> 
       return { ok: true, message: await testGemini(config) }
     }
     if (config.provider === 'ollama') {
-      const models = await ollamaModels(config.ollamaUrl)
+      const models = await ollamaModels(config.ollamaUrl, config.ollamaKey)
       if (!config.model) return { ok: false, message: `reachable; pick a model (installed: ${models.join(', ') || 'none'})` }
       const found = models.some((m) => m === config.model || m.startsWith(`${config.model}:`))
       return found
