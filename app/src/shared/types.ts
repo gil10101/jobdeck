@@ -390,7 +390,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   scoutGlassdoor: false,
   glassdoorSearches: [],
   provider: 'claude',
-  geminiModel: 'gemini-2.5-flash',
+  geminiModel: 'gemini-3.6-flash',
   ollamaUrl: 'http://127.0.0.1:11434',
   ollamaModel: '',
   ollamaNumCtx: 32768

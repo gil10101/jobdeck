@@ -51,6 +51,11 @@ export class Store extends EventEmitter {
           // Migrations for fields added after first release.
           this.state_.candidates ??= []
           this.state_.intakeFolders ??= []
+          // Retired upstream ("no longer available to new users", HTTP 404) —
+          // was this app's original default, so stored copies get upgraded.
+          if (this.state_.settings.geminiModel === 'gemini-2.5-flash') {
+            this.state_.settings.geminiModel = DEFAULT_SETTINGS.geminiModel
+          }
           for (const item of this.state_.intake) {
             item.imagePaths ??= []
             item.folderId ??= null

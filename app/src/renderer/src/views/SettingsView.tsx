@@ -99,6 +99,7 @@ export default function SettingsView(): JSX.Element {
   const [provStatus, setProvStatus] = useState<{
     provider: 'claude' | 'gemini' | 'ollama'
     geminiKeySet: boolean
+    geminiModels: string[]
     ollama: { reachable: boolean; models: string[]; message: string }
   } | null>(null)
   // Never echoes the stored key back; holds only fresh input until saved.
@@ -605,7 +606,14 @@ export default function SettingsView(): JSX.Element {
                   )}
                 </div>
               </Row>
-              <Row label="Gemini model" hint="Flash is fast and cheap; Pro is stronger on long agent runs.">
+              <Row
+                label="Gemini model"
+                hint={
+                  provStatus?.geminiModels.length
+                    ? `${provStatus.geminiModels.length} chat models available to your key — the list comes from the live catalog.`
+                    : 'Flash models are fast and cheap. Save a key to list what it can use.'
+                }
+              >
                 <>
                   <input
                     className="input w-52"
@@ -619,9 +627,12 @@ export default function SettingsView(): JSX.Element {
                     }}
                   />
                   <datalist id="gemini-model-presets">
-                    <option value="gemini-2.5-flash" />
-                    <option value="gemini-2.5-pro" />
-                    <option value="gemini-2.5-flash-lite" />
+                    {(provStatus?.geminiModels.length
+                      ? provStatus.geminiModels
+                      : ['gemini-3.6-flash', 'gemini-3.5-flash-lite']
+                    ).map((m) => (
+                      <option key={m} value={m} />
+                    ))}
                   </datalist>
                 </>
               </Row>

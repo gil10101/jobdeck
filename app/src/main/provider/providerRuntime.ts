@@ -1,5 +1,5 @@
 import type { AppSettings } from '@shared/types'
-import { testGemini } from './geminiBackend'
+import { listGeminiModels, testGemini } from './geminiBackend'
 import { geminiKey, geminiKeySet } from './geminiKeyStore'
 import { ollamaModels } from './ollamaBackend'
 import { startShim, type ShimHandle } from './shim'
@@ -119,19 +119,28 @@ export function providerPromptAddendum(): string {
 export interface ProviderStatus {
   provider: 'claude' | 'gemini' | 'ollama'
   geminiKeySet: boolean
+  /** Chat models this key can use, from the live catalog ([] without a key). */
+  geminiModels: string[]
   ollama: { reachable: boolean; models: string[]; message: string }
 }
 
 export async function providerStatus(): Promise<ProviderStatus> {
   const s = settings()
-  let ollama: ProviderStatus['ollama'] = { reachable: false, models: [], message: '' }
-  try {
-    const models = await ollamaModels(s.ollamaUrl)
-    ollama = { reachable: true, models, message: `${models.length} model${models.length === 1 ? '' : 's'} installed` }
-  } catch (err) {
-    ollama = { reachable: false, models: [], message: `not reachable: ${err instanceof Error ? err.message : String(err)}` }
-  }
-  return { provider: s.provider ?? 'claude', geminiKeySet: geminiKeySet(), ollama }
+  const [ollama, geminiModels] = await Promise.all([
+    ollamaModels(s.ollamaUrl)
+      .then((models) => ({
+        reachable: true,
+        models,
+        message: `${models.length} model${models.length === 1 ? '' : 's'} installed`
+      }))
+      .catch((err: unknown) => ({
+        reachable: false,
+        models: [] as string[],
+        message: `not reachable: ${err instanceof Error ? err.message : String(err)}`
+      })),
+    listGeminiModels(currentProviderConfig()).catch(() => [] as string[])
+  ])
+  return { provider: s.provider ?? 'claude', geminiKeySet: geminiKeySet(), geminiModels, ollama }
 }
 
 /** One live round-trip against the ACTIVE provider's backend (not the SDK —

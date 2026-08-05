@@ -146,12 +146,13 @@ export interface IpcInvokeContract {
   // ---- BYO model providers (Gemini key via safeStorage; Ollama local) ----
   'provider:setGeminiKey': { req: { key: string }; res: { keySet: boolean } }
   'provider:clearGeminiKey': { req: void; res: { keySet: boolean } }
-  /** Gemini key presence + Ollama reachability/installed models. */
+  /** Gemini key presence + live model catalogs (Gemini per-key, Ollama local). */
   'provider:status': {
     req: void
     res: {
       provider: 'claude' | 'gemini' | 'ollama'
       geminiKeySet: boolean
+      geminiModels: string[]
       ollama: { reachable: boolean; models: string[]; message: string }
     }
   }

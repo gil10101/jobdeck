@@ -69,9 +69,10 @@ function toolConfig(req: AnthropicRequest): Record<string, unknown> | undefined 
 function buildBody(req: AnthropicRequest): Record<string, unknown> {
   const body: Record<string, unknown> = {
     contents: toContents(req),
+    // The incoming request's temperature is NOT forwarded: sampling params
+    // (temperature/top_p/top_k) are deprecated on Gemini 3.5+ models.
     generationConfig: {
       maxOutputTokens: Math.min(req.max_tokens ?? 8192, MAX_OUTPUT_TOKENS),
-      ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
       ...(req.stop_sequences?.length
         ? { stopSequences: req.stop_sequences.slice(0, MAX_STOP_SEQUENCES) }
         : {})
@@ -224,6 +225,41 @@ export async function* geminiBackend(
     inputTokens: inputTokens ?? estimateTokens(req),
     outputTokens
   }
+}
+
+/** Names to hide from the picker: generateContent-capable but not chat models. */
+const NON_CHAT_RE = /image|tts|audio|live|embedding|veo|lyria|imagen|robotics|computer-use|deep-research|translate/i
+
+/** Chat-capable model ids available to THIS key, newest-ish first — the model
+ *  catalog churns (ids retire for new keys), so the picker asks the API
+ *  instead of trusting a hardcoded list. */
+export async function listGeminiModels(config: ProviderConfig): Promise<string[]> {
+  if (!config.geminiKey) return []
+  const out: string[] = []
+  let pageToken = ''
+  // v1beta paginates; 3 pages at 200/page covers the whole catalog today.
+  for (let page = 0; page < 3; page++) {
+    const url = `${config.geminiUrl.replace(/\/$/, '')}/v1beta/models?pageSize=200${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`
+    const res = await fetch(url, {
+      headers: { 'x-goog-api-key': config.geminiKey },
+      signal: AbortSignal.timeout(6000)
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const parsed = (await res.json()) as {
+      models?: { name?: string; supportedGenerationMethods?: string[] }[]
+      nextPageToken?: string
+    }
+    for (const m of parsed.models ?? []) {
+      const id = (m.name ?? '').replace(/^models\//, '')
+      if (!id.startsWith('gemini-')) continue
+      if (!(m.supportedGenerationMethods ?? []).includes('generateContent')) continue
+      if (NON_CHAT_RE.test(id)) continue
+      out.push(id)
+    }
+    pageToken = parsed.nextPageToken ?? ''
+    if (!pageToken) break
+  }
+  return out.sort().reverse()
 }
 
 /** One tiny non-streaming request to validate key + model; throws with detail. */
