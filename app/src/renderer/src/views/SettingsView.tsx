@@ -440,10 +440,14 @@ export default function SettingsView(): JSX.Element {
             <button
               className="btn btn-primary px-2 py-1 text-[10px]"
               disabled={masterContextSaved && kbNotesSaved}
-              onClick={() => {
-                if (!masterContextSaved) void saveMasterContext()
-                if (!kbNotesSaved) void saveKbNotes()
-              }}
+              onClick={() =>
+                void (async () => {
+                  // Sequential: a failed save leaves its own dirty flag set, so
+                  // the button stays enabled to retry just that one.
+                  if (!masterContextSaved) await saveMasterContext()
+                  if (!kbNotesSaved) await saveKbNotes()
+                })()
+              }
             >
               {masterContextSaved && kbNotesSaved ? 'Saved' : 'Save'}
             </button>

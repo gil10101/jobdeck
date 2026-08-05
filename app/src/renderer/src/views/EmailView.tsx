@@ -81,7 +81,11 @@ function reflowPlain(text: string): string {
       next !== '' &&
       prev.trim().length >= 40 &&
       !/https?:\/\/\S*$/.test(prev.trim()) &&
+      // List items (bulleted or numbered) and indented/quoted lines keep
+      // their own line — only clear mid-sentence wraps join.
       !/^[-*•>]/.test(next) &&
+      !/^(\d+[.)]|[a-z][.)])\s/.test(next) &&
+      !/^\s/.test(line) &&
       (!/[.!?:]$/.test(prev.trim()) || /^[a-z0-9]/.test(next))
     if (joinable) out[out.length - 1] = `${prev.trimEnd()} ${next}`
     else out.push(line)
