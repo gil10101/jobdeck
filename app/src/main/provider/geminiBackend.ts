@@ -169,15 +169,21 @@ export async function* geminiBackend(
       outputTokens = chunk.usageMetadata.candidatesTokenCount ?? outputTokens
     }
   }
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split('\n')
-    buffer = lines.pop() ?? ''
-    for (const line of lines) yield* handleLine(line)
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+      for (const line of lines) yield* handleLine(line)
+    }
+    if (buffer) yield* handleLine(buffer)
+  } finally {
+    // Runs on parse errors AND consumer abandonment (generator .return());
+    // without it the connection lingers until the socket times out.
+    void reader.cancel().catch(() => undefined)
   }
-  if (buffer) yield* handleLine(buffer)
   yield {
     kind: 'done',
     stopReason: mapStop(finishReason, sawTool),

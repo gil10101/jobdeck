@@ -19,6 +19,9 @@ const API_TIMEOUT_MS = 600_000
 let getSettings: (() => AppSettings) | null = null
 let shim: ShimHandle | null = null
 let shimStarting: Promise<ShimHandle> | null = null
+// Fences a startup that outlives a stopShim(): the late resolution must not
+// resurrect a server nothing will ever close.
+let shimGen = 0
 
 export function initProviderRuntime(settingsGetter: () => AppSettings): void {
   getSettings = settingsGetter
@@ -45,7 +48,12 @@ export function currentProviderConfig(): ProviderConfig {
 async function ensureShim(): Promise<ShimHandle> {
   if (shim) return shim
   if (!shimStarting) {
+    const gen = shimGen
     shimStarting = startShim(currentProviderConfig).then((h) => {
+      if (gen !== shimGen) {
+        h.close()
+        throw new Error('shim stopped during startup')
+      }
       shim = h
       return h
     })
@@ -55,6 +63,7 @@ async function ensureShim(): Promise<ShimHandle> {
 }
 
 export function stopShim(): void {
+  shimGen++
   shim?.close()
   shim = null
   shimStarting = null
