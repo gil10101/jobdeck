@@ -66,6 +66,8 @@ function toMessages(req: AnthropicRequest): OllamaMessage[] {
 interface OllamaChunk {
   message?: {
     content?: string
+    /** Thinking-capable models (qwen3…) stream reasoning separately here. */
+    thinking?: string
     tool_calls?: { function?: { name?: string; arguments?: unknown } }[]
   }
   done?: boolean
@@ -73,6 +75,31 @@ interface OllamaChunk {
   prompt_eval_count?: number
   eval_count?: number
   error?: string
+}
+
+/** End index of the balanced JSON object starting at `start` (string-aware),
+ *  or -1 while incomplete. */
+function balancedEnd(s: string, start: number): number {
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let i = start; i < s.length; i++) {
+    const ch = s[i]
+    if (escaped) {
+      escaped = false
+    } else if (ch === '\\') {
+      escaped = inString
+    } else if (ch === '"') {
+      inString = !inString
+    } else if (!inString) {
+      if (ch === '{') depth++
+      else if (ch === '}') {
+        depth--
+        if (depth === 0) return i
+      }
+    }
+  }
+  return -1
 }
 
 export async function* ollamaBackend(
@@ -122,6 +149,75 @@ export async function* ollamaBackend(
   let doneReason: string | undefined
   let inputTokens: number | null = null
   let outputTokens: number | null = null
+  // Small models happily emit the SAME call over and over in one response
+  // (five identical Writes in a row) — collapse exact repeats.
+  const seenCalls = new Set<string>()
+  const emitCall = function* (name: string, input: Record<string, unknown>): Generator<BackendEvent> {
+    const key = `${name} ${JSON.stringify(input)}`
+    if (seenCalls.has(key)) return
+    seenCalls.add(key)
+    sawTool = true
+    yield { kind: 'tool', name, input }
+  }
+  // Llama-family models often print tool calls as TEXT in trained-in JSON
+  // shapes ({"name": ..., "parameters": {...}}) that Ollama's template cannot
+  // parse. Text is buffered across brace boundaries; a complete JSON object
+  // naming a KNOWN tool becomes a real call, anything else flows through as
+  // text untouched.
+  const knownTools = new Set((req.tools ?? []).filter((t) => t.input_schema).map((t) => t.name))
+  let textBuf = ''
+  const drainText = function* (final: boolean): Generator<BackendEvent> {
+    for (;;) {
+      const start = textBuf.indexOf('{')
+      if (start === -1) {
+        if (textBuf) {
+          yield { kind: 'text', delta: textBuf }
+          textBuf = ''
+        }
+        return
+      }
+      const end = balancedEnd(textBuf, start)
+      if (end === -1) {
+        // Object still streaming in: flush the text before it, hold the rest.
+        if (start > 0) {
+          yield { kind: 'text', delta: textBuf.slice(0, start) }
+          textBuf = textBuf.slice(start)
+        }
+        if (final && textBuf) {
+          yield { kind: 'text', delta: textBuf }
+          textBuf = ''
+        }
+        return
+      }
+      interface TextCall {
+        name?: unknown
+        parameters?: unknown
+        arguments?: unknown
+        input?: unknown
+      }
+      let call: TextCall | null = null
+      try {
+        call = JSON.parse(textBuf.slice(start, end + 1)) as TextCall
+      } catch {
+        call = null
+      }
+      const input = call?.parameters ?? call?.arguments ?? call?.input
+      if (
+        typeof call?.name === 'string' &&
+        knownTools.has(call.name) &&
+        input !== null &&
+        typeof input === 'object'
+      ) {
+        if (start > 0) yield { kind: 'text', delta: textBuf.slice(0, start) }
+        yield* emitCall(call.name, input as Record<string, unknown>)
+        textBuf = textBuf.slice(end + 1)
+        continue
+      }
+      // Not a tool call: pass the opening brace through and keep scanning.
+      yield { kind: 'text', delta: textBuf.slice(0, start + 1) }
+      textBuf = textBuf.slice(start + 1)
+    }
+  }
   let buffer = ''
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
@@ -135,16 +231,18 @@ export async function* ollamaBackend(
       return
     }
     if (chunk.error) throw new Error(`Ollama stream error: ${chunk.error}`)
-    if (chunk.message?.content) yield { kind: 'text', delta: chunk.message.content }
+    if (chunk.message?.thinking) yield { kind: 'thinking', delta: chunk.message.thinking }
+    if (chunk.message?.content) {
+      textBuf += chunk.message.content
+      yield* drainText(false)
+    }
     for (const call of chunk.message?.tool_calls ?? []) {
       if (!call.function?.name) continue
-      sawTool = true
       const args = call.function.arguments
-      yield {
-        kind: 'tool',
-        name: call.function.name,
-        input: (args && typeof args === 'object' ? args : {}) as Record<string, unknown>
-      }
+      yield* emitCall(
+        call.function.name,
+        (args && typeof args === 'object' ? args : {}) as Record<string, unknown>
+      )
     }
     if (chunk.done) {
       doneReason = chunk.done_reason
@@ -162,6 +260,7 @@ export async function* ollamaBackend(
       for (const line of lines) yield* handleLine(line)
     }
     if (buffer) yield* handleLine(buffer)
+    yield* drainText(true)
   } finally {
     // Runs on parse errors AND consumer abandonment (generator .return());
     // without it the connection lingers until the socket times out.

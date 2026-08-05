@@ -89,6 +89,13 @@ export default function Timeline({ events }: { events: RunEvent[] }): JSX.Elemen
             return <ToolRow key={e.seq} event={e} end={ends.get(e.toolUseId)} />
           case 'tool_end':
             return null // rendered inside its ToolRow
+          case 'thinking':
+            return (
+              <div key={e.seq} className="my-1 px-2 py-0.5 font-sans text-[11px] italic leading-relaxed text-gray-600">
+                <span className="mr-1 not-italic text-gray-500">thinking</span>
+                {e.text}
+              </div>
+            )
           case 'text':
             return (
               <div

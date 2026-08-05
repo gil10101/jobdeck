@@ -185,6 +185,8 @@ export async function* geminiBackend(
   let outputTokens: number | null = null
   const searchQueries = new Set<string>()
   const searchResults = new Map<string, { title: string; url: string }>()
+  // Collapse exact repeats of one call within a response (model brokenness).
+  const seenCalls = new Set<string>()
   let buffer = ''
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
@@ -201,17 +203,22 @@ export async function* geminiBackend(
     if (chunk.error?.message) throw new Error(`Gemini stream error: ${chunk.error.message}`)
     const cand = chunk.candidates?.[0]
     for (const part of cand?.content?.parts ?? []) {
-      // Reasoning parts are internal — leaking them would show chain-of-thought
-      // as assistant prose.
-      if (typeof part.text === 'string' && part.text && !part.thought) {
-        yield { kind: 'text', delta: part.text }
+      if (typeof part.text === 'string' && part.text) {
+        // Reasoning parts surface as thinking (dimmed in the UI), never as
+        // assistant prose.
+        if (part.thought) yield { kind: 'thinking', delta: part.text }
+        else yield { kind: 'text', delta: part.text }
       }
       if (part.functionCall?.name) {
+        const input = part.functionCall.args ?? {}
+        const key = `${part.functionCall.name} ${JSON.stringify(input)}`
+        if (seenCalls.has(key)) continue
+        seenCalls.add(key)
         sawTool = true
         yield {
           kind: 'tool',
           name: part.functionCall.name,
-          input: part.functionCall.args ?? {},
+          input,
           ...(part.thoughtSignature ? { signature: part.thoughtSignature } : {})
         }
       }

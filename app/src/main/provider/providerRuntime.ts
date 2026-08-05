@@ -111,19 +111,19 @@ export function providerPromptAddendum(): string {
   return [
     '',
     'MODEL DISCIPLINE (you are running via a compatibility layer):',
-    '- Call tools with strict JSON arguments that match the schema exactly; never invent tool or field names.',
-    '- Prefer one tool call at a time; read results before the next call.',
-    '- When asked to write a file, use the Write tool with the COMPLETE file content.',
+    '- Call tools with strict JSON arguments that match the schema exactly; never invent tool or field names. Argument values must use their real JSON types — objects as objects, never as JSON-in-a-string.',
+    '- Prefer one tool call at a time; read results before the next call. NEVER repeat a call that already succeeded.',
+    '- To create a NEW file, use Write once with the COMPLETE content. To change an EXISTING file, Read it first, then Edit or Write — a Write that fails with "has not been read yet" means Read it, then retry once.',
     '- Do the work directly with Read/Write/Bash-style tools — never launch subagents or name agent types.',
     '- Finish with exactly the output format the task specifies — no extra commentary after it.'
   ].join('\n')
 }
 
 /** Tools withheld from agent runs per provider. Local models reliably
- *  hallucinate Task/agent-type arguments; withholding the tool beats hoping
- *  the prompt is obeyed. */
+ *  hallucinate Task/agent-type and Skill arguments; withholding the tools
+ *  beats hoping the prompt is obeyed. */
 export function providerDisallowedTools(): string[] {
-  return currentProviderConfig().provider === 'ollama' ? ['Task'] : []
+  return currentProviderConfig().provider === 'ollama' ? ['Task', 'Skill'] : []
 }
 
 export interface ProviderStatus {

@@ -252,3 +252,20 @@ body {
 .fit-note-label {
   color: var(--note-label);
 }
+
+/* Agent-working indicator: cells fade on mutually offset cycles. */
+.dot-pulse {
+  opacity: 0.15;
+  animation-name: dotPulse;
+  animation-iteration-count: infinite;
+  animation-timing-function: ease-in-out;
+}
+@keyframes dotPulse {
+  0%,
+  100% {
+    opacity: 0.15;
+  }
+  50% {
+    opacity: 1;
+  }
+}

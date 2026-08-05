@@ -3,6 +3,7 @@ import http from 'node:http'
 import { geminiBackend, rememberToolSignature } from './geminiBackend'
 import { ollamaBackend } from './ollamaBackend'
 import {
+  coerceToolArgs,
   estimateTokens,
   webSearchTool,
   type AnthropicRequest,
@@ -91,6 +92,7 @@ async function* searchUnavailable(req: AnthropicRequest): AsyncGenerator<Backend
 
 interface CollectedBlocks {
   text: string
+  thinking: string
   tools: { id: string; name: string; input: Record<string, unknown> }[]
   searches: Extract<BackendEvent, { kind: 'web_search' }>[]
 }
@@ -127,41 +129,54 @@ async function streamResponse(
     }
   })
   let index = -1
-  let textOpen = false
+  let open: 'text' | 'thinking' | null = null
   let stopReason = 'end_turn'
   let usage: Record<string, number> = { output_tokens: 0 }
+  const closeOpen = (): void => {
+    if (open !== null) {
+      emit('content_block_stop', { index })
+      open = null
+    }
+  }
   for await (const ev of backend(req, config, signal)) {
     if (ev.kind === 'text') {
-      if (!textOpen) {
+      if (open !== 'text') {
+        closeOpen()
         index++
-        textOpen = true
+        open = 'text'
         emit('content_block_start', { index, content_block: { type: 'text', text: '' } })
       }
       emit('content_block_delta', { index, delta: { type: 'text_delta', text: ev.delta } })
-    } else if (ev.kind === 'tool') {
-      if (textOpen) {
-        emit('content_block_stop', { index })
-        textOpen = false
+    } else if (ev.kind === 'thinking') {
+      if (open !== 'thinking') {
+        closeOpen()
+        index++
+        open = 'thinking'
+        emit('content_block_start', {
+          index,
+          content_block: { type: 'thinking', thinking: '', signature: '' }
+        })
       }
+      emit('content_block_delta', { index, delta: { type: 'thinking_delta', thinking: ev.delta } })
+    } else if (ev.kind === 'tool') {
+      closeOpen()
       index++
       const toolId = blockId('toolu')
       // The CLI echoes this id back in history; the signature rejoins the
       // functionCall there (Gemini 3 rejects unsigned calls).
       if (ev.signature) rememberToolSignature(toolId, ev.signature)
+      const input = coerceToolArgs(ev.input, (req.tools ?? []).find((t) => t.name === ev.name))
       emit('content_block_start', {
         index,
         content_block: { type: 'tool_use', id: toolId, name: ev.name, input: {} }
       })
       emit('content_block_delta', {
         index,
-        delta: { type: 'input_json_delta', partial_json: JSON.stringify(ev.input) }
+        delta: { type: 'input_json_delta', partial_json: JSON.stringify(input) }
       })
       emit('content_block_stop', { index })
     } else if (ev.kind === 'web_search') {
-      if (textOpen) {
-        emit('content_block_stop', { index })
-        textOpen = false
-      }
+      closeOpen()
       const blocks = searchBlocks(ev)
       // The pair mirrors the real API: input streams as input_json_delta (the
       // CLI reads the query from there for progress), the result block
@@ -187,7 +202,7 @@ async function streamResponse(
       }
     }
   }
-  if (textOpen) emit('content_block_stop', { index })
+  closeOpen()
   emit('message_delta', { delta: { stop_reason: stopReason, stop_sequence: null }, usage })
   emit('message_stop', {})
   res.end()
@@ -201,16 +216,21 @@ async function jsonResponse(
   config: ProviderConfig,
   signal: AbortSignal
 ): Promise<void> {
-  const collected: CollectedBlocks = { text: '', tools: [], searches: [] }
+  const collected: CollectedBlocks = { text: '', thinking: '', tools: [], searches: [] }
   let stopReason = 'end_turn'
   let inputTokens: number | null = null
   let outputTokens: number | null = null
   for await (const ev of backend(req, config, signal)) {
     if (ev.kind === 'text') collected.text += ev.delta
+    else if (ev.kind === 'thinking') collected.thinking += ev.delta
     else if (ev.kind === 'tool') {
       const id = blockId('toolu')
       if (ev.signature) rememberToolSignature(id, ev.signature)
-      collected.tools.push({ id, name: ev.name, input: ev.input })
+      collected.tools.push({
+        id,
+        name: ev.name,
+        input: coerceToolArgs(ev.input, (req.tools ?? []).find((t) => t.name === ev.name))
+      })
     } else if (ev.kind === 'web_search') {
       collected.searches.push(ev)
     } else {
@@ -220,6 +240,7 @@ async function jsonResponse(
     }
   }
   const content: Record<string, unknown>[] = []
+  if (collected.thinking) content.push({ type: 'thinking', thinking: collected.thinking, signature: '' })
   if (collected.text) content.push({ type: 'text', text: collected.text })
   for (const s of collected.searches) {
     const blocks = searchBlocks(s)

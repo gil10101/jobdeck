@@ -44,6 +44,7 @@ import { useApp } from '../store'
 import { useRunEvents } from '../hooks/useRunEvents'
 import Timeline from './runs/Timeline'
 import ReportCard from './runs/ReportCard'
+import ThinkingDots from '../components/ThinkingDots'
 
 function fmtTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -121,9 +122,7 @@ export default function RunsView({ runId }: { runId?: string }): JSX.Element {
             >
               <div className="flex items-center gap-2">
                 <span className={`text-[10px] font-bold uppercase ${STATUS_STYLE[r.status]}`}>
-                  {r.status === 'running' && (
-                    <span className="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400" />
-                  )}
+                  {r.status === 'running' && <ThinkingDots className="mr-1.5" />}
                   {r.status}
                 </span>
                 {r.kind !== 'build' && (
@@ -158,6 +157,7 @@ export default function RunsView({ runId }: { runId?: string }): JSX.Element {
         {meta ? (
           <>
             <div className="flex items-center gap-3 border-b border-edge bg-panel px-4 py-2.5">
+              {meta.status === 'running' && <ThinkingDots />}
               <span className={`text-xs font-bold uppercase ${STATUS_STYLE[meta.status]}`}>
                 {meta.status}
               </span>

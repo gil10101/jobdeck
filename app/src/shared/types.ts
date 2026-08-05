@@ -200,6 +200,9 @@ export type RunEvent =
   | { seq: number; ts: number; kind: 'status'; status: RunStatus }
   | { seq: number; ts: number; kind: 'init'; model: string; sessionId?: string }
   | { seq: number; ts: number; kind: 'text'; text: string; complete: boolean }
+  /** Model reasoning (Claude extended thinking, or thinking passed through the
+   *  provider shim) — shown dimmed, never part of the answer. */
+  | { seq: number; ts: number; kind: 'thinking'; text: string }
   | { seq: number; ts: number; kind: 'tool_start'; toolUseId: string; tool: string; summary: string }
   | { seq: number; ts: number; kind: 'tool_end'; toolUseId: string; ok: boolean; preview: string }
   | {

@@ -205,11 +205,45 @@ export function geminiSchema(schema: unknown): Record<string, unknown> | null {
   return Object.keys(out).length ? out : null
 }
 
+/**
+ * Repair sloppy tool arguments against the tool's declared schema — smaller
+ * models routinely send `"metadata": "{}"` where an object is required, or
+ * numbers/booleans as strings. Only unambiguous repairs are made.
+ */
+export function coerceToolArgs(
+  input: Record<string, unknown>,
+  tool: AnthropicTool | undefined
+): Record<string, unknown> {
+  const props = tool?.input_schema?.properties as Record<string, { type?: string }> | undefined
+  if (!props) return input
+  const out: Record<string, unknown> = { ...input }
+  for (const [key, value] of Object.entries(out)) {
+    const expected = props[key]?.type
+    if (typeof value !== 'string' || !expected) continue
+    if (expected === 'object' || expected === 'array') {
+      try {
+        const parsed = JSON.parse(value) as unknown
+        if (parsed !== null && typeof parsed === 'object') out[key] = parsed
+      } catch {
+        /* leave as-is; the tool's own validation will report it */
+      }
+    } else if (expected === 'number' || expected === 'integer') {
+      const n = Number(value)
+      if (value.trim() !== '' && Number.isFinite(n)) out[key] = n
+    } else if (expected === 'boolean' && (value === 'true' || value === 'false')) {
+      out[key] = value === 'true'
+    }
+  }
+  return out
+}
+
 // ---- Backend event contract ----
 
 /** What a backend yields; the shim renders these as Anthropic SSE or JSON. */
 export type BackendEvent =
   | { kind: 'text'; delta: string }
+  /** Model reasoning — rendered as an Anthropic thinking block, never as answer text. */
+  | { kind: 'thinking'; delta: string }
   | {
       kind: 'tool'
       name: string
