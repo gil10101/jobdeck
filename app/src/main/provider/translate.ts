@@ -7,6 +7,17 @@ export interface AnthropicTool {
   name: string
   description?: string
   input_schema?: Record<string, unknown>
+  /** Server tools carry a versioned type ('web_search_20250305') and no schema. */
+  type?: string
+  allowed_domains?: string[]
+  blocked_domains?: string[]
+}
+
+/** The web_search server tool, when the request carries one. The CLI's
+ *  WebSearch client tool issues a sub-request whose ONLY tool is this — that
+ *  request is a search order the shim must execute itself. */
+export function webSearchTool(req: AnthropicRequest): AnthropicTool | null {
+  return (req.tools ?? []).find((t) => t.type?.startsWith('web_search')) ?? null
 }
 
 export interface AnthropicRequest {
@@ -201,6 +212,13 @@ export type BackendEvent =
   | { kind: 'text'; delta: string }
   | { kind: 'tool'; name: string; input: Record<string, unknown> }
   | {
+      // One executed (or failed) web search → a server_tool_use +
+      // web_search_tool_result block pair in the Anthropic response.
+      kind: 'web_search'
+      query: string
+      results: { title: string; url: string }[] | { errorCode: string }
+    }
+  | {
       kind: 'done'
       stopReason: 'end_turn' | 'max_tokens' | 'tool_use' | 'stop_sequence'
       inputTokens: number | null
@@ -209,9 +227,13 @@ export type BackendEvent =
 
 export interface ProviderConfig {
   provider: 'claude' | 'gemini' | 'ollama'
-  /** Backend model name (gemini-2.5-flash, qwen3:14b, …). */
+  /** Backend model name for the active provider (gemini-2.5-flash, qwen3:14b, …). */
   model: string
+  /** Key is carried regardless of provider: web searches run through Gemini
+   *  grounding even when the main model is Ollama. */
   geminiKey: string | null
+  /** Model for Gemini requests — the search path uses this under any provider. */
+  geminiModel: string
   /** Override for tests; production uses the public endpoint. */
   geminiUrl: string
   ollamaUrl: string

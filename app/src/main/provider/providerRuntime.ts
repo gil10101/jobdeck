@@ -38,7 +38,10 @@ export function currentProviderConfig(): ProviderConfig {
   return {
     provider,
     model: provider === 'gemini' ? s.geminiModel : provider === 'ollama' ? s.ollamaModel : '',
-    geminiKey: provider === 'gemini' ? geminiKey() : null,
+    // Not gated on provider: web-search sub-requests run through Gemini
+    // grounding even when the main model is Ollama.
+    geminiKey: geminiKey(),
+    geminiModel: s.geminiModel,
     geminiUrl: GEMINI_URL,
     ollamaUrl: s.ollamaUrl,
     ollamaNumCtx: s.ollamaNumCtx

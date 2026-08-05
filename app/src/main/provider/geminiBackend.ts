@@ -3,6 +3,7 @@ import {
   geminiSchema,
   normalizeMessages,
   systemText,
+  webSearchTool,
   type AnthropicRequest,
   type BackendEvent,
   type ProviderConfig
@@ -94,6 +95,12 @@ function buildBody(req: AnthropicRequest): Record<string, unknown> {
     body.tools = [{ functionDeclarations: decls }]
     const tc = toolConfig(req)
     if (tc) body.toolConfig = tc
+  } else if (webSearchTool(req)) {
+    // The CLI's WebSearch sub-request: its only tool is the server-side
+    // web_search — executed here via Gemini's Google Search grounding. Only
+    // when there are no function declarations: Gemini rejects mixing search
+    // grounding with function calling in one request.
+    body.tools = [{ googleSearch: {} }]
   }
   return body
 }
@@ -102,6 +109,10 @@ interface GeminiChunk {
   candidates?: {
     content?: { parts?: GeminiPart[] }
     finishReason?: string
+    groundingMetadata?: {
+      webSearchQueries?: string[]
+      groundingChunks?: { web?: { uri?: string; title?: string } }[]
+    }
   }[]
   usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number }
   error?: { message?: string }
@@ -119,7 +130,9 @@ export async function* geminiBackend(
   signal: AbortSignal
 ): AsyncGenerator<BackendEvent> {
   if (!config.geminiKey) throw new Error('no Gemini API key set (Settings → Model provider)')
-  const url = `${config.geminiUrl.replace(/\/$/, '')}/v1beta/models/${encodeURIComponent(config.model)}:streamGenerateContent?alt=sse`
+  // geminiModel, not model: under the Ollama provider this backend still runs
+  // web-search sub-requests, where config.model is an Ollama name.
+  const url = `${config.geminiUrl.replace(/\/$/, '')}/v1beta/models/${encodeURIComponent(config.geminiModel)}:streamGenerateContent?alt=sse`
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-goog-api-key': config.geminiKey },
@@ -141,6 +154,8 @@ export async function* geminiBackend(
   let finishReason: string | undefined
   let inputTokens: number | null = null
   let outputTokens: number | null = null
+  const searchQueries = new Set<string>()
+  const searchResults = new Map<string, { title: string; url: string }>()
   let buffer = ''
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
@@ -161,6 +176,15 @@ export async function* geminiBackend(
       if (part.functionCall?.name) {
         sawTool = true
         yield { kind: 'tool', name: part.functionCall.name, input: part.functionCall.args ?? {} }
+      }
+    }
+    const gm = cand?.groundingMetadata
+    if (gm) {
+      for (const q of gm.webSearchQueries ?? []) searchQueries.add(q)
+      for (const c of gm.groundingChunks ?? []) {
+        if (c.web?.uri) {
+          searchResults.set(c.web.uri, { title: c.web.title ?? c.web.uri, url: c.web.uri })
+        }
       }
     }
     if (cand?.finishReason) finishReason = cand.finishReason
@@ -184,6 +208,16 @@ export async function* geminiBackend(
     // without it the connection lingers until the socket times out.
     void reader.cancel().catch(() => undefined)
   }
+  // Grounding data → one search-result pair. Attribution of individual hits
+  // to individual queries isn't in the metadata, so all hits ride together;
+  // the CLI only aggregates titles + urls anyway.
+  if (webSearchTool(req) && (searchQueries.size || searchResults.size)) {
+    yield {
+      kind: 'web_search',
+      query: [...searchQueries].join(' | ') || 'web search',
+      results: [...searchResults.values()]
+    }
+  }
   yield {
     kind: 'done',
     stopReason: mapStop(finishReason, sawTool),
@@ -195,7 +229,7 @@ export async function* geminiBackend(
 /** One tiny non-streaming request to validate key + model; throws with detail. */
 export async function testGemini(config: ProviderConfig): Promise<string> {
   if (!config.geminiKey) throw new Error('no Gemini API key set')
-  const url = `${config.geminiUrl.replace(/\/$/, '')}/v1beta/models/${encodeURIComponent(config.model)}:generateContent`
+  const url = `${config.geminiUrl.replace(/\/$/, '')}/v1beta/models/${encodeURIComponent(config.geminiModel)}:generateContent`
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-goog-api-key': config.geminiKey },
@@ -213,5 +247,5 @@ export async function testGemini(config: ProviderConfig): Promise<string> {
     }
     throw new Error(`HTTP ${res.status}${detail ? `: ${detail}` : ''}`)
   }
-  return `${config.model} responded`
+  return `${config.geminiModel} responded`
 }

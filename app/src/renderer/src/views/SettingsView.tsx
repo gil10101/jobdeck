@@ -555,7 +555,7 @@ export default function SettingsView(): JSX.Element {
           </div>
           <Row
             label="Backend"
-            hint="Powers every agent (builds, scout, assistant, email drafts). Gemini and Ollama route through a local translation layer; conversations keep their full context when you switch. Tool-use quality varies by model — Claude models are tuned for this harness."
+            hint="Powers every agent (builds, scout, assistant, email drafts). Gemini and Ollama route through a local translation layer; conversations keep their full context when you switch. Web search runs through Gemini grounding whenever a Gemini key is saved — even with Ollama as the backend. Tool-use quality varies by model — Claude models are tuned for this harness."
           >
             <div className="flex gap-1">
               {(['claude', 'gemini', 'ollama'] as const).map((p) => (

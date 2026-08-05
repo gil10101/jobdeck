@@ -86,7 +86,6 @@ export default function RunsView({ runId }: { runId?: string }): JSX.Element {
   }, [runId, runs.length])
 
   const totalTokens = runs.reduce((sum, r) => sum + (r.totalTokens ?? 0), 0)
-  const totalCost = runs.reduce((sum, r) => sum + (r.costUsd ?? 0), 0)
   const report = meta?.slug ? (rows.find((r) => r.slug === meta.slug)?.report ?? null) : null
 
   return (
@@ -94,12 +93,14 @@ export default function RunsView({ runId }: { runId?: string }): JSX.Element {
       <div className="flex w-72 shrink-0 flex-col border-r border-edge bg-panel">
         <div className="flex items-center justify-between border-b border-edge px-3 py-2.5">
           <h1 className="text-sm font-semibold text-gray-100">Runs</h1>
-          <span
-            className="text-[10px] text-gray-500"
-            title="Total tokens across all runs. Runs use your Claude subscription login — nothing is billed per run."
-          >
-            {totalTokens > 0 ? `usage ${fmtTokens(totalTokens)} tokens` : `usage ≈$${totalCost.toFixed(2)}`}
-          </span>
+          {totalTokens > 0 && (
+            <span
+              className="text-[10px] text-gray-500"
+              title="Total tokens across all runs — usage, not a bill."
+            >
+              usage {fmtTokens(totalTokens)} tokens
+            </span>
+          )}
         </div>
         <div className="min-h-0 flex-1 overflow-auto">
           {runs.length === 0 && (
@@ -134,15 +135,15 @@ export default function RunsView({ runId }: { runId?: string }): JSX.Element {
               </div>
               <div className="truncate text-xs font-medium text-gray-200">{r.slug}</div>
               {r.summary && <div className="truncate text-[10px] text-green-300">{r.summary}</div>}
-              {(r.contextTokens != null || r.costUsd != null) && (
+              {(r.contextTokens != null || r.durationMs != null) && (
                 <div
                   className="text-[10px] text-gray-600"
-                  title="Context window used at the end of the run — subscription usage, not billed"
+                  title="Context window used at the end of the run — usage, not a bill"
                 >
                   {r.contextTokens != null && r.contextWindow
-                    ? `ctx ${ctxPct(r.contextTokens, r.contextWindow)}%`
-                    : `≈$${(r.costUsd ?? 0).toFixed(2)}`}{' '}
-                  · {Math.round((r.durationMs ?? 0) / 1000)}s
+                    ? `ctx ${ctxPct(r.contextTokens, r.contextWindow)}% · `
+                    : ''}
+                  {Math.round((r.durationMs ?? 0) / 1000)}s
                 </div>
               )}
               {r.errorText && (
@@ -171,16 +172,16 @@ export default function RunsView({ runId }: { runId?: string }): JSX.Element {
                   {meta.summary}
                 </span>
               )}
-              {(meta.contextTokens != null || meta.costUsd != null) && (
+              {(meta.contextTokens != null || meta.totalTokens != null) && (
                 <span
                   className="text-[11px] text-gray-500"
-                  title="Context window used at the end of the run, and total tokens consumed — subscription usage, not billed"
+                  title="Context window used at the end of the run, and total tokens consumed — usage, not a bill"
                 >
                   {meta.contextTokens != null && meta.contextWindow
                     ? `ctx ${ctxPct(meta.contextTokens, meta.contextWindow)}%${
                         meta.totalTokens ? ` · ${fmtTokens(meta.totalTokens)} tokens` : ''
                       }`
-                    : `usage ≈$${(meta.costUsd ?? 0).toFixed(2)}`}{' '}
+                    : `${fmtTokens(meta.totalTokens ?? 0)} tokens`}{' '}
                   · {meta.numTurns ?? '?'} turns
                 </span>
               )}

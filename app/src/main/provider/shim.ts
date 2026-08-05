@@ -2,7 +2,14 @@ import { randomUUID } from 'node:crypto'
 import http from 'node:http'
 import { geminiBackend } from './geminiBackend'
 import { ollamaBackend } from './ollamaBackend'
-import { estimateTokens, type AnthropicRequest, type Backend, type ProviderConfig } from './translate'
+import {
+  estimateTokens,
+  webSearchTool,
+  type AnthropicRequest,
+  type Backend,
+  type BackendEvent,
+  type ProviderConfig
+} from './translate'
 
 // Loopback HTTP server speaking the Anthropic Messages API (the subset the
 // Claude Code CLI uses: POST /v1/messages streaming + non-streaming, and
@@ -47,9 +54,39 @@ function sendError(res: http.ServerResponse, status: number, message: string): v
   res.end(JSON.stringify({ type: 'error', error: { type: 'api_error', message } }))
 }
 
+function blockId(prefix: string): string {
+  return `${prefix}_${randomUUID().replace(/-/g, '').slice(0, 24)}`
+}
+
+/** The server_tool_use + web_search_tool_result block pair for one search,
+ *  in Anthropic wire shape (shared by the SSE and JSON renderers). */
+function searchBlocks(ev: Extract<BackendEvent, { kind: 'web_search' }>): {
+  use: Record<string, unknown>
+  result: Record<string, unknown>
+} {
+  const id = blockId('srvtoolu')
+  const content = Array.isArray(ev.results)
+    ? ev.results.map((r) => ({ type: 'web_search_result', title: r.title, url: r.url }))
+    : { type: 'web_search_tool_result_error', error_code: ev.results.errorCode }
+  return {
+    use: { type: 'server_tool_use', id, name: 'web_search', input: { query: ev.query } },
+    result: { type: 'web_search_tool_result', tool_use_id: id, content }
+  }
+}
+
+/** Backend for search sub-requests when no Gemini key exists to execute them:
+ *  an explicit error result, so the model learns search is unavailable
+ *  instead of hallucinating results. */
+async function* searchUnavailable(req: AnthropicRequest): AsyncGenerator<BackendEvent> {
+  yield { kind: 'text', delta: 'Web search is unavailable: no Gemini API key is set (Settings → Model provider). Answer from existing knowledge and say the web could not be searched.' }
+  yield { kind: 'web_search', query: 'web search', results: { errorCode: 'unavailable' } }
+  yield { kind: 'done', stopReason: 'end_turn', inputTokens: estimateTokens(req), outputTokens: 0 }
+}
+
 interface CollectedBlocks {
   text: string
   tools: { id: string; name: string; input: Record<string, unknown> }[]
+  searches: Extract<BackendEvent, { kind: 'web_search' }>[]
 }
 
 /** Render backend events as the Anthropic streaming SSE sequence. */
@@ -101,15 +138,36 @@ async function streamResponse(
         textOpen = false
       }
       index++
-      const toolId = `toolu_${randomUUID().replace(/-/g, '').slice(0, 24)}`
       emit('content_block_start', {
         index,
-        content_block: { type: 'tool_use', id: toolId, name: ev.name, input: {} }
+        content_block: { type: 'tool_use', id: blockId('toolu'), name: ev.name, input: {} }
       })
       emit('content_block_delta', {
         index,
         delta: { type: 'input_json_delta', partial_json: JSON.stringify(ev.input) }
       })
+      emit('content_block_stop', { index })
+    } else if (ev.kind === 'web_search') {
+      if (textOpen) {
+        emit('content_block_stop', { index })
+        textOpen = false
+      }
+      const blocks = searchBlocks(ev)
+      // The pair mirrors the real API: input streams as input_json_delta (the
+      // CLI reads the query from there for progress), the result block
+      // arrives complete.
+      index++
+      emit('content_block_start', {
+        index,
+        content_block: { ...blocks.use, input: {} }
+      })
+      emit('content_block_delta', {
+        index,
+        delta: { type: 'input_json_delta', partial_json: JSON.stringify({ query: ev.query }) }
+      })
+      emit('content_block_stop', { index })
+      index++
+      emit('content_block_start', { index, content_block: blocks.result })
       emit('content_block_stop', { index })
     } else {
       stopReason = ev.stopReason
@@ -133,18 +191,16 @@ async function jsonResponse(
   config: ProviderConfig,
   signal: AbortSignal
 ): Promise<void> {
-  const collected: CollectedBlocks = { text: '', tools: [] }
+  const collected: CollectedBlocks = { text: '', tools: [], searches: [] }
   let stopReason = 'end_turn'
   let inputTokens: number | null = null
   let outputTokens: number | null = null
   for await (const ev of backend(req, config, signal)) {
     if (ev.kind === 'text') collected.text += ev.delta
     else if (ev.kind === 'tool') {
-      collected.tools.push({
-        id: `toolu_${randomUUID().replace(/-/g, '').slice(0, 24)}`,
-        name: ev.name,
-        input: ev.input
-      })
+      collected.tools.push({ id: blockId('toolu'), name: ev.name, input: ev.input })
+    } else if (ev.kind === 'web_search') {
+      collected.searches.push(ev)
     } else {
       stopReason = ev.stopReason
       inputTokens = ev.inputTokens
@@ -153,11 +209,15 @@ async function jsonResponse(
   }
   const content: Record<string, unknown>[] = []
   if (collected.text) content.push({ type: 'text', text: collected.text })
+  for (const s of collected.searches) {
+    const blocks = searchBlocks(s)
+    content.push(blocks.use, blocks.result)
+  }
   for (const t of collected.tools) content.push({ type: 'tool_use', ...t })
   res.writeHead(200, { 'content-type': 'application/json' })
   res.end(
     JSON.stringify({
-      id: `msg_${randomUUID().replace(/-/g, '').slice(0, 24)}`,
+      id: blockId('msg'),
       type: 'message',
       role: 'assistant',
       model: config.model,
@@ -206,11 +266,18 @@ export function startShim(getConfig: () => ProviderConfig): Promise<ShimHandle> 
         return
       }
       const config = getConfig()
-      const backend: Backend | null =
+      let backend: Backend | null =
         config.provider === 'gemini' ? geminiBackend : config.provider === 'ollama' ? ollamaBackend : null
       if (!backend) {
         sendError(res, 400, 'shim reached while provider is claude')
         return
+      }
+      // Pure search sub-requests (the server web_search tool and nothing
+      // else) always execute through Gemini grounding when a key exists —
+      // including under the Ollama provider (local models have no search).
+      // Without a key they get an explicit unavailable result.
+      if (webSearchTool(body) && !(body.tools ?? []).some((t) => t.input_schema)) {
+        backend = config.geminiKey ? geminiBackend : (r): AsyncGenerator<BackendEvent> => searchUnavailable(r)
       }
       // Kill the backend fetch when the CLI drops the connection (abort/stop).
       const controller = new AbortController()
