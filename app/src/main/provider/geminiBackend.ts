@@ -8,6 +8,7 @@ import {
   type BackendEvent,
   type ProviderConfig
 } from './translate'
+import { llmFetch } from './llmFetch'
 
 // Anthropic Messages → Gemini generateContent. Tool round-trips map onto
 // functionCall/functionResponse parts; the API key travels in a header (never
@@ -158,7 +159,7 @@ export async function* geminiBackend(
   // geminiModel, not model: under the Ollama provider this backend still runs
   // web-search sub-requests, where config.model is an Ollama name.
   const url = `${config.geminiUrl.replace(/\/$/, '')}/v1beta/models/${encodeURIComponent(config.geminiModel)}:streamGenerateContent?alt=sse`
-  const res = await fetch(url, {
+  const res = await llmFetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-goog-api-key': config.geminiKey },
     body: JSON.stringify(buildBody(req)),
@@ -284,7 +285,7 @@ export async function listGeminiModels(config: ProviderConfig): Promise<string[]
   // v1beta paginates; 3 pages at 200/page covers the whole catalog today.
   for (let page = 0; page < 3; page++) {
     const url = `${config.geminiUrl.replace(/\/$/, '')}/v1beta/models?pageSize=200${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`
-    const res = await fetch(url, {
+    const res = await llmFetch(url, {
       headers: { 'x-goog-api-key': config.geminiKey },
       signal: AbortSignal.timeout(6000)
     })
@@ -310,7 +311,7 @@ export async function listGeminiModels(config: ProviderConfig): Promise<string[]
 export async function testGemini(config: ProviderConfig): Promise<string> {
   if (!config.geminiKey) throw new Error('no Gemini API key set')
   const url = `${config.geminiUrl.replace(/\/$/, '')}/v1beta/models/${encodeURIComponent(config.geminiModel)}:generateContent`
-  const res = await fetch(url, {
+  const res = await llmFetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-goog-api-key': config.geminiKey },
     body: JSON.stringify({

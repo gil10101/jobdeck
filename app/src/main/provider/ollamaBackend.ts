@@ -6,6 +6,7 @@ import {
   type BackendEvent,
   type ProviderConfig
 } from './translate'
+import { llmFetch } from './llmFetch'
 
 // Anthropic Messages → Ollama native /api/chat (NDJSON streaming). The native
 // endpoint is used instead of Ollama's OpenAI compat layer because it accepts
@@ -130,7 +131,7 @@ export async function* ollamaBackend(
   }))
   if (tools.length) body.tools = tools
 
-  const res = await fetch(`${config.ollamaUrl.replace(/\/$/, '')}/api/chat`, {
+  const res = await llmFetch(`${config.ollamaUrl.replace(/\/$/, '')}/api/chat`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...authHeader(config.ollamaKey) },
     body: JSON.stringify(body),
@@ -284,7 +285,7 @@ function authHeader(key: string | null): Record<string, string> {
 
 /** Reachability + installed-models probe for the Settings card. */
 export async function ollamaModels(url: string, key: string | null = null): Promise<string[]> {
-  const res = await fetch(`${url.replace(/\/$/, '')}/api/tags`, {
+  const res = await llmFetch(`${url.replace(/\/$/, '')}/api/tags`, {
     headers: authHeader(key),
     signal: AbortSignal.timeout(5000)
   })
@@ -306,7 +307,7 @@ export async function ollamaModelInfo(
   key: string | null,
   model: string
 ): Promise<OllamaModelInfo> {
-  const res = await fetch(`${url.replace(/\/$/, '')}/api/show`, {
+  const res = await llmFetch(`${url.replace(/\/$/, '')}/api/show`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...authHeader(key) },
     body: JSON.stringify({ model }),

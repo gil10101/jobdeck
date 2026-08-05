@@ -138,7 +138,17 @@ async function streamResponse(
       open = null
     }
   }
-  for await (const ev of backend(req, config, signal)) {
+  // Local backends can sit minutes in prompt-eval before their first byte;
+  // without traffic the CLI declares "Stream idle timeout". Real Anthropic
+  // streams carry ping events too.
+  const keepalive = setInterval(() => emit('ping', {}), 15_000)
+  try {
+    await pumpBackend()
+  } finally {
+    clearInterval(keepalive)
+  }
+  async function pumpBackend(): Promise<void> {
+    for await (const ev of backend(req, config, signal)) {
     if (ev.kind === 'text') {
       if (open !== 'text') {
         closeOpen()
@@ -200,6 +210,7 @@ async function streamResponse(
         output_tokens: ev.outputTokens ?? 0,
         ...(ev.inputTokens !== null ? { input_tokens: ev.inputTokens } : {})
       }
+    }
     }
   }
   closeOpen()
