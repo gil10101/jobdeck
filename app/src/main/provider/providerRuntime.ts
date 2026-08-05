@@ -13,10 +13,11 @@ import type { ProviderConfig } from './translate'
 // keeps the whole history.
 
 const GEMINI_URL = 'https://generativelanguage.googleapis.com'
-/** Hard per-request ceiling for the CLI. Local models on memory-tight
- *  machines can stall mid-generation for minutes (swap pressure) and then
- *  recover — 30min keeps a stalled-but-alive request from being killed. */
-const API_TIMEOUT_MS = 1_800_000
+/** Hard per-request ceiling for the CLI. 600000 exactly: the CLI accepts it
+ *  and local turns fit inside it when the model fits in RAM — and values
+ *  beyond it (tested: 1800000) make the CLI fail every request with silent
+ *  'unknown' errors, so do not raise this. */
+const API_TIMEOUT_MS = 600_000
 
 let getSettings: (() => AppSettings) | null = null
 let shim: ShimHandle | null = null
