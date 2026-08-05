@@ -21,6 +21,7 @@ import { parseCandidatesFile, parseReport, validateReport } from '../parsers/rep
 import { validateProfile } from '../profile/profileSchema'
 import { loadProfile } from '../profile/profileStore'
 import { ensureRatingBg } from '../companies/ratingService'
+import { recompileDoc } from '../latex/recompile'
 import {
   providerDisallowedTools,
   providerEnv,
@@ -471,7 +472,7 @@ export class AgentRunner {
       }
       this.flushText(run, true)
 
-      this.finalize(run, resultOk, resultError)
+      await this.finalize(run, resultOk, resultError)
     } catch (err) {
       this.flushText(run, true)
       if (run.controller.signal.aborted) {
@@ -485,8 +486,37 @@ export class AgentRunner {
     }
   }
 
+  /** Build runs only: compile any document whose .tex exists but whose PDF
+   *  does not. Best-effort — a compile failure falls through to validation,
+   *  which reports the missing PDF. */
+  private async compileMissingPdfs(run: ActiveRun, folderAbs: string): Promise<void> {
+    if (run.meta.kind !== 'build') return
+    let names: string[] = []
+    try {
+      names = fs.readdirSync(folderAbs)
+    } catch {
+      return
+    }
+    for (const doc of ['resume', 'cover'] as const) {
+      const suffix = doc === 'resume' ? '_Resume' : '_Cover_Letter'
+      const hasTex = names.some((n) => n.endsWith(`${suffix}.tex`))
+      const hasPdf = names.some((n) => n.endsWith(`${suffix}.pdf`))
+      if (!hasTex || hasPdf) continue
+      try {
+        const { pages } = await recompileDoc(toRel(folderAbs), doc)
+        this.emit(run, {
+          kind: 'text',
+          text: `compiled the ${doc} app-side (${pages ?? '?'} page${pages === 1 ? '' : 's'}) — the agent wrote the .tex but skipped compilation`,
+          complete: true
+        })
+      } catch (err) {
+        console.warn(`[runner] app-side ${doc} compile failed:`, err)
+      }
+    }
+  }
+
   /** Verify the run output and wire up store state on success. */
-  private finalize(run: ActiveRun, sdkOk: boolean, sdkError: string | null): void {
+  private async finalize(run: ActiveRun, sdkOk: boolean, sdkError: string | null): Promise<void> {
     if (run.controller.signal.aborted) {
       this.finish(run, 'cancelled', 'cancelled by user')
       return
@@ -522,6 +552,9 @@ export class AgentRunner {
       this.finish(run, 'failed', `agent finished but ${run.meta.slug}/report.json is missing`)
       return
     }
+    // Weaker models write valid .tex but skip running the compiler. Compiling
+    // is mechanical — do it here rather than failing the whole build over it.
+    await this.compileMissingPdfs(run, folderAbs)
     let raw = ''
     try {
       raw = fs.readFileSync(reportPath, 'utf-8')
