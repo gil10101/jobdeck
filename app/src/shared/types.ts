@@ -367,6 +367,15 @@ export interface AppSettings {
   /** User-pasted Glassdoor search URLs to harvest; empty = auto-derive from the
    *  profile's target roles. */
   glassdoorSearches: string[]
+  /** Which model backend powers agents. claude = the Agent SDK's own auth;
+   *  gemini/ollama route the SDK through a local Anthropic-API shim. */
+  provider: 'claude' | 'gemini' | 'ollama'
+  geminiModel: string
+  ollamaUrl: string
+  ollamaModel: string
+  /** Ollama context window per request — model defaults are far too small
+   *  for agent prompts; lower it if the machine runs out of memory. */
+  ollamaNumCtx: number
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -379,7 +388,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   emailPollMinutes: 5,
   emailAutoApply: false,
   scoutGlassdoor: false,
-  glassdoorSearches: []
+  glassdoorSearches: [],
+  provider: 'claude',
+  geminiModel: 'gemini-2.5-flash',
+  ollamaUrl: 'http://127.0.0.1:11434',
+  ollamaModel: '',
+  ollamaNumCtx: 32768
 }
 
 // ---- Gmail integration ----

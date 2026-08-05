@@ -13,6 +13,7 @@ import { RunStore } from './agent/runStore'
 import { AgentRunner } from './agent/AgentRunner'
 import { initRatingService } from './companies/ratingService'
 import { registerIpc } from './ipcRegistry'
+import { initProviderRuntime, stopShim } from './provider/providerRuntime'
 import { createMainWindow, installWebviewHardening } from './window'
 
 // Dev isolation: distinct userData so an ohmo dev instance never collides
@@ -71,6 +72,7 @@ function bootWorkspace(workspacePath: string): void {
     (payload) => send('push:companiesChanged', payload),
     () => store!.state.settings.model
   )
+  initProviderRuntime(() => store!.state.settings)
 
   store.on('changed', (domains: string[]) => send('push:storeChanged', { domains }))
 
@@ -139,6 +141,7 @@ app.on('before-quit', (event) => {
   quitting = true
   event.preventDefault()
   runner?.abortAll('app quit')
+  stopShim()
   void (store?.flush() ?? Promise.resolve()).finally(() => {
     app.quit()
   })

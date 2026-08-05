@@ -21,6 +21,7 @@ import { parseCandidatesFile, parseReport, validateReport } from '../parsers/rep
 import { validateProfile } from '../profile/profileSchema'
 import { loadProfile } from '../profile/profileStore'
 import { ensureRatingBg } from '../companies/ratingService'
+import { providerEnv, providerPromptAddendum, resolveAgentModel } from '../provider/providerRuntime'
 import type { Store } from '../store/Store'
 import type { TrackerRepo } from '../store/trackerRepo'
 import type { TodoWatcher } from '../fsops/TodoWatcher'
@@ -381,11 +382,12 @@ export class AgentRunner {
       }
     }
     try {
-      const prompt = this.buildRunPrompt(run)
+      const prompt = this.buildRunPrompt(run) + providerPromptAddendum()
       this.runStore.savePrompt(run.meta.id, prompt) // audit: exactly what the agent saw
 
       const { query } = await import('@anthropic-ai/claude-agent-sdk')
       const settings = this.store.state.settings
+      const model = resolveAgentModel(settings.model)
 
       const q = query({
         prompt,
@@ -400,8 +402,8 @@ export class AgentRunner {
           abortController: run.controller,
           includePartialMessages: settings.includePartialMessages,
           stderr: (data: string) => this.runStore.appendStderr(run.meta.id, data),
-          env: { ...process.env } as Record<string, string>,
-          ...(settings.model ? { model: settings.model } : {})
+          env: await providerEnv(),
+          ...(model ? { model } : {})
         }
       })
 

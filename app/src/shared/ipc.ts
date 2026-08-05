@@ -143,6 +143,20 @@ export interface IpcInvokeContract {
   }
   /** Feed summary for the Settings card; null when never harvested. */
   'glassdoor:feedStatus': { req: void; res: { count: number; fetchedAt: string; stale: boolean } | null }
+  // ---- BYO model providers (Gemini key via safeStorage; Ollama local) ----
+  'provider:setGeminiKey': { req: { key: string }; res: { keySet: boolean } }
+  'provider:clearGeminiKey': { req: void; res: { keySet: boolean } }
+  /** Gemini key presence + Ollama reachability/installed models. */
+  'provider:status': {
+    req: void
+    res: {
+      provider: 'claude' | 'gemini' | 'ollama'
+      geminiKeySet: boolean
+      ollama: { reachable: boolean; models: string[]; message: string }
+    }
+  }
+  /** Live round-trip against the active provider's backend. */
+  'provider:test': { req: void; res: { ok: boolean; message: string } }
   'app:info': { req: void; res: { repoRoot: string; appDataDir: string } }
   'config:get': { req: void; res: { workspacePath: string | null; onboardedAt: string | null } }
   'env:check': {
@@ -315,6 +329,10 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'glassdoor:searches',
   'glassdoor:writeFeed',
   'glassdoor:feedStatus',
+  'provider:setGeminiKey',
+  'provider:clearGeminiKey',
+  'provider:status',
+  'provider:test',
   'app:info',
   'config:get',
   'env:check',

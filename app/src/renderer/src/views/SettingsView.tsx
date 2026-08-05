@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BookUser, Bot, Briefcase, Check, FolderOpen, Mail, Palette, Workflow, X } from 'lucide-react'
+import { BookUser, Bot, Briefcase, Check, Cpu, FolderOpen, Mail, Palette, Workflow, X } from 'lucide-react'
 import type { AppSettings, BoardId, BoardsStatus, EmailStatus } from '@shared/types'
 import type { CustomBoard } from '@shared/profile'
 import { call } from '../api'
@@ -96,6 +96,19 @@ export default function SettingsView(): JSX.Element {
   const [gdFeed, setGdFeed] = useState<{ count: number; fetchedAt: string; stale: boolean } | null>(null)
   const [gdSearchesDraft, setGdSearchesDraft] = useState('')
   const [gdSaved, setGdSaved] = useState(true)
+  const [provStatus, setProvStatus] = useState<{
+    provider: 'claude' | 'gemini' | 'ollama'
+    geminiKeySet: boolean
+    ollama: { reachable: boolean; models: string[]; message: string }
+  } | null>(null)
+  // Never echoes the stored key back; holds only fresh input until saved.
+  const [geminiKeyDraft, setGeminiKeyDraft] = useState('')
+  const [geminiModelDraft, setGeminiModelDraft] = useState('')
+  const [ollamaUrlDraft, setOllamaUrlDraft] = useState('')
+  const [ollamaModelDraft, setOllamaModelDraft] = useState('')
+  const [ollamaCtxDraft, setOllamaCtxDraft] = useState('')
+  const [provTest, setProvTest] = useState<{ ok: boolean; message: string } | null>(null)
+  const [provBusy, setProvBusy] = useState(false)
 
   useEffect(() => {
     void call('master:getContext', undefined)
@@ -127,7 +140,19 @@ export default function SettingsView(): JSX.Element {
     void call('glassdoor:feedStatus', undefined)
       .then(setGdFeed)
       .catch(() => undefined)
+    void call('provider:status', undefined)
+      .then(setProvStatus)
+      .catch(() => undefined)
   }, [])
+
+  useEffect(() => {
+    if (settings) {
+      setGeminiModelDraft(settings.geminiModel)
+      setOllamaUrlDraft(settings.ollamaUrl)
+      setOllamaModelDraft(settings.ollamaModel)
+      setOllamaCtxDraft(String(settings.ollamaNumCtx))
+    }
+  }, [settings?.geminiModel, settings?.ollamaUrl, settings?.ollamaModel, settings?.ollamaNumCtx])
 
   useEffect(() => {
     if (settings) setGdSearchesDraft((settings.glassdoorSearches ?? []).join('\n'))
@@ -146,6 +171,47 @@ export default function SettingsView(): JSX.Element {
     void call('settings:set', p)
       .then(() => useApp.getState().refreshSettings())
       .catch((err) => toast(String(err), 'error'))
+  }
+
+  const refreshProviderStatus = async (): Promise<void> => {
+    try {
+      setProvStatus(await call('provider:status', undefined))
+    } catch {
+      /* status is advisory */
+    }
+  }
+
+  const saveGeminiKey = async (): Promise<void> => {
+    try {
+      await call('provider:setGeminiKey', { key: geminiKeyDraft })
+      setGeminiKeyDraft('')
+      await refreshProviderStatus()
+      toast('Gemini key saved (encrypted with the OS keychain)', 'success')
+    } catch (err) {
+      toast(String(err), 'error')
+    }
+  }
+
+  const clearGeminiKeyNow = async (): Promise<void> => {
+    try {
+      await call('provider:clearGeminiKey', undefined)
+      await refreshProviderStatus()
+      toast('Gemini key removed', 'success')
+    } catch (err) {
+      toast(String(err), 'error')
+    }
+  }
+
+  const runProviderTest = async (): Promise<void> => {
+    setProvBusy(true)
+    setProvTest(null)
+    try {
+      setProvTest(await call('provider:test', undefined))
+    } catch (err) {
+      setProvTest({ ok: false, message: String(err) })
+    } finally {
+      setProvBusy(false)
+    }
   }
 
   const saveCreds = async (): Promise<void> => {
@@ -485,27 +551,181 @@ export default function SettingsView(): JSX.Element {
 
         <div className="panel mt-4 px-4 py-1">
           <div className="flex items-center gap-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
-            <Bot size={11} aria-hidden="true" /> Agent runs
+            <Cpu size={11} aria-hidden="true" /> Model provider
           </div>
           <Row
-            label="Model override"
-            hint="Model used by agent runs. Default = your Claude Code default."
+            label="Backend"
+            hint="Powers every agent (builds, scout, assistant, email drafts). Gemini and Ollama route through a local translation layer; conversations keep their full context when you switch. Tool-use quality varies by model — Claude models are tuned for this harness."
           >
-            <select
-              className="input w-44"
-              value={modelDraft}
-              onChange={(e) => {
-                setModelDraft(e.target.value)
-                patch({ model: e.target.value || undefined })
-              }}
-            >
-              {modelOptionsWith(modelDraft).map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
+            <div className="flex gap-1">
+              {(['claude', 'gemini', 'ollama'] as const).map((p) => (
+                <button
+                  key={p}
+                  className={`chip ${settings.provider === p ? 'border-cyan-700 bg-cyan-950/60 text-cyan-200' : ''}`}
+                  onClick={() => {
+                    patch({ provider: p })
+                    setProvTest(null)
+                    void refreshProviderStatus()
+                  }}
+                >
+                  {p === 'claude' ? 'Claude' : p === 'gemini' ? 'Gemini' : 'Ollama'}
+                </button>
               ))}
-            </select>
+            </div>
           </Row>
+          {settings.provider === 'gemini' && (
+            <>
+              <Row
+                label="Gemini API key"
+                hint={
+                  provStatus?.geminiKeySet
+                    ? 'A key is stored, encrypted with the OS keychain. Paste a new one to replace it.'
+                    : 'From Google AI Studio. Stored encrypted with the OS keychain — never in the workspace, never passed to agent processes.'
+                }
+              >
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="password"
+                    className="input w-52"
+                    placeholder={provStatus?.geminiKeySet ? '(key set)' : 'AIza…'}
+                    value={geminiKeyDraft}
+                    onChange={(e) => setGeminiKeyDraft(e.target.value)}
+                  />
+                  <button
+                    className="btn px-2 py-1 text-[10px]"
+                    disabled={!geminiKeyDraft.trim()}
+                    onClick={() => void saveGeminiKey()}
+                  >
+                    Save
+                  </button>
+                  {provStatus?.geminiKeySet && (
+                    <button className="btn px-2 py-1 text-[10px]" onClick={() => void clearGeminiKeyNow()}>
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </Row>
+              <Row label="Gemini model" hint="Flash is fast and cheap; Pro is stronger on long agent runs.">
+                <>
+                  <input
+                    className="input w-52"
+                    list="gemini-model-presets"
+                    value={geminiModelDraft}
+                    onChange={(e) => setGeminiModelDraft(e.target.value)}
+                    onBlur={() => {
+                      const v = geminiModelDraft.trim()
+                      if (v) patch({ geminiModel: v })
+                      else setGeminiModelDraft(settings.geminiModel)
+                    }}
+                  />
+                  <datalist id="gemini-model-presets">
+                    <option value="gemini-2.5-flash" />
+                    <option value="gemini-2.5-pro" />
+                    <option value="gemini-2.5-flash-lite" />
+                  </datalist>
+                </>
+              </Row>
+            </>
+          )}
+          {settings.provider === 'ollama' && (
+            <>
+              <Row
+                label="Ollama URL"
+                hint={provStatus ? `Local server: ${provStatus.ollama.message}` : 'Local Ollama server address.'}
+              >
+                <input
+                  className="input w-52"
+                  value={ollamaUrlDraft}
+                  onChange={(e) => setOllamaUrlDraft(e.target.value)}
+                  onBlur={() => {
+                    const v = ollamaUrlDraft.trim()
+                    if (v) {
+                      patch({ ollamaUrl: v })
+                      void refreshProviderStatus()
+                    } else setOllamaUrlDraft(settings.ollamaUrl)
+                  }}
+                />
+              </Row>
+              <Row
+                label="Ollama model"
+                hint="Must already be pulled (ollama pull …). Pick a tool-capable model — agents depend on function calling."
+              >
+                <>
+                  <input
+                    className="input w-52"
+                    list="ollama-model-list"
+                    placeholder="qwen3:14b"
+                    value={ollamaModelDraft}
+                    onChange={(e) => setOllamaModelDraft(e.target.value)}
+                    onBlur={() => patch({ ollamaModel: ollamaModelDraft.trim() })}
+                  />
+                  <datalist id="ollama-model-list">
+                    {(provStatus?.ollama.models ?? []).map((m) => (
+                      <option key={m} value={m} />
+                    ))}
+                  </datalist>
+                </>
+              </Row>
+              <Row
+                label="Context window"
+                hint="Tokens per request (num_ctx). Agent prompts are large — keep this high; lower it only if the machine runs out of memory."
+              >
+                <input
+                  className="input w-24 text-right"
+                  value={ollamaCtxDraft}
+                  onChange={(e) => setOllamaCtxDraft(e.target.value.replace(/\D/g, ''))}
+                  onBlur={() => {
+                    const n = parseInt(ollamaCtxDraft, 10)
+                    if (n >= 4096 && n <= 1_048_576) patch({ ollamaNumCtx: n })
+                    else setOllamaCtxDraft(String(settings.ollamaNumCtx))
+                  }}
+                />
+              </Row>
+            </>
+          )}
+          {settings.provider !== 'claude' && (
+            <Row label="Connection" hint="One tiny request against the backend to validate key, model, and URL.">
+              <div className="flex items-center gap-2">
+                {provTest && (
+                  <span
+                    className={`max-w-64 text-right text-[10px] ${provTest.ok ? 'text-green-300' : 'text-amber-300'}`}
+                  >
+                    {provTest.message}
+                  </span>
+                )}
+                <button className="btn px-2 py-1 text-[10px]" disabled={provBusy} onClick={() => void runProviderTest()}>
+                  {provBusy ? 'Testing…' : 'Test'}
+                </button>
+              </div>
+            </Row>
+          )}
+        </div>
+
+        <div className="panel mt-4 px-4 py-1">
+          <div className="flex items-center gap-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
+            <Bot size={11} aria-hidden="true" /> Agent runs
+          </div>
+          {settings.provider === 'claude' && (
+            <Row
+              label="Model override"
+              hint="Model used by agent runs. Default = your Claude Code default."
+            >
+              <select
+                className="input w-44"
+                value={modelDraft}
+                onChange={(e) => {
+                  setModelDraft(e.target.value)
+                  patch({ model: e.target.value || undefined })
+                }}
+              >
+                {modelOptionsWith(modelDraft).map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </Row>
+          )}
           <Row label="Max turns per run" hint="Safety ceiling before a run is stopped.">
             <input
               className="input w-20 text-right"

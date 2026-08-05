@@ -3,6 +3,7 @@ import path from 'node:path'
 import { mapMessage } from '../agent/eventMap'
 import { MASTER_DIR, REPO_ROOT } from '../paths'
 import { loadProfile } from '../profile/profileStore'
+import { providerEnv, resolveAgentModel } from '../provider/providerRuntime'
 import { getMessageBody, getMessageMeta } from './gmailClient'
 
 // Draft a reply to one email as the candidate. One-shot SDK generation with NO
@@ -102,6 +103,7 @@ export async function draftEmailReply(
 ): Promise<ReplyDraft> {
   const [meta, body] = await Promise.all([getMessageMeta(id), getMessageBody(id)])
   const { query } = await import('@anthropic-ai/claude-agent-sdk')
+  const resolvedModel = resolveAgentModel(model)
   const q = query({
     prompt: buildPrompt(meta.from, meta.subject, body, instructions),
     options: {
@@ -113,8 +115,8 @@ export async function draftEmailReply(
       allowedTools: [],
       permissionMode: 'default',
       maxTurns: 1,
-      env: { ...process.env } as Record<string, string>,
-      ...(model ? { model } : {})
+      env: await providerEnv(),
+      ...(resolvedModel ? { model: resolvedModel } : {})
     }
   })
   let text = ''

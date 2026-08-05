@@ -95,7 +95,7 @@ Key design decisions:
 
 ## Requirements
 
-- **[Claude Code](https://claude.com/claude-code)** installed and logged in — agent runs execute under your Claude subscription via the Agent SDK; the app shows token/context usage, and nothing is billed per-run beyond your plan.
+- **[Claude Code](https://claude.com/claude-code)** installed and logged in — agent runs execute under your Claude subscription via the Agent SDK; the app shows token/context usage, and nothing is billed per-run beyond your plan. The CLI is still required when the model provider is Gemini or Ollama — it runs the agent loop either way; only the model calls are redirected.
 - **Node.js 20+ and npm** (to run the app in development).
 - **[bun](https://bun.sh)** — runs the job-board search CLIs. Auto-detected (including version-manager installs); Settings offers a one-click install if missing.
 - **A LaTeX engine** — [tectonic](https://tectonic-typesetting.github.io) (single binary, recommended) or any TeX distribution providing pdflatex/xelatex/lualatex. Auto-detected, with a manual path override in Settings.
@@ -124,7 +124,8 @@ A starter master-résumé template lives at `cv/main_example.tex` — a plain-`a
 
 Everything lives in **Settings**:
 
-- **Agent runs** — model override (aliases or pinned versions), max turns per run, concurrent runs, live text streaming.
+- **Model provider** — which backend powers every agent: **Claude** (default, your Claude Code auth), **Gemini** (bring your own API key, keychain-encrypted), or **Ollama** (local server URL + model + context window). Gemini and Ollama run through a local loopback shim that speaks the Anthropic Messages API to the Agent SDK and translates streaming + tool calls to the backend's wire format — conversations keep their full context when you switch, because SDK session transcripts live on disk and replay through whichever backend is active. A Test button validates key/model/URL with one tiny request. Notes: tool-calling quality varies by model (Claude models are tuned for this harness), web search is unavailable off-Anthropic (Glassdoor rating lookups degrade to "not found"), and Ollama models must be tool-capable.
+- **Agent runs** — model override (aliases or pinned versions; Claude provider only), max turns per run, concurrent runs, live text streaming.
 - **Job boards** — per-board enable toggles, install status with one-click repair, jobright credentials (keychain-encrypted) and connection test, custom Greenhouse/Lever/Ashby company boards, bun runtime detection/install, Glassdoor rating backfill.
 - **Email (Gmail)** — bring your own Google OAuth client (paste the client ID/secret or upload the downloaded JSON), sign in read-only, set the poll interval, and choose whether status suggestions auto-apply.
 - **Candidate profile** — the structured profile editor, profile refinement runs, master-résumé context, and the knowledge base.
@@ -156,7 +157,7 @@ assets/mascot/        Pip
 
 ## Roadmap
 
-- **Alternative model providers** (Qwen, Gemini, other OpenAI-compatible APIs): the agent layer is built on the Claude Agent SDK, which speaks the Anthropic API only. The planned route is an optional local translation proxy (LiteLLM-style) the app points `ANTHROPIC_BASE_URL` at, with bring-your-own API keys stored in the OS keychain — useful as a fallback when Claude usage limits are exhausted. Tool-calling fidelity varies by model, so approval-gated agent flows will need per-provider validation before this ships.
+- **More model providers** (OpenAI-compatible APIs, Qwen endpoints): Gemini and Ollama shipped via the built-in translation shim (see Configuration → Model provider); the same shim can grow additional backends. Tool-calling fidelity varies by model, so each new backend needs validation against the approval-gated agent flows before it's wired in.
 
 ## Acknowledgements
 

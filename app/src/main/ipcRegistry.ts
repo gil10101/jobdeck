@@ -38,6 +38,8 @@ import {
   writeGlassdoorFeed
 } from './boards/glassdoorFeed'
 import { APP_DATA_DIR, REPO_ROOT } from './paths'
+import { clearGeminiKey, setGeminiKey } from './provider/geminiKeyStore'
+import { providerStatus, testProvider } from './provider/providerRuntime'
 import { validateProfile } from './profile/profileSchema'
 import { loadProfile, saveProfile } from './profile/profileStore'
 import type { ProfileFile } from '@shared/profile'
@@ -702,6 +704,19 @@ export function registerIpc(services: Services): void {
     return { count: feed.rows.length, fetchedAt: feed.fetchedAt }
   })
   handle('glassdoor:feedStatus', () => glassdoorFeedStatus(Date.now()))
+
+  // ---- BYO model providers ----
+  handle('provider:setGeminiKey', ({ key }) => {
+    if (!key.trim()) throw new Error('empty API key')
+    setGeminiKey(key)
+    return { keySet: true }
+  })
+  handle('provider:clearGeminiKey', () => {
+    clearGeminiKey()
+    return { keySet: false }
+  })
+  handle('provider:status', () => providerStatus())
+  handle('provider:test', () => testProvider())
 
   // ---- app info ----
   handle('app:info', () => ({ repoRoot: REPO_ROOT, appDataDir: APP_DATA_DIR }))
