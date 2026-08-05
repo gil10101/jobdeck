@@ -121,6 +121,7 @@ export function providerPromptAddendum(): string {
     '- To create a NEW file, use Write once with the COMPLETE content. To change an EXISTING file, Read it first, then Edit or Write — a Write that fails with "has not been read yet" means Read it, then retry once.',
     '- Do the work directly with Read/Write/Bash-style tools — never launch subagents or name agent types.',
     '- A reply is NEVER just a plan or a description of what you are about to do. Until the task is fully complete, EVERY reply must contain a tool call that advances the work; stopping without one abandons the task. Only the final reply — after all required files exist — is plain text.',
+    '- In LaTeX, never redefine an existing command: no \\newcommand for \\section or other built-ins. Copy the master preamble VERBATIM. If a compile error says "already defined", DELETE your redefinition — do not rename or wrap it.',
     '- Never report a result you did not execute: if the task says to compile, test, or verify, RUN that command and read its real output first. Claiming an unexecuted result is fabrication.',
     '- Finish with exactly the output format the task specifies — no extra commentary after it.'
   ].join('\n')
