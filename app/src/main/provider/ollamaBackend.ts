@@ -283,6 +283,29 @@ function authHeader(key: string | null): Record<string, string> {
   return key ? { authorization: `Bearer ${key}` } : {}
 }
 
+// Loading a model + allocating its context can take minutes on first touch;
+// fired ahead of agent spawn so the CLI's first request queues behind a
+// warm runner instead of eating the cold start inside its stream watchdog.
+let lastWarm = { key: '', at: 0 }
+export function prewarmOllama(config: ProviderConfig): void {
+  if (!config.model) return
+  const key = `${config.ollamaUrl}|${config.model}|${config.ollamaNumCtx}`
+  const now = Date.now()
+  if (lastWarm.key === key && now - lastWarm.at < 240_000) return
+  lastWarm = { key, at: now }
+  void llmFetch(`${config.ollamaUrl.replace(/\/$/, '')}/api/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...authHeader(config.ollamaKey) },
+    body: JSON.stringify({
+      model: config.model,
+      messages: [{ role: 'user', content: 'ok' }],
+      stream: false,
+      think: false,
+      options: { num_ctx: config.ollamaNumCtx, num_predict: 1 }
+    })
+  }).catch(() => undefined)
+}
+
 /** Reachability + installed-models probe for the Settings card. */
 export async function ollamaModels(url: string, key: string | null = null): Promise<string[]> {
   const res = await llmFetch(`${url.replace(/\/$/, '')}/api/tags`, {

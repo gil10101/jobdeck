@@ -1,7 +1,7 @@
 import type { AppSettings } from '@shared/types'
 import { listGeminiModels, testGemini } from './geminiBackend'
 import { geminiKey, geminiKeySet, ollamaKey, ollamaKeySet } from './providerKeyStore'
-import { ollamaModelInfo, ollamaModels, type OllamaModelInfo } from './ollamaBackend'
+import { ollamaModelInfo, ollamaModels, prewarmOllama, type OllamaModelInfo } from './ollamaBackend'
 import { startShim, type ShimHandle } from './shim'
 import type { ProviderConfig } from './translate'
 
@@ -83,6 +83,7 @@ export async function providerEnv(): Promise<Record<string, string>> {
   const base = { ...process.env } as Record<string, string>
   const config = currentProviderConfig()
   if (config.provider === 'claude') return base
+  if (config.provider === 'ollama') prewarmOllama(config)
   const handle = await ensureShim()
   return {
     ...base,

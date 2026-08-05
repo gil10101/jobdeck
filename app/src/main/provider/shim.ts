@@ -138,10 +138,23 @@ async function streamResponse(
       open = null
     }
   }
-  // Local backends can sit minutes in prompt-eval before their first byte;
-  // without traffic the CLI declares "Stream idle timeout". Real Anthropic
-  // streams carry ping events too.
-  const keepalive = setInterval(() => emit('ping', {}), 15_000)
+  // Local backends can sit minutes in prompt-eval before their first byte,
+  // and the CLI's stream watchdog only counts CONTENT chunks — pings alone
+  // don't feed it. Open a thinking block immediately and drip empty deltas
+  // (zero characters — invisible) until real output arrives; the state
+  // machine then continues the block for real thinking or closes it for
+  // text/tools.
+  index = 0
+  open = 'thinking'
+  emit('content_block_start', { index, content_block: { type: 'thinking', thinking: '', signature: '' } })
+  emit('content_block_delta', { index, delta: { type: 'thinking_delta', thinking: '' } })
+  const keepalive = setInterval(() => {
+    if (open === 'thinking') {
+      emit('content_block_delta', { index, delta: { type: 'thinking_delta', thinking: '' } })
+    } else {
+      emit('ping', {})
+    }
+  }, 15_000)
   try {
     await pumpBackend()
   } finally {
