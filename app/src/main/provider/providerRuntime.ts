@@ -120,6 +120,7 @@ export function providerPromptAddendum(): string {
     '- Prefer one tool call at a time; read results before the next call. NEVER repeat a call that already succeeded.',
     '- To create a NEW file, use Write once with the COMPLETE content. To change an EXISTING file, Read it first, then Edit or Write — a Write that fails with "has not been read yet" means Read it, then retry once.',
     '- Do the work directly with Read/Write/Bash-style tools — never launch subagents or name agent types.',
+    '- A reply is NEVER just a plan or a description of what you are about to do. Until the task is fully complete, EVERY reply must contain a tool call that advances the work; stopping without one abandons the task. Only the final reply — after all required files exist — is plain text.',
     '- Finish with exactly the output format the task specifies — no extra commentary after it.'
   ].join('\n')
 }
