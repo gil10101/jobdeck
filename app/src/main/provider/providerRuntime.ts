@@ -13,8 +13,10 @@ import type { ProviderConfig } from './translate'
 // keeps the whole history.
 
 const GEMINI_URL = 'https://generativelanguage.googleapis.com'
-/** Local models mostly load slowly on first token; the CLI default timeout is too eager. */
-const API_TIMEOUT_MS = 600_000
+/** Hard per-request ceiling for the CLI. Local models on memory-tight
+ *  machines can stall mid-generation for minutes (swap pressure) and then
+ *  recover — 30min keeps a stalled-but-alive request from being killed. */
+const API_TIMEOUT_MS = 1_800_000
 
 let getSettings: (() => AppSettings) | null = null
 let shim: ShimHandle | null = null
