@@ -1,25 +1,41 @@
 import { useEffect, useState } from 'react'
-import { Check, X } from 'lucide-react'
+import { BookUser, Bot, Briefcase, Check, FolderOpen, Mail, Palette, Workflow, X } from 'lucide-react'
 import type { AppSettings, BoardId, BoardsStatus, EmailStatus } from '@shared/types'
 import type { CustomBoard } from '@shared/profile'
 import { call } from '../api'
 import { modelOptionsWith } from '../lib/models'
 import { useApp } from '../store'
 import ProfilePanel from './settings/ProfilePanel'
+import glassdoorLogo from '../assets/boards/glassdoor.svg'
+import jobrightLogo from '../assets/boards/jobright.svg'
+import linkedinLogo from '../assets/boards/linkedin.svg'
+
+/** Board logo URL for a settings row, when one is bundled. */
+const BOARD_LOGOS: Record<string, string> = {
+  jobright: jobrightLogo,
+  linkedin: linkedinLogo,
+  glassdoor: glassdoorLogo
+}
 
 function Row({
   label,
   hint,
+  icon,
   children
 }: {
   label: string
   hint?: string
+  /** Optional logo URL rendered before the label (board rows). */
+  icon?: string
   children: React.ReactNode
 }): JSX.Element {
   return (
     <div className="flex items-start justify-between gap-6 border-b border-edge/50 py-3 last:border-b-0">
       <div>
-        <div className="text-xs font-medium text-gray-200">{label}</div>
+        <div className="flex items-center gap-2 text-xs font-medium text-gray-200">
+          {icon && <img src={icon} alt="" className="h-4 w-4 shrink-0 rounded-sm" />}
+          {label}
+        </div>
         {hint && <div className="mt-0.5 max-w-md text-[11px] leading-relaxed text-gray-500">{hint}</div>}
       </div>
       <div className="shrink-0 pt-0.5">{children}</div>
@@ -356,49 +372,43 @@ export default function SettingsView(): JSX.Element {
 
         <ProfilePanel />
 
+        {/* One card, two lanes: always-on context (can shape documents) and
+            background-only knowledge (never on documents). Separate stores
+            (master/context.md vs master/knowledge/) — the split is what keeps
+            "never on documents" enforceable at the prompt level. */}
         <div className="panel mt-4 px-4 py-3">
-          <div className="text-[10px] font-bold uppercase tracking-wide text-muted">
-            Master résumé context
+          <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-muted">
+            <BookUser size={11} aria-hidden="true" /> Agent context
           </div>
           <div className="mt-1 text-[11px] leading-relaxed text-gray-500">
-            Free-form context added to every build alongside your profile — extra skills, certs,
-            projects, or standing guidance the agent should always know. For one specific
-            application, use the notes field on its intake card or scout panel instead.
+            What every agent knows about you beyond the profile. For one specific application, use
+            the notes field on its intake card or scout panel instead.
+          </div>
+
+          <div className="mt-3 text-[11px] font-semibold text-gray-300">
+            Always-on notes
+            <span className="ml-2 font-normal text-gray-500">
+              added to every build — may shape the résumé and cover letter
+            </span>
           </div>
           <textarea
-            className="input mt-2 min-h-[7rem] w-full resize-y font-mono text-[11px] leading-relaxed"
-            placeholder={'e.g.\n- AWS Solutions Architect Associate (in progress, exam Aug 2026)\n- Coursework (context only — NEVER list on résumé or cover letter): Databases, Distributed Systems, Statistical Learning\n- Prefer "data practitioner" framing over "engineer" for analyst roles'}
+            className="input mt-1.5 min-h-[6rem] w-full resize-y font-mono text-[11px] leading-relaxed"
+            placeholder={'e.g.\n- AWS Solutions Architect Associate (in progress, exam Aug 2026)\n- Prefer "data practitioner" framing over "engineer" for analyst roles'}
             value={masterContext}
             onChange={(e) => {
               setMasterContext(e.target.value)
               setMasterContextSaved(false)
             }}
           />
-          <div className="mt-2 flex items-center gap-2">
-            <button
-              className="btn btn-primary px-2 py-1 text-[10px]"
-              disabled={masterContextSaved}
-              onClick={() => void saveMasterContext()}
-            >
-              {masterContextSaved ? 'Saved' : 'Save'}
-            </button>
-            <span className="text-[10px] text-gray-600">
-              Stored at master/context.md in your workspace.
+
+          <div className="mt-4 text-[11px] font-semibold text-gray-300">
+            Background only
+            <span className="ml-2 font-normal text-gray-500">
+              informs judgment and answers — never listed on a résumé or cover letter
             </span>
           </div>
-        </div>
-
-        <div className="panel mt-4 px-4 py-3">
-          <div className="text-[10px] font-bold uppercase tracking-wide text-muted">
-            Knowledge base — background only, never on documents
-          </div>
-          <div className="mt-1 text-[11px] leading-relaxed text-gray-500">
-            Notes and files (transcripts, syllabi, portfolios, old résumés — images and PDFs are
-            readable by agents) that inform fit judgment, application answers, and framing. Nothing
-            here is ever listed on a résumé or cover letter.
-          </div>
           <textarea
-            className="input mt-2 min-h-[5rem] w-full resize-y font-mono text-[11px] leading-relaxed"
+            className="input mt-1.5 min-h-[5rem] w-full resize-y font-mono text-[11px] leading-relaxed"
             placeholder={'e.g.\n- Coursework: Databases, Distributed Systems, Statistical Learning\n- Left retail job off the résumé; fine to mention in "other experience" questions'}
             value={kbNotes}
             onChange={(e) => {
@@ -406,21 +416,6 @@ export default function SettingsView(): JSX.Element {
               setKbNotesSaved(false)
             }}
           />
-          <div className="mt-2 flex items-center gap-2">
-            <button
-              className="btn btn-primary px-2 py-1 text-[10px]"
-              disabled={kbNotesSaved}
-              onClick={() => void saveKbNotes()}
-            >
-              {kbNotesSaved ? 'Saved' : 'Save notes'}
-            </button>
-            <button className="btn px-2 py-1 text-[10px]" onClick={() => void addKbFiles()}>
-              + Add files
-            </button>
-            <span className="text-[10px] text-gray-600">
-              Stored in master/knowledge/ in your workspace.
-            </span>
-          </div>
           {kbFiles.length > 0 && (
             <div className="mt-2 flex flex-col gap-1">
               {kbFiles.map((f) => (
@@ -441,11 +436,30 @@ export default function SettingsView(): JSX.Element {
               ))}
             </div>
           )}
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              className="btn btn-primary px-2 py-1 text-[10px]"
+              disabled={masterContextSaved && kbNotesSaved}
+              onClick={() => {
+                if (!masterContextSaved) void saveMasterContext()
+                if (!kbNotesSaved) void saveKbNotes()
+              }}
+            >
+              {masterContextSaved && kbNotesSaved ? 'Saved' : 'Save'}
+            </button>
+            <button className="btn px-2 py-1 text-[10px]" onClick={() => void addKbFiles()}>
+              + Add files
+            </button>
+            <span className="text-[10px] text-gray-600">
+              Stored at master/context.md and master/knowledge/ in your workspace — files (PDFs,
+              images) are readable by agents.
+            </span>
+          </div>
         </div>
 
         <div className="panel mt-4 px-4 py-1">
-          <div className="pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
-            Appearance
+          <div className="flex items-center gap-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
+            <Palette size={11} aria-hidden="true" /> Appearance
           </div>
           <Row label="Theme">
             <div className="flex gap-1">
@@ -466,8 +480,8 @@ export default function SettingsView(): JSX.Element {
         </div>
 
         <div className="panel mt-4 px-4 py-1">
-          <div className="pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
-            Agent runs
+          <div className="flex items-center gap-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
+            <Bot size={11} aria-hidden="true" /> Agent runs
           </div>
           <Row
             label="Model override"
@@ -528,8 +542,8 @@ export default function SettingsView(): JSX.Element {
         </div>
 
         <div className="panel mt-4 px-4 py-1">
-          <div className="pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
-            Workflow
+          <div className="flex items-center gap-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
+            <Workflow size={11} aria-hidden="true" /> Workflow
           </div>
           <Row
             label="Rename folder to [DONE] on submit"
@@ -552,8 +566,8 @@ export default function SettingsView(): JSX.Element {
         </div>
 
         <div className="panel mt-4 px-4 py-1">
-          <div className="pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
-            Job boards
+          <div className="flex items-center gap-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
+            <Briefcase size={11} aria-hidden="true" /> Job boards
           </div>
           {boards && !boards.bunOk && (
             <div className="mt-2 flex items-center justify-between gap-3 rounded-md border border-amber-700 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-300">
@@ -580,7 +594,7 @@ export default function SettingsView(): JSX.Element {
                   : 'Public API — no credentials needed.'
                 : `Not installed. Install copies the bundled search CLI into ${b.path} inside your workspace (no network access needed).`
             return (
-              <Row key={b.id} label={jr ? 'jobright.ai' : b.id} hint={hint}>
+              <Row key={b.id} label={jr ? 'jobright.ai' : b.id} icon={BOARD_LOGOS[b.id]} hint={hint}>
                 <div className="flex flex-col items-end gap-1.5">
                   <div className="flex items-center gap-2">
                     {!b.enabled ? (
@@ -709,6 +723,7 @@ export default function SettingsView(): JSX.Element {
           </Row>
           <Row
             label="Glassdoor ratings"
+            icon={glassdoorLogo}
             hint="Look up and cache a Glassdoor rating for every company across your tracker, intake, and scout candidates."
           >
             <button
@@ -721,6 +736,7 @@ export default function SettingsView(): JSX.Element {
           </Row>
           <Row
             label="Glassdoor jobs (browser session)"
+            icon={glassdoorLogo}
             hint="When on, the scout button first harvests your target Glassdoor searches through the in-app browser using YOUR logged-in session — no stored password, nothing sent. Safe because you drive it (and solve any bot check); it does automate your session, a gray zone on Glassdoor's ToS, so keep it low-volume. Sign into Glassdoor once in the Browser tab first."
           >
             <div className="flex flex-col items-end gap-1.5">
@@ -767,8 +783,8 @@ export default function SettingsView(): JSX.Element {
         </div>
 
         <div className="panel mt-4 px-4 py-1">
-          <div className="pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
-            Email (Gmail)
+          <div className="flex items-center gap-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
+            <Mail size={11} aria-hidden="true" /> Email (Gmail)
           </div>
           <Row
             label="Google OAuth client"
@@ -912,7 +928,9 @@ export default function SettingsView(): JSX.Element {
 
         {info && (
           <div className="panel mt-4 px-4 py-3">
-            <div className="text-[10px] font-bold uppercase tracking-wide text-muted">Locations</div>
+            <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-muted">
+              <FolderOpen size={11} aria-hidden="true" /> Locations
+            </div>
             <div className="mt-2 flex flex-col gap-1 text-[11px] text-gray-500">
               <div>
                 <span className="text-gray-400">Workspace:</span> {info.repoRoot}

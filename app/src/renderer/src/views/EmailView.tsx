@@ -63,10 +63,36 @@ function ClassChip({ classification }: { classification: EmailClassification }):
   )
 }
 
+/** Unwrap hard line breaks inside paragraphs so mailer text wrapped at ~70
+ *  columns flows to the container width instead of rendering ragged. A single
+ *  newline is joined only when the previous line is clearly mid-flow: long
+ *  enough, not ending a sentence (or the next line starts lowercase), not a
+ *  URL, and the next line is not a list item. Blank-line paragraph breaks are
+ *  always kept. */
+function reflowPlain(text: string): string {
+  const lines = text.split('\n')
+  const out: string[] = []
+  for (const line of lines) {
+    const prev = out[out.length - 1]
+    const next = line.trim()
+    const joinable =
+      prev !== undefined &&
+      prev.trim() !== '' &&
+      next !== '' &&
+      prev.trim().length >= 40 &&
+      !/https?:\/\/\S*$/.test(prev.trim()) &&
+      !/^[-*•>]/.test(next) &&
+      (!/[.!?:]$/.test(prev.trim()) || /^[a-z0-9]/.test(next))
+    if (joinable) out[out.length - 1] = `${prev.trimEnd()} ${next}`
+    else out.push(line)
+  }
+  return out.join('\n')
+}
+
 /** Bare http(s) URLs open externally; split-with-capture puts every URL at an
  *  odd index, everything else stays plain pre-wrap text — no other markup. */
 function LinkifiedBody({ text }: { text: string }): JSX.Element {
-  const parts = text.split(/(https?:\/\/[^\s<>"]+[^\s<>".,;:!?')\]])/g)
+  const parts = reflowPlain(text).split(/(https?:\/\/[^\s<>"]+[^\s<>".,;:!?')\]])/g)
   return (
     <div className="max-w-3xl whitespace-pre-wrap text-[13px] leading-relaxed text-gray-200">
       {parts.map((part, i) =>

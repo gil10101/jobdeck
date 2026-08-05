@@ -101,10 +101,13 @@ function htmlToText(html: string): string {
     .replace(/<head[\s\S]*?<\/head>/gi, '')
     .replace(/<(style|script)[\s\S]*?<\/\1>/gi, '')
     .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(p|div|tr|li|h[1-6]|blockquote)>/gi, '\n')
+    .replace(/<\/(p|div|tr|li|h[1-6]|blockquote|table)>/gi, '\n')
     // Table cells: without a separator, adjacent cell texts concatenate.
     .replace(/<\/(td|th)>/gi, ' ')
-    .replace(/<[^>]+>/g, '')
+    // Strip remaining tags to a SPACE, not '': adjacent inline elements
+    // ("<span>Event Name</span><span>AI Interview</span>") would otherwise
+    // concatenate; the whitespace collapse below eats the extras.
+    .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/gi, ' ')
     .replace(/&amp;/gi, '&')
     .replace(/&lt;/gi, '<')
