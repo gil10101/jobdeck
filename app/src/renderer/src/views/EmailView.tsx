@@ -855,25 +855,38 @@ export default function EmailView(): JSX.Element {
           {suggestions.map((m) => (
             <div
               key={m.id}
-              className="flex items-center gap-3 border-b border-edge/50 bg-cyan-950/40 px-4 py-2 last:border-b-0"
+              className="flex cursor-pointer items-center gap-3 border-b border-edge/50 bg-cyan-950/40 px-4 py-2 last:border-b-0 hover:bg-cyan-950/60"
+              title="Open this email below to verify before applying"
+              onClick={() => setSelectedId(m.id)}
             >
               <ClassChip classification={m.classification} />
-              <span className="text-xs text-gray-200">
+              <span className="shrink-0 text-xs text-gray-200">
                 Mark <span className="font-semibold">{m.suggestion?.company}</span> as{' '}
                 <span className="font-semibold">{m.suggestion?.suggestStatus}</span>
               </span>
-              <button
-                className="min-w-0 truncate text-left text-[11px] text-gray-500 hover:text-gray-300"
-                title={m.subject}
-                onClick={() => setSelectedId(m.id)}
-              >
-                {m.subject}
-              </button>
+              <span className="min-w-0 truncate text-[11px] text-gray-500">{m.subject}</span>
+              <Eye
+                size={12}
+                className="shrink-0 text-gray-500"
+                aria-hidden="true"
+              />
               <div className="ml-auto flex shrink-0 gap-1.5">
-                <button className="btn btn-primary px-2 py-0.5 text-[10px]" onClick={() => void applySuggestion(m)}>
+                <button
+                  className="btn btn-primary px-2 py-0.5 text-[10px]"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void applySuggestion(m)
+                  }}
+                >
                   <Check size={11} className="mr-0.5 inline" /> Apply
                 </button>
-                <button className="btn px-2 py-0.5 text-[10px]" onClick={() => void dismissSuggestion(m)}>
+                <button
+                  className="btn px-2 py-0.5 text-[10px]"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void dismissSuggestion(m)
+                  }}
+                >
                   <X size={11} className="mr-0.5 inline" /> Dismiss
                 </button>
               </div>
