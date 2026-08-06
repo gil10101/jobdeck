@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
-import type { EmailClassification, EmailFilter, EmailMessage, EmailSuggestion } from '@shared/types'
+import type { EmailClassification, EmailFilter, EmailInvite, EmailMessage, EmailSuggestion } from '@shared/types'
 
 // Header/snippet cache for synced Gmail messages, in the app-data dir (0600 —
 // mail is personal and must never land in the workspace agents can read; the
@@ -39,6 +39,7 @@ function load(): EmailCacheFile {
       m.favorite ??= false
       m.hidden ??= false
       m.tags ??= []
+      m.invite ??= null
     }
   } catch {
     cache = { messages: [], lastSyncAt: null, customTags: [] }
@@ -142,7 +143,9 @@ export function updateMessage(
 /** Overwrite the derived fields (classification/job-related/suggestion) of one
  *  cached message — used when a full-body reclassification supersedes the
  *  snippet-based one made at sync. No-op for an unknown id; returns whether
- *  anything actually changed. User state (star/hide/tags) is untouched. */
+ *  anything actually changed. User state (star/hide/tags) is untouched.
+ *  `invite` undefined = leave the stored invite alone (the caller had no ICS
+ *  part to judge from); null/value = overwrite. */
 export function applyReclassification(
   id: string,
   fields: {
@@ -150,11 +153,15 @@ export function applyReclassification(
     jobRelated: boolean
     suggestion: EmailSuggestion | null
     suggestionState: EmailMessage['suggestionState']
+    invite?: EmailInvite | null
   }
 ): boolean {
   const msg = load().messages.find((m) => m.id === id)
   if (!msg) return false
+  const inviteChanged =
+    fields.invite !== undefined && JSON.stringify(msg.invite ?? null) !== JSON.stringify(fields.invite)
   const changed =
+    inviteChanged ||
     msg.classification !== fields.classification ||
     msg.jobRelated !== fields.jobRelated ||
     msg.suggestionState !== fields.suggestionState ||
@@ -164,6 +171,7 @@ export function applyReclassification(
   msg.jobRelated = fields.jobRelated
   msg.suggestion = fields.suggestion
   msg.suggestionState = fields.suggestionState
+  if (fields.invite !== undefined) msg.invite = fields.invite
   persist()
   return true
 }

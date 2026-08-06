@@ -62,7 +62,8 @@ import {
   parseClientJson,
   setGmailClientId
 } from './email/gmailAuth'
-import { getMessageBody } from './email/gmailClient'
+import { getMessageFull } from './email/gmailClient'
+import { parseIcs } from './email/icsParse'
 import { draftEmailReply } from './email/emailReply'
 import {
   clearEmailCache,
@@ -75,7 +76,18 @@ import {
   setSuggestionState,
   updateMessage
 } from './email/emailStore'
-import { EmailSync } from './email/emailSync'
+import { EmailSync, matchTrackerRow } from './email/emailSync'
+import {
+  addManual,
+  approveEvent,
+  dismissEvent,
+  listEvents,
+  proposeEvent,
+  proposedCount,
+  removeEvent,
+  updateEvent
+} from './calendar/calendarStore'
+import { ReminderLoop } from './calendar/reminders'
 
 export interface Services {
   store: Store
@@ -824,12 +836,15 @@ export function registerIpc(services: Services): void {
   })
   handle('email:list', ({ filter }) => listCachedMessages(filter))
   handle('email:getBody', async ({ id }) => {
-    const text = await getMessageBody(id)
+    const { text, ics } = await getMessageFull(id)
     // Opening a message is the chance to reclassify it from the full body,
     // healing a snippet-based miss (e.g. a rejection whose decisive line sat
-    // past the preview) and refreshing its tracker suggestion.
-    emailSync.reclassifyFromBody(id, text)
-    return { text }
+    // past the preview), refresh its tracker suggestion, and persist a newly
+    // parsed invite. An unparseable/absent ICS part must not clear a stored
+    // invite, hence undefined (leave alone) instead of null there.
+    const parsed = ics ? parseIcs(ics) : null
+    emailSync.reclassifyFromBody(id, text, parsed ? parsed.invite : undefined)
+    return { text, invite: getCachedMessage(id)?.invite ?? parsed?.invite ?? null }
   })
   handle('email:draftReply', ({ id, instructions }) =>
     draftEmailReply(id, instructions, store.state.settings.model)
@@ -862,6 +877,55 @@ export function registerIpc(services: Services): void {
   })
   handle('email:tags', () => ({ tags: listTags() }))
   handle('email:createTag', ({ name }) => createTag(name))
+
+  // ---- calendar: events extracted from mail, plus reminders ----
+  // Reminders run regardless of Gmail state — manual events exist without it.
+  const reminders = new ReminderLoop({ store, send })
+  reminders.start()
+  const pushCalendarChanged = (): void =>
+    send('push:calendarChanged', { proposed: proposedCount() })
+  handle('calendar:list', () => listEvents())
+  handle('calendar:approve', ({ id }) => {
+    approveEvent(id)
+    pushCalendarChanged()
+    return listEvents()
+  })
+  handle('calendar:dismiss', ({ id }) => {
+    dismissEvent(id)
+    pushCalendarChanged()
+    return listEvents()
+  })
+  handle('calendar:remove', ({ id }) => {
+    removeEvent(id)
+    pushCalendarChanged()
+    return listEvents()
+  })
+  handle('calendar:add', (input) => {
+    addManual(input)
+    pushCalendarChanged()
+    return listEvents()
+  })
+  handle('calendar:update', ({ id, patch }) => {
+    updateEvent(id, patch)
+    pushCalendarChanged()
+    return listEvents()
+  })
+  handle('calendar:propose', (input) => {
+    // Same tracker match the sync path uses, so a card-proposed event carries
+    // its company/row link. The renderer never sees the ICS UID, so dedupe
+    // rests on sourceMessageId + title/start-minute.
+    const msg = input.sourceMessageId ? getCachedMessage(input.sourceMessageId) : null
+    const match = msg ? matchTrackerRow(msg.from, msg.subject, msg.snippet, tracker.listRows()) : null
+    proposeEvent({
+      ...input,
+      icsUid: null,
+      company: match?.company ?? null,
+      rowId: match?.id ?? null,
+      source: 'ics'
+    })
+    pushCalendarChanged()
+    return listEvents()
+  })
 
   // ---- assistant: in-app chat, IPC channels mirror AssistantManager 1:1 ----
   const sessionDeps = {

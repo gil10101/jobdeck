@@ -1,0 +1,256 @@
+// Conservative natural-language date/time extraction for interview mail with
+// no ICS part. A candidate event requires a date and a time within 300
+// characters of each other; anything ambiguous returns null — a missed event
+// is recoverable from the mail view, a wrong calendar entry is not.
+// Pure module: zero runtime imports — the email selftest executes it under
+// plain `node` type stripping (which is also why zonedTimeToIso is duplicated
+// from icsParse instead of imported).
+
+const PAIR_WINDOW = 300
+
+const MONTHS: Record<string, number> = {
+  jan: 1,
+  feb: 2,
+  mar: 3,
+  apr: 4,
+  may: 5,
+  jun: 6,
+  jul: 7,
+  aug: 8,
+  sep: 9,
+  oct: 10,
+  nov: 11,
+  dec: 12
+}
+
+/** US timezone tokens → IANA zones. ET/EST/EDT all map to the zone; the
+ *  offset actually applied is the zone's real offset for that date. */
+const ZONES: Record<string, string> = {
+  ET: 'America/New_York',
+  EST: 'America/New_York',
+  EDT: 'America/New_York',
+  CT: 'America/Chicago',
+  CST: 'America/Chicago',
+  CDT: 'America/Chicago',
+  MT: 'America/Denver',
+  MST: 'America/Denver',
+  MDT: 'America/Denver',
+  PT: 'America/Los_Angeles',
+  PST: 'America/Los_Angeles',
+  PDT: 'America/Los_Angeles'
+}
+
+interface DateHit {
+  index: number
+  end: number
+  month: number
+  day: number
+  year: number | null
+}
+
+interface TimeHit {
+  index: number
+  end: number
+  hh: number
+  mi: number
+  endHh: number | null
+  endMi: number | null
+  zone: string | null
+}
+
+/** Same algorithm as icsParse.zonedTimeToIso: wall time in an IANA zone →
+ *  UTC ISO, offset found by round-tripping through Intl.DateTimeFormat. */
+function zonedTimeToIso(
+  tzid: string,
+  y: number,
+  mo: number,
+  d: number,
+  hh: number,
+  mi: number,
+  ss: number
+): string {
+  let dtf: Intl.DateTimeFormat
+  try {
+    dtf = new Intl.DateTimeFormat('en-US', {
+      timeZone: tzid,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    })
+  } catch {
+    return new Date(y, mo - 1, d, hh, mi, ss).toISOString()
+  }
+  const target = Date.UTC(y, mo - 1, d, hh, mi, ss)
+  const wallAt = (t: number): number => {
+    const p: Record<string, number> = {}
+    for (const part of dtf.formatToParts(new Date(t))) {
+      if (part.type !== 'literal') p[part.type] = Number(part.value)
+    }
+    const hour = p.hour === 24 ? 0 : p.hour
+    return Date.UTC(p.year, p.month - 1, p.day, hour, p.minute, p.second)
+  }
+  let t = target - (wallAt(target) - target)
+  const drift = wallAt(t) - target
+  if (drift !== 0) t -= drift
+  return new Date(t).toISOString()
+}
+
+function to24(h: number, meridiem: string): number {
+  const mer = meridiem.toLowerCase()
+  if (mer === 'am') return h === 12 ? 0 : h
+  return h === 12 ? 12 : h + 12
+}
+
+/** Month-name dates (weekday and year optional) plus M/D and M/D/YYYY. */
+function findDates(text: string): DateHit[] {
+  const hits: DateHit[] = []
+  const monthRe =
+    /(?:\b(?:mon|tues?|wed(?:nes)?|thu(?:rs?)?|fri|sat(?:ur)?|sun)(?:day)?,?\s+)?\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?\b/gi
+  for (let m = monthRe.exec(text); m; m = monthRe.exec(text)) {
+    const month = MONTHS[m[1].slice(0, 3).toLowerCase()]
+    const day = Number(m[2])
+    if (!month || day < 1 || day > 31) continue
+    hits.push({
+      index: m.index,
+      end: m.index + m[0].length,
+      month,
+      day,
+      year: m[3] ? Number(m[3]) : null
+    })
+  }
+  const numRe = /\b(\d{1,2})\/(\d{1,2})(?:\/(\d{4}|\d{2}))?\b/g
+  for (let m = numRe.exec(text); m; m = numRe.exec(text)) {
+    const month = Number(m[1])
+    const day = Number(m[2])
+    if (month < 1 || month > 12 || day < 1 || day > 31) continue
+    let year: number | null = m[3] ? Number(m[3]) : null
+    if (year !== null && year < 100) year += 2000
+    hits.push({ index: m.index, end: m.index + m[0].length, month, day, year })
+  }
+  return hits
+}
+
+/** Timezone token immediately after a time, uppercase only ("PT" must never
+ *  match the "pt" in ordinary words). */
+function zoneAfter(text: string, end: number): { zone: string; end: number } | null {
+  const m = /^[ \t]*\(?([A-Z]{2,3})\)?/.exec(text.slice(end, end + 8))
+  if (!m) return null
+  const zone = ZONES[m[1]]
+  return zone ? { zone, end: end + m[0].length } : null
+}
+
+/** Ranges first (4pm - 4:30pm, 4:00–4:30 PM, 16:00-17:00), then single times
+ *  (10am, 10:00 AM, 16:00) outside the range spans. Bare "10 - 12" carries no
+ *  meridiem or minutes and is rejected. */
+function findTimes(text: string): TimeHit[] {
+  const hits: TimeHit[] = []
+  const spans: { index: number; end: number }[] = []
+  const rangeRe = /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*[-–—]\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/gi
+  for (let m = rangeRe.exec(text); m; m = rangeRe.exec(text)) {
+    const h1 = Number(m[1])
+    const mi1 = m[2] !== undefined ? Number(m[2]) : null
+    let mer1 = m[3] ?? null
+    const h2 = Number(m[4])
+    const mi2 = m[5] !== undefined ? Number(m[5]) : null
+    let mer2 = m[6] ?? null
+    if (!mer1 && !mer2) {
+      // 24-hour ranges must spell out minutes on both sides.
+      if (mi1 === null || mi2 === null || h1 > 23 || h2 > 23) continue
+    } else {
+      mer1 = mer1 ?? mer2
+      mer2 = mer2 ?? mer1
+      if (h1 < 1 || h1 > 12 || h2 < 1 || h2 > 12) continue
+    }
+    if ((mi1 !== null && mi1 > 59) || (mi2 !== null && mi2 > 59)) continue
+    let hh = mer1 ? to24(h1, mer1) : h1
+    const endHh = mer2 ? to24(h2, mer2) : h2
+    const mi = mi1 ?? 0
+    const endMi = mi2 ?? 0
+    // "11 - 1pm" inherits pm onto 11; the intended reading is 11am.
+    if (m[3] === undefined && mer1 && hh * 60 + mi > endHh * 60 + endMi) hh = to24(h1, 'am')
+    const end = m.index + m[0].length
+    const z = zoneAfter(text, end)
+    spans.push({ index: m.index, end })
+    hits.push({ index: m.index, end, hh, mi, endHh, endMi, zone: z?.zone ?? null })
+  }
+  const singleRe = /\b(\d{1,2}):(\d{2})\s*(am|pm)?\b|\b(\d{1,2})\s*(am|pm)\b/gi
+  for (let m = singleRe.exec(text); m; m = singleRe.exec(text)) {
+    const index = m.index
+    const end = index + m[0].length
+    if (spans.some((s) => index < s.end && end > s.index)) continue
+    let hh: number
+    let mi: number
+    if (m[1] !== undefined) {
+      const h = Number(m[1])
+      mi = Number(m[2])
+      if (mi > 59) continue
+      if (m[3]) {
+        if (h < 1 || h > 12) continue
+        hh = to24(h, m[3])
+      } else {
+        if (h > 23) continue
+        hh = h
+      }
+    } else {
+      const h = Number(m[4])
+      if (h < 1 || h > 12) continue
+      hh = to24(h, m[5])
+      mi = 0
+    }
+    const z = zoneAfter(text, end)
+    hits.push({ index, end, hh, mi, endHh: null, endMi: null, zone: z?.zone ?? null })
+  }
+  return hits
+}
+
+/** Missing year → the nearest occurrence at or after `now` within 12 months
+ *  (a December mail about "Jan 5" lands in the next year). */
+function resolveYear(month: number, day: number, hh: number, mi: number, now: Date): number {
+  const y = now.getFullYear()
+  const candidate = new Date(y, month - 1, day, hh, mi)
+  return candidate.getTime() >= now.getTime() ? y : y + 1
+}
+
+/** Extract one event from an interview mail's subject + body. Returns null
+ *  unless exactly one coherent date+time reading exists: pairs of candidate
+ *  starts more than a day apart, date-only, and time-only text all fail.
+ *  False negatives are fine; false positives are not. */
+export function extractEvent(
+  subject: string,
+  body: string,
+  now: Date
+): { title: string; start: string; end: string | null } | null {
+  // The subject counts as a body prefix for proximity pairing.
+  const text = subject + '\n' + body
+  const dates = findDates(text)
+  const times = findTimes(text)
+  const pairs: { pos: number; start: string; end: string | null }[] = []
+  for (const dh of dates) {
+    for (const th of times) {
+      const gap = dh.index > th.end ? dh.index - th.end : th.index > dh.end ? th.index - dh.end : 0
+      if (gap > PAIR_WINDOW) continue
+      const year = dh.year ?? resolveYear(dh.month, dh.day, th.hh, th.mi, now)
+      const start = th.zone
+        ? zonedTimeToIso(th.zone, year, dh.month, dh.day, th.hh, th.mi, 0)
+        : new Date(year, dh.month - 1, dh.day, th.hh, th.mi).toISOString()
+      let end: string | null = null
+      if (th.endHh !== null) {
+        end = th.zone
+          ? zonedTimeToIso(th.zone, year, dh.month, dh.day, th.endHh, th.endMi ?? 0, 0)
+          : new Date(year, dh.month - 1, dh.day, th.endHh, th.endMi ?? 0).toISOString()
+        if (Date.parse(end) <= Date.parse(start)) end = null
+      }
+      pairs.push({ pos: Math.min(dh.index, th.index), start, end })
+    }
+  }
+  if (pairs.length === 0) return null
+  const stamps = pairs.map((p) => Date.parse(p.start))
+  if (Math.max(...stamps) - Math.min(...stamps) > 24 * 60 * 60 * 1000) return null
+  pairs.sort((a, b) => a.pos - b.pos)
+  const title = subject.replace(/^\s*(?:(?:re|fwd?|fw)\s*:\s*)+/i, '').trim() || 'Interview'
+  return { title, start: pairs[0].start, end: pairs[0].end }
+}

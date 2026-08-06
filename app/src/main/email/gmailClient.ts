@@ -133,23 +133,25 @@ function looksLikeHtml(text: string): boolean {
   return (tags?.length ?? 0) >= 4
 }
 
-/** Depth-first hunt for the first part of the wanted mime type with data. */
-function findPart(part: RawPart | undefined, mimeType: string): string | null {
+/** Depth-first hunt for the first part whose mime type passes `match`. */
+function findPartBy(part: RawPart | undefined, match: (mimeType: string) => boolean): string | null {
   if (!part) return null
-  if (part.mimeType === mimeType && part.body?.data) return part.body.data
+  if (part.mimeType && match(part.mimeType) && part.body?.data) return part.body.data
   for (const child of part.parts ?? []) {
-    const hit = findPart(child, mimeType)
+    const hit = findPartBy(child, match)
     if (hit) return hit
   }
   return null
 }
 
-/** Full body as plain text (text/plain part, else stripped text/html). A
- *  text/plain part that is secretly HTML gets stripped too, so the Email tab
- *  and the assistant's get_email never render raw markup. */
-export async function getMessageBody(id: string): Promise<string> {
-  assertMessageId(id)
-  const msg = await gmailGet<RawMessage>(`/messages/${id}?format=full`)
+function findPart(part: RawPart | undefined, mimeType: string): string | null {
+  return findPartBy(part, (mt) => mt === mimeType)
+}
+
+/** Body as plain text (text/plain part, else stripped text/html). A text/plain
+ *  part that is secretly HTML gets stripped too, so the Email tab and the
+ *  assistant's get_email never render raw markup. */
+function extractText(msg: RawMessage): string {
   const plain = findPart(msg.payload, 'text/plain')
   if (plain) {
     const text = decodeBody(plain)
@@ -158,4 +160,23 @@ export async function getMessageBody(id: string): Promise<string> {
   const html = findPart(msg.payload, 'text/html')
   if (html) return htmlToText(decodeBody(html)).slice(0, BODY_CHAR_CAP)
   return msg.snippet ?? ''
+}
+
+export async function getMessageBody(id: string): Promise<string> {
+  assertMessageId(id)
+  const msg = await gmailGet<RawMessage>(`/messages/${id}?format=full`)
+  return extractText(msg)
+}
+
+/** One format=full fetch yielding body text plus the raw ICS payload (first
+ *  text/calendar part at any depth; some mailers label it application/ics),
+ *  so callers never pay for two round trips per message. */
+export async function getMessageFull(id: string): Promise<{ text: string; ics: string | null }> {
+  assertMessageId(id)
+  const msg = await gmailGet<RawMessage>(`/messages/${id}?format=full`)
+  const ics = findPartBy(
+    msg.payload,
+    (mt) => mt.toLowerCase().startsWith('text/calendar') || mt.toLowerCase() === 'application/ics'
+  )
+  return { text: extractText(msg), ics: ics ? decodeBody(ics) : null }
 }

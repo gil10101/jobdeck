@@ -9,11 +9,13 @@ import type {
   AssistantUsage,
   BoardId,
   BoardsStatus,
+  CalendarEvent,
   CandidateJob,
   CompanyInfo,
   ConversationMeta,
   CustomBoardTest,
   EmailFilter,
+  EmailInvite,
   EmailMessage,
   EmailStatus,
   IntakeFolder,
@@ -222,8 +224,10 @@ export interface IpcInvokeContract {
   'email:signIn': { req: void; res: EmailStatus }
   'email:signOut': { req: void; res: EmailStatus }
   'email:list': { req: { filter: EmailFilter }; res: EmailMessage[] }
-  /** Body text fetched live from Gmail (never cached on disk). */
-  'email:getBody': { req: { id: string }; res: { text: string } }
+  /** Body text fetched live from Gmail (never cached on disk). invite is the
+   *  parsed text/calendar metadata, null when the message carries none —
+   *  required so the handler cannot silently drop the invite-healing path. */
+  'email:getBody': { req: { id: string }; res: { text: string; invite: EmailInvite | null } }
   /** AI-draft a reply to one message as the candidate. Read-only Gmail scope
    *  means nothing is sent — the draft is returned for the user to copy or
    *  open in a Gmail compose window. */
@@ -242,6 +246,38 @@ export interface IpcInvokeContract {
   /** Assignable tag names: presets plus every user-created tag. */
   'email:tags': { req: void; res: { tags: string[] } }
   'email:createTag': { req: { name: string }; res: { tags: string[]; created: string } }
+  // ---- calendar (events extracted from mail, plus manual entries) ----
+  'calendar:list': { req: void; res: CalendarEvent[] }
+  'calendar:approve': { req: { id: string }; res: CalendarEvent[] }
+  'calendar:dismiss': { req: { id: string }; res: CalendarEvent[] }
+  'calendar:remove': { req: { id: string }; res: CalendarEvent[] }
+  /** Manual entry — created directly in state 'approved'. */
+  'calendar:add': {
+    req: { title: string; start: string; end: string | null; location: string | null; notes: string | null }
+    res: CalendarEvent[]
+  }
+  'calendar:update': {
+    req: {
+      id: string
+      patch: { title?: string; start?: string; end?: string | null; location?: string | null; notes?: string | null }
+    }
+    res: CalendarEvent[]
+  }
+  /** Invite-card proposal — goes through the proposeEvent dedupe path so the
+   *  meet link and source message survive (a re-synced copy of the same mail
+   *  dedupes against them) and the event lands in state 'proposed' for review. */
+  'calendar:propose': {
+    req: {
+      sourceMessageId: string | null
+      title: string
+      start: string
+      end: string | null
+      location: string | null
+      meetLink: string | null
+      notes: string | null
+    }
+    res: CalendarEvent[]
+  }
   'assistant:send': {
     req: { conversationId: string | null; text: string; model: string | null }
     res: { conversationId: string }
@@ -277,6 +313,10 @@ export interface IpcPushContract {
   'push:assistantMessage': { conversationId: string; message: AssistantMessage }
   /** After every email sync / suggestion action: open-suggestion count. */
   'push:emailChanged': { suggestions: number }
+  /** After any calendar mutation or sync proposal: proposed-event count. */
+  'push:calendarChanged': { proposed: number }
+  /** Reminder notification clicked — bring the calendar view forward. */
+  'push:calendarFocus': Record<string, never>
 }
 
 export type IpcPushChannel = keyof IpcPushContract
@@ -383,6 +423,13 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'email:update',
   'email:tags',
   'email:createTag',
+  'calendar:list',
+  'calendar:approve',
+  'calendar:dismiss',
+  'calendar:remove',
+  'calendar:add',
+  'calendar:update',
+  'calendar:propose',
   'assistant:send',
   'assistant:stop',
   'assistant:approve',
@@ -404,7 +451,9 @@ export const PUSH_CHANNELS: IpcPushChannel[] = [
   'push:assistantUsage',
   'push:assistantState',
   'push:assistantMessage',
-  'push:emailChanged'
+  'push:emailChanged',
+  'push:calendarChanged',
+  'push:calendarFocus'
 ]
 
 /** Build a local-file:// URL for a repo-relative path (PDF preview etc.). */

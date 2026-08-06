@@ -363,6 +363,10 @@ export interface AppSettings {
    *  Email tab shows one-click suggestions instead (status flips from
    *  heuristic classification are too consequential to silently apply). */
   emailAutoApply: boolean
+  /** OS notifications for new job mail and calendar event reminders. */
+  emailNotifications: boolean
+  /** Minutes before an approved event's start for the "starting soon" reminder. */
+  reminderLeadMinutes: number
   /** Harvest Glassdoor via the in-app browser session before each scout run.
    *  Off by default: it drives the user's logged-in browser (real session, no
    *  stored creds), which is a gray zone on Glassdoor's ToS. */
@@ -392,6 +396,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   theme: 'dark',
   emailPollMinutes: 5,
   emailAutoApply: false,
+  emailNotifications: true,
+  reminderLeadMinutes: 30,
   scoutGlassdoor: false,
   glassdoorSearches: [],
   provider: 'claude',
@@ -421,6 +427,18 @@ export interface EmailSuggestion {
   suggestStatus: StatusKey
 }
 
+/** Structured view of a message's text/calendar part. */
+export interface EmailInvite {
+  title: string | null
+  start: string | null
+  end: string | null
+  location: string | null
+  meetLink: string | null
+  organizer: string | null
+  /** iCalendar METHOD: REQUEST = invite/update, CANCEL = cancellation. */
+  method: string | null
+}
+
 /** Cached Gmail message: headers + snippet only — the body is fetched live on
  *  demand (email:getBody) and never stored. */
 export interface EmailMessage {
@@ -445,6 +463,9 @@ export interface EmailMessage {
   hidden: boolean
   /** User-assigned tag names (from presets + custom tags). */
   tags: string[]
+  /** Parsed text/calendar metadata (derived facts, never the body).
+   *  undefined and null both mean no invite; consumers read `invite ?? null`. */
+  invite?: EmailInvite | null
 }
 
 /** Email list filters: content sweeps plus the user's own starred/hidden sets. */
@@ -460,6 +481,30 @@ export interface EmailStatus {
   email: string | null
   polling: boolean
   lastSyncAt: string | null
+}
+
+// ---- calendar ----
+
+/** One calendar entry, extracted from mail or added by hand. Proposed events
+ *  wait for explicit approval; reminders fire only for approved ones. */
+export interface CalendarEvent {
+  id: string
+  sourceMessageId: string | null
+  /** iCalendar UID — an update with the same UID replaces the event. */
+  icsUid: string | null
+  title: string
+  company: string | null
+  rowId: string | null
+  start: string
+  end: string | null
+  location: string | null
+  meetLink: string | null
+  notes: string | null
+  source: 'ics' | 'detected' | 'manual'
+  state: 'proposed' | 'approved' | 'dismissed'
+  createdAt: string
+  remindedDayBefore: boolean
+  remindedSoon: boolean
 }
 
 export interface TrackerStoreFile {
