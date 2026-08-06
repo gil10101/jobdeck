@@ -4,6 +4,7 @@ import {
   Check,
   ChevronDown,
   Copy,
+  CornerDownRight,
   ExternalLink,
   Eye,
   EyeOff,
@@ -681,6 +682,9 @@ export default function EmailView(): JSX.Element {
       } ${selectedId === m.id ? 'bg-panel2' : ''}`}
     >
       <div className="flex items-center gap-2">
+        {(sub || /^\s*(re|fwd?):/i.test(m.subject)) && (
+          <CornerDownRight size={11} className="shrink-0 text-gray-500" aria-hidden="true" />
+        )}
         <span className="min-w-0 truncate text-[11px] font-medium text-gray-300">
           {fromName(m.from)}
         </span>

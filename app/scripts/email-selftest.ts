@@ -3,6 +3,7 @@
 // Fixtures use example.com addresses and placeholder companies only.
 import { parseIcs } from '../src/main/email/icsParse.ts'
 import { extractEvent } from '../src/main/email/eventExtract.ts'
+import { classifyEmail } from '../src/main/email/emailClassify.ts'
 
 let pass = 0
 let fail = 0
@@ -160,6 +161,92 @@ check(
   'conflicting date+time pairs return null',
   extractEvent('Scheduling', 'We could do Aug 12 at 10am or Sep 3 at 2pm — let me know.', nowAug),
   null
+)
+
+// ---- extractEvent: real-world layouts ----
+
+check(
+  'ATS plain-text invite with time range and GMT offset',
+  extractEvent(
+    'Interview',
+    'When: Thursday August 06 at 3:15pm - 4:00pm (GMT -04:00)\n\nAdditional details:\nLocation:',
+    nowAug
+  ),
+  {
+    title: 'Interview',
+    start: new Date(2026, 7, 6, 15, 15).toISOString(),
+    end: new Date(2026, 7, 6, 16, 0).toISOString()
+  }
+)
+check(
+  'calendar-notification layout with dot separator and en-dash range',
+  extractEvent(
+    'Updated invitation: Screening call',
+    'Person A and Person B\nMonday Aug 10, 2026 ⋅ 4pm – 4:30pm\nEastern Time - New York',
+    nowAug
+  ),
+  {
+    title: 'Updated invitation: Screening call',
+    start: new Date(2026, 7, 10, 16, 0).toISOString(),
+    end: new Date(2026, 7, 10, 16, 30).toISOString()
+  }
+)
+
+// ---- classifyEmail ----
+
+check(
+  'non-gerund rejection phrasing classifies as rejection',
+  classifyEmail(
+    'no-reply@example.myworkday.com',
+    'Update on your application',
+    "Thank you for giving us the opportunity to review your application for the Data Analyst position. After review, we've made the decision to not move forward. We appreciate your interest and wish you success."
+  ),
+  'rejection'
+)
+check(
+  'ATS auto-reply mentioning next steps stays a confirmation',
+  classifyEmail(
+    '"Acme LLP @ icims" <acme+autoreply@talent.icims.com>',
+    'Thank You for Applying at Acme!',
+    'We now have your application for the Data Analytics Intern position and will be carefully reviewing your information. We will follow-up with you via email or phone call if selected for next steps.'
+  ),
+  'confirmation'
+)
+check(
+  'scheduling language still beats confirmation wording',
+  classifyEmail(
+    'recruiting@example.com',
+    'Your Acme application',
+    'Thanks for applying! We would like to schedule a call with you this week. Please share your availability.'
+  ),
+  'interview'
+)
+check(
+  'weak next-steps alone still reads as interview',
+  classifyEmail(
+    'recruiter@example.com',
+    'Following up',
+    'Great chatting today. Next steps: the team will be in touch about timing.'
+  ),
+  'interview'
+)
+check(
+  'calendar-notification body with When: marker is interview',
+  classifyEmail(
+    'calendar-notification@example.com',
+    'Updated invitation: Screening call @ Mon Aug 10',
+    'When: Monday Aug 10, 2026 4pm (Eastern Time - New York)\nAttendees: recruiting team'
+  ),
+  'interview'
+)
+check(
+  'promotional offer still guarded out',
+  classifyEmail(
+    'deals@offers.example.com',
+    'Your exclusive offer ends soon',
+    'Half price on everything — schedule your visit today! Limited-time offer ends August 12.'
+  ),
+  'other'
 )
 
 console.log(`PASS ${pass}/${pass + fail}`)

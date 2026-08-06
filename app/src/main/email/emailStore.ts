@@ -17,6 +17,8 @@ interface EmailCacheFile {
   messages: EmailMessage[]
   lastSyncAt: string | null
   customTags?: string[]
+  /** Stamp of the one-time calendar backfill sweep; null = not yet run. */
+  calendarBackfillAt?: string | null
 }
 
 function cacheFile(): string {
@@ -32,7 +34,8 @@ function load(): EmailCacheFile {
     cache = {
       messages: Array.isArray(parsed.messages) ? parsed.messages : [],
       lastSyncAt: parsed.lastSyncAt ?? null,
-      customTags: Array.isArray(parsed.customTags) ? parsed.customTags : []
+      customTags: Array.isArray(parsed.customTags) ? parsed.customTags : [],
+      calendarBackfillAt: parsed.calendarBackfillAt ?? null
     }
     // Migrations for per-message user state added after first release.
     for (const m of cache.messages) {
@@ -57,6 +60,16 @@ function persist(): void {
 
 export function lastSyncAt(): string | null {
   return load().lastSyncAt
+}
+
+export function calendarBackfillAt(): string | null {
+  return load().calendarBackfillAt ?? null
+}
+
+/** Stamped after a COMPLETED backfill sweep — an interrupted sweep must retry. */
+export function markCalendarBackfill(): void {
+  load().calendarBackfillAt = new Date().toISOString()
+  persist()
 }
 
 /** Every cached message, newest first — sync reconciliation needs hidden mail

@@ -8,9 +8,18 @@ import { getMessageFull, getMessageMeta, listMessages, type GmailMessageMeta } f
 import { parseIcs } from './icsParse'
 import { extractEvent } from './eventExtract'
 import {
+  ASSESSMENT_DOMAINS,
+  ATS_DOMAINS,
+  classifyEmail,
+  deriveJobRelated,
+  fromDomainMatch
+} from './emailClassify'
+import {
   allCachedMessages,
   applyReclassification,
+  calendarBackfillAt,
   getCachedMessage,
+  markCalendarBackfill,
   openSuggestionCount,
   upsertMessages
 } from './emailStore'
@@ -19,30 +28,6 @@ import {
 // job-search-shaped mail + Primary-category and recent-inbox sweeps, classify
 // deterministically, and propose tracker status updates. Suggestions are
 // one-click by default; they are auto-applied ONLY behind settings.emailAutoApply.
-
-/** Coding-assessment platforms — mail from these IS the assessment. */
-const ASSESSMENT_DOMAINS = [
-  'hackerrank.com',
-  'codility.com',
-  'codesignal.com',
-  'karat.com',
-  'hirevue.com',
-  'testgorilla.com'
-]
-/** ATS notification senders — always job mail, but the subject picks the class.
- *  Workable routes candidate mail (incl. calendar invites) through
- *  inbound.workablemail.com, which is why interview invites slipped past. */
-const ATS_DOMAINS = [
-  'greenhouse.io',
-  'lever.co',
-  'ashbyhq.com',
-  'myworkday.com',
-  'icims.com',
-  'smartrecruiters.com',
-  'workable.com',
-  'workablemail.com',
-  'jobvite.com'
-]
 
 /** Job-search mail, ~30 days back: subject terms OR a known assessment/ATS
  *  sender — assessment invites often carry no keyword in the subject at all.
@@ -72,99 +57,10 @@ const NOTIFY_TITLES: Partial<Record<EmailClassification, string>> = {
 const NOTIFY_WINDOW_MS = 48 * 60 * 60 * 1000
 /** Individual toasts per sync pass; the overflow collapses into one summary. */
 const NOTIFY_MAX_PER_SYNC = 3
-
-/** True when any address in the From header sits on (a subdomain of) one of
- *  `domains` — assessment invites often come from a mail.* subdomain. */
-function fromDomainMatch(from: string, domains: string[]): boolean {
-  const hosts = [...from.toLowerCase().matchAll(/@([a-z0-9-][a-z0-9.-]*)/g)].map((m) => m[1])
-  return hosts.some((h) => domains.some((d) => h === d || h.endsWith(`.${d}`)))
-}
-
-/** Deterministic classification from the subject AND snippet. Order matters:
- *  assessment invites mention interviews, rejections mention everything — most
- *  specific signals first. Assessment-platform senders are 'assessment'
- *  outright; ATS senders that hit no rule default by whether the text mentions
- *  the application. The snippet is included throughout because the decisive
- *  word often lives in the body ("...take the Rembrandt Personality
- *  Assessment", a calendar invite's "When:/Attendees:" block), not the subject. */
-export function classifyEmail(from: string, subject: string, snippet: string): EmailClassification {
-  const s = subject
-  const text = `${subject}\n${snippet}`
-  // Retail/marketing blasts keyword-collide with job terms ("your OFFER ends
-  // soon", "schedule your visit") — unless they come from a real ATS or
-  // assessment sender, they are never job mail. Guard first so those terms
-  // never reach the class rules below.
-  if (
-    !fromDomainMatch(from, [...ASSESSMENT_DOMAINS, ...ATS_DOMAINS]) &&
-    looksPromotional(from, subject, snippet)
-  ) {
-    return 'other'
-  }
-  if (
-    fromDomainMatch(from, ASSESSMENT_DOMAINS) ||
-    /\bassessment\b|hackerrank|codility|codesignal|coding (challenge|test|exercise)|take[- ]home|\bonline assessment\b|personality (test|assessment)|\boa\b/i.test(
-      text
-    )
-  ) {
-    return 'assessment'
-  }
-  if (/offer letter|job offer|offer of employment|employment offer|pleased to (extend|offer)|extend(ing)? (you )?an offer|excited to offer you|we('d| would) (be happy to |like to )?offer you/i.test(text)) {
-    return 'offer'
-  }
-  const rejection =
-    /unfortunately|we regret|regret to inform|not (be )?(moving|proceeding) forward|will not be moving forward|decided (not )?to (move|proceed)|other candidates|not (been )?selected|no longer under consideration|pursue other (applicants|candidates)|position has been filled/i
-  if (rejection.test(text)) return 'rejection'
-  // Interview / call scheduling / calendar invites. Calendar markers
-  // ("When:", "Attendees:", "reschedule", "needs-action") and phrasings like
-  // "invite you for a call" carry no "interview" keyword, so match them too.
-  const interview =
-    /interview|technical screen|phone screen|screening call|next steps|invit(e|ation) (you )?(to|for)|schedule (a|your|some) (call|chat|conversation|meeting|time)|set up (a )?(call|time|chat)|book (a )?time|your availability|meet (the|with) (team|us)|phone (call|conversation)|hop on a call|speak with you|calendar (invite|invitation)|\bwhen:\s|\battendees:\b|\breschedule\b|needs-action|will call you|call (for|with|regarding).{0,40}\b(job|role|position|opportunity)\b/i
-  if (interview.test(text)) return 'interview'
-  const confirmation =
-    /application (was |has been )?(received|submitted)|(thank you|thanks) for (applying|your application)|we('ve| have) received your application|application confirmation|successfully (applied|submitted)/i
-  if (confirmation.test(text)) return 'confirmation'
-  if (fromDomainMatch(from, ATS_DOMAINS)) {
-    return /application/i.test(text) ? 'confirmation' : 'other'
-  }
-  if (/recruit|talent acquisition|sourcing|hiring team/i.test(from) || /\b(opportunity|opening|role at|position at)\b/i.test(s)) {
-    return 'recruiter'
-  }
-  return 'other'
-}
-
-/** Marketing/promotional mail that keyword-matched the job sweep by accident
- *  ("your half price OFFER ends soon"). Only an unambiguous marketing sender
- *  subdomain, or a clearly promo-shaped subject/snippet, counts — generic
- *  labels (mail., email., news.) are excluded because real companies send
- *  legitimate hiring mail from them. */
-function looksPromotional(from: string, subject: string, snippet: string): boolean {
-  const host = from.toLowerCase().match(/@([a-z0-9.-]+)/)?.[1] ?? ''
-  if (/(^|\.)(offers?|usoffers|deals?|promo|promotions?|marketing|newsletters?|eblast)\./.test(host)) {
-    return true
-  }
-  const text = `${subject} ${snippet}`.toLowerCase()
-  return /\b\d+%\s*(off|discount)\b|half price|\bcoupon\b|promo code|limited[- ]time|(offer|deal|sale|discount) ends|flash sale|shop now|free (month|trial|shipping)/.test(
-    text
-  )
-}
-
-/** True if a message belongs in the Job tab. ATS/assessment senders are always
- *  job mail. Otherwise it must have hit the job sweep — and mail the classifier
- *  could only call 'other' is dropped when it looks promotional, so a retail
- *  "offer"/"schedule" blast that snuck into the sweep does not pollute the tab.
- *  A message the classifier recognized as a real job class (interview, offer,
- *  rejection, …) is never demoted. */
-export function deriveJobRelated(
-  from: string,
-  subject: string,
-  snippet: string,
-  jobHit: boolean,
-  classification: EmailClassification
-): boolean {
-  if (fromDomainMatch(from, [...ATS_DOMAINS, ...ASSESSMENT_DOMAINS])) return true
-  if (classification === 'other' && looksPromotional(from, subject, snippet)) return false
-  return jobHit
-}
+/** Backfill sweep bounds: recent job mail only, hard-capped so the one-time
+ *  pass stays a bounded number of Gmail fetches. */
+const BACKFILL_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
+const BACKFILL_MAX = 60
 
 /** Lowercase, punctuation → spaces, collapsed — the comparable form. */
 function normalizeText(text: string): string {
@@ -468,10 +364,38 @@ export class EmailSync {
       this.deps.send('push:emailChanged', { suggestions: openSuggestionCount() })
       if (calendarChanged) this.deps.send('push:calendarChanged', { proposed: proposedCount() })
       this.notifyNewMail(fresh)
+      await this.backfillCalendar(gen)
       return { fetched: metas.length }
     } finally {
       this.syncing = false
     }
+  }
+
+  /** One-time sweep: mail cached before calendar extraction existed never
+   *  proposed events. Refetch full bodies for recent job mail, re-run
+   *  classification + invite parsing through reclassifyFromBody (which also
+   *  proposes), then stamp the cache so the sweep never repeats. Per-message
+   *  failures are skipped; the stamp lands only after a completed pass, so an
+   *  interrupted sweep retries on the next sync. */
+  private async backfillCalendar(gen: number): Promise<void> {
+    if (calendarBackfillAt()) return
+    const cutoff = Date.now() - BACKFILL_WINDOW_MS
+    const candidates = allCachedMessages()
+      .filter((m) => !m.hidden && m.jobRelated && Date.parse(m.date) >= cutoff)
+      .slice(0, BACKFILL_MAX)
+    await mapLimit(candidates, FETCH_CONCURRENCY, async (m) => {
+      if (gen !== this.generation) return
+      try {
+        const { text, ics } = await getMessageFull(m.id)
+        const parsed = ics ? parseIcs(ics) : null
+        if (gen !== this.generation) return
+        this.reclassifyFromBody(m.id, text, parsed ?? undefined)
+      } catch {
+        /* unreadable message: keep its sync-time classification */
+      }
+    })
+    if (gen !== this.generation) return
+    markCalendarBackfill()
   }
 
   private buildMessage(
@@ -599,14 +523,19 @@ export class EmailSync {
     n.show()
   }
 
-  /** Reclassify one cached message from its full body (fetched for display).
-   *  Heals a message the snippet-based sync mis-classified — the FIRST-style
-   *  rejection whose decisive line sits past the snippet — and refreshes its
-   *  tracker suggestion. Applied/dismissed suggestions and hidden mail are left
-   *  alone. `invite` undefined = keep the stored invite (the caller saw no ICS
-   *  part); null/value = persist the freshly parsed result. Pushes so the
-   *  list + badge update live. */
-  reclassifyFromBody(id: string, body: string, invite?: EmailInvite | null): void {
+  /** Reclassify one cached message from its full body (fetched for display or
+   *  by the backfill sweep). Heals a snippet-based mis-classification,
+   *  refreshes its tracker suggestion, persists a freshly parsed invite, and
+   *  proposes a calendar event the message qualifies for — a message cached
+   *  before calendar extraction existed gets its event here. `parsed`
+   *  undefined = the caller saw no usable ICS part (a stored invite is kept
+   *  and still proposable). Applied/dismissed suggestions and hidden mail are
+   *  left alone. Pushes so lists + badges update live. */
+  reclassifyFromBody(
+    id: string,
+    body: string,
+    parsed?: { invite: EmailInvite; uid: string | null } | null
+  ): void {
     const msg = getCachedMessage(id)
     if (!msg || msg.hidden) return
     const rows = this.deps.tracker.listRows()
@@ -618,8 +547,18 @@ export class EmailSync {
       suggestion = suggestForMessage(classification, msg.from, msg.subject, body, rows)
       suggestionState = suggestion ? 'open' : null
     }
+    const invite = parsed ? parsed.invite : undefined
     if (applyReclassification(id, { classification, jobRelated, suggestion, suggestionState, invite })) {
       this.deps.send('push:emailChanged', { suggestions: openSuggestionCount() })
+    }
+    const healed = getCachedMessage(id)
+    if (healed) {
+      // A stored invite without a fresh ICS part still proposes; uid null
+      // means dedupe falls back to sourceMessageId, which is stable per mail.
+      const proposable = parsed ?? (healed.invite ? { invite: healed.invite, uid: null } : null)
+      if (this.proposeFromMessage(healed, proposable, body, rows)) {
+        this.deps.send('push:calendarChanged', { proposed: proposedCount() })
+      }
     }
   }
 

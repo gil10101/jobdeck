@@ -843,7 +843,7 @@ export function registerIpc(services: Services): void {
     // parsed invite. An unparseable/absent ICS part must not clear a stored
     // invite, hence undefined (leave alone) instead of null there.
     const parsed = ics ? parseIcs(ics) : null
-    emailSync.reclassifyFromBody(id, text, parsed ? parsed.invite : undefined)
+    emailSync.reclassifyFromBody(id, text, parsed ?? undefined)
     return { text, invite: getCachedMessage(id)?.invite ?? parsed?.invite ?? null }
   })
   handle('email:draftReply', ({ id, instructions }) =>
