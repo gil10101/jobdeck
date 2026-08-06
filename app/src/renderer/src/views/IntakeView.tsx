@@ -16,8 +16,10 @@ import {
   GripVertical,
   Heart,
   Info,
+  MoreHorizontal,
   PanelRightClose,
   PanelRightOpen,
+  Pencil,
   Play,
   Plus,
   RefreshCw,
@@ -110,6 +112,8 @@ function IntakeCard({
   const [dragged, setDragged] = useState(false)
   const [notes, setNotes] = useState(item.notes ?? '')
   const [notesOpen, setNotesOpen] = useState(!!item.notes)
+  const [editing, setEditing] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
 
   const saveNotes = (): void => {
     if ((item.notes ?? '') === notes.trim()) return
@@ -180,13 +184,73 @@ function IntakeCard({
             )}
           </div>
         </div>
-        <button
-          className="shrink-0 p-1 text-gray-500 hover:text-cyan-300"
-          onClick={() => onInfo(item)}
-          title="Posting & company details"
-        >
-          <Info size={15} />
-        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          {item.state === 'new' || item.state === 'failed' ? (
+            <button className="btn btn-primary px-2 py-0.5 text-[11px]" onClick={build}>
+              <Play size={11} className="mr-0.5 inline" /> Build
+            </button>
+          ) : item.runId ? (
+            <button
+              className="btn px-2 py-0.5 text-[11px]"
+              onClick={() => useApp.getState().navigate({ view: 'runs', runId: item.runId! })}
+            >
+              View
+            </button>
+          ) : null}
+          <button
+            className={`p-1 ${notes.trim() ? 'text-amber-300' : 'text-gray-500 hover:text-gray-300'}`}
+            onClick={() => setNotesOpen((v) => !v)}
+            title="Notes for the agent (extra skills, framing, context)"
+          >
+            <StickyNote size={14} />
+          </button>
+          <div
+            className="relative"
+            onBlur={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setMenuOpen(false)
+            }}
+          >
+            <button
+              className={`p-1 ${menuOpen ? 'text-cyan-300' : 'text-gray-500 hover:text-gray-300'}`}
+              onClick={() => setMenuOpen((v) => !v)}
+              title="More actions"
+              aria-label="More actions"
+            >
+              <MoreHorizontal size={15} />
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 top-full z-30 mt-1 w-32 rounded-md border border-edge bg-panel2 py-1 shadow-xl">
+                <button
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-200 hover:bg-panel"
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    setEditing((v) => !v)
+                    setMenuOpen(false)
+                  }}
+                >
+                  <Pencil size={12} aria-hidden="true" /> Edit
+                </button>
+                <button
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-400 hover:bg-panel"
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    setMenuOpen(false)
+                    void dismiss()
+                  }}
+                >
+                  <X size={12} aria-hidden="true" /> Dismiss
+                </button>
+              </div>
+            )}
+          </div>
+          <button
+            className="p-1 text-gray-500 hover:text-cyan-300"
+            onClick={() => onInfo(item)}
+            title="Posting & company details"
+          >
+            <Info size={15} />
+          </button>
+        </div>
       </div>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -209,42 +273,22 @@ function IntakeCard({
           )}
         </div>
       </div>
-      <div className="mt-3 flex items-center gap-2">
-        <input
-          className="input flex-1"
-          placeholder="Company"
-          value={company}
-          onChange={(e) => setCompany(e.target.value)}
-        />
-        <input
-          className="input flex-1"
-          placeholder="Role title"
-          value={role}
-          onChange={(e) => setRole(e.target.value)}
-        />
-        <button
-          className={`btn shrink-0 px-2 ${notes.trim() ? 'text-amber-300' : 'text-gray-500'}`}
-          onClick={() => setNotesOpen((v) => !v)}
-          title="Notes for the agent (extra skills, framing, context)"
-        >
-          <StickyNote size={13} />
-        </button>
-        {item.state === 'new' || item.state === 'failed' ? (
-          <button className="btn btn-primary shrink-0" onClick={build}>
-            <Play size={12} /> Build
-          </button>
-        ) : item.runId ? (
-          <button
-            className="btn shrink-0"
-            onClick={() => useApp.getState().navigate({ view: 'runs', runId: item.runId! })}
-          >
-            View run
-          </button>
-        ) : null}
-        <button className="btn shrink-0 text-gray-500" onClick={dismiss}>
-          Dismiss
-        </button>
-      </div>
+      {editing && (
+        <div className="mt-3 flex items-center gap-2">
+          <input
+            className="input flex-1"
+            placeholder="Company"
+            value={company}
+            onChange={(e) => setCompany(e.target.value)}
+          />
+          <input
+            className="input flex-1"
+            placeholder="Role title"
+            value={role}
+            onChange={(e) => setRole(e.target.value)}
+          />
+        </div>
+      )}
       {notesOpen && (
         <textarea
           className="input mt-2 min-h-[3.5rem] w-full resize-y text-[11px]"
