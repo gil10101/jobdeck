@@ -664,7 +664,10 @@ export default function IntakeView(): JSX.Element {
       </div>
 
       <div className="flex flex-1 gap-4 overflow-auto p-4">
-        <div className="flex min-w-0 flex-1 flex-col gap-2">
+        {/* Cards keep a readable measure regardless of composer state — the
+            list column centers at the same cap the scout results use. */}
+        <div className="min-w-0 flex-1">
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-2">
           {creatingFolder && (
             <div className="panel flex flex-col gap-2 p-3">
               <div className="flex gap-2">
@@ -744,6 +747,7 @@ export default function IntakeView(): JSX.Element {
               applications/TODO/ in your workspace.
             </div>
           )}
+          </div>
         </div>
 
         {/* The composer slides as one fixed-width unit; the outer div animates
