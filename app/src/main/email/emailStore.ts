@@ -80,7 +80,7 @@ export function allCachedMessages(): EmailMessage[] {
   return [...load().messages].sort((a, b) => b.date.localeCompare(a.date))
 }
 
-/** Time-sensitive job actions float to the top of the primary/starred/all
+/** Time-sensitive job actions float to the top of the starred/all
  *  lists so a deadline is never buried under newer mail. Lower rank = higher.
  *  Only recent, still-actionable items are pinned — an assessment handled
  *  weeks ago drops back to date order. The Job list opts out: it reads
@@ -101,18 +101,19 @@ function prioritize(list: EmailMessage[]): EmailMessage[] {
   return [...list].sort((a, b) => priorityRank(a) - priorityRank(b) || b.date.localeCompare(a.date))
 }
 
-/** 'job' = job-search-query matches (strict date order), 'primary' = Gmail's
- *  Primary sweep, 'starred'/'hidden' = the user's own sets. Hidden messages
- *  only ever appear under 'hidden'. Assessment/interview/offer mail is pinned
- *  to the top everywhere except the Job list. */
+/** 'job' = job-search-query matches, 'primary' = Gmail's Primary sweep —
+ *  both in strict date order. 'starred'/'hidden' = the user's own sets.
+ *  Hidden messages only ever appear under 'hidden'. Assessment/interview/
+ *  offer mail is pinned to the top only in the starred and all lists. */
 export function listCachedMessages(filter: EmailFilter): EmailMessage[] {
   const all = allCachedMessages()
   if (filter === 'hidden') return all.filter((m) => m.hidden)
   const visible = all.filter((m) => !m.hidden)
-  // Job mail reads strictly newest-first: the tab is triaged chronologically,
-  // and pinned weeks-old interview mail buries what just arrived.
+  // Job and Primary read strictly newest-first: both tabs are triaged
+  // chronologically, and pinned weeks-old interview mail buries what just
+  // arrived.
   if (filter === 'job') return visible.filter((m) => m.jobRelated)
-  if (filter === 'primary') return prioritize(visible.filter((m) => m.primary))
+  if (filter === 'primary') return visible.filter((m) => m.primary)
   if (filter === 'starred') return prioritize(visible.filter((m) => m.favorite))
   return prioritize(visible)
 }
