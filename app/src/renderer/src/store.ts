@@ -28,6 +28,7 @@ export type Route =
   | { view: 'history' }
   | { view: 'browser' }
   | { view: 'email' }
+  | { view: 'calendar' }
   | { view: 'runs'; runId?: string }
   | { view: 'library' }
   | { view: 'whoami' }
@@ -104,6 +105,9 @@ interface AppState {
   runs: RunMeta[]
   settings: AppSettings | null
   companies: Record<string, CompanyInfo>
+  /** Count of calendar events awaiting review — drives the sidebar badge.
+   *  Seeded from calendar:list on hydrate, then kept live by push:calendarChanged. */
+  calendarProposed: number
   toasts: Toast[]
   assistant: AssistantSlice
   detailChat: DetailChatSlice
@@ -118,6 +122,7 @@ interface AppState {
   refreshRuns: () => Promise<void>
   refreshSettings: () => Promise<void>
   refreshCompanies: () => Promise<void>
+  refreshCalendarProposed: () => Promise<void>
   toggleTheme: () => Promise<void>
   hydrate: () => Promise<void>
   upsertRunMeta: (meta: RunMeta) => void
@@ -155,6 +160,7 @@ export const useApp = create<AppState>((set, get) => ({
   runs: [],
   settings: null,
   companies: {},
+  calendarProposed: 0,
   toasts: [],
   assistant: initialAssistantSlice(),
   detailChat: { rowId: null, conversationId: null, messages: [], streaming: null, status: 'idle' },
@@ -249,6 +255,14 @@ export const useApp = create<AppState>((set, get) => ({
       /* ignore */
     }
   },
+  refreshCalendarProposed: async () => {
+    try {
+      const events = await call('calendar:list', undefined)
+      set({ calendarProposed: events.filter((e) => e.state === 'proposed').length })
+    } catch {
+      /* ignore */
+    }
+  },
   toggleTheme: async () => {
     const current = get().settings?.theme ?? 'dark'
     const theme = current === 'dark' ? 'light' : 'dark'
@@ -269,7 +283,8 @@ export const useApp = create<AppState>((set, get) => ({
       get().refreshCandidates(),
       get().refreshRuns(),
       get().refreshSettings(),
-      get().refreshCompanies()
+      get().refreshCompanies(),
+      get().refreshCalendarProposed()
     ])
   },
 
@@ -546,4 +561,14 @@ onPush('push:assistantEvent', ({ conversationId, event }) => {
 onPush('push:assistantState', ({ conversationId, status }) => {
   if (conversationId !== useApp.getState().detailChat.conversationId) return
   useApp.setState((s) => ({ detailChat: { ...s.detailChat, status } }))
+})
+
+// Calendar pushes are app-wide (sidebar badge, notification-click focus), so
+// they subscribe here rather than in the view, which may be unmounted.
+onPush('push:calendarChanged', ({ proposed }) => {
+  useApp.setState({ calendarProposed: proposed })
+})
+
+onPush('push:calendarFocus', () => {
+  useApp.setState({ route: { view: 'calendar' } })
 })

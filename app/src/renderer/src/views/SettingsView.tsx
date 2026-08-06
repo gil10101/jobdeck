@@ -78,6 +78,7 @@ export default function SettingsView(): JSX.Element {
   const [testing, setTesting] = useState(false)
   const [modelDraft, setModelDraft] = useState('')
   const [maxTurnsDraft, setMaxTurnsDraft] = useState('')
+  const [reminderLeadDraft, setReminderLeadDraft] = useState('')
   const [backfillBusy, setBackfillBusy] = useState(false)
   const [masterContext, setMasterContext] = useState('')
   const [masterContextSaved, setMasterContextSaved] = useState(true)
@@ -184,6 +185,10 @@ export default function SettingsView(): JSX.Element {
       setMaxTurnsDraft(String(settings.maxTurns))
     }
   }, [settings?.model, settings?.maxTurns])
+
+  useEffect(() => {
+    if (settings) setReminderLeadDraft(String(settings.reminderLeadMinutes))
+  }, [settings?.reminderLeadMinutes])
 
   if (!settings) return <div className="p-6 text-sm text-gray-500">Loading…</div>
 
@@ -1222,6 +1227,35 @@ export default function SettingsView(): JSX.Element {
             <Toggle
               value={settings.emailAutoApply}
               onChange={(v) => patch({ emailAutoApply: v })}
+            />
+          </Row>
+          <Row
+            label="Desktop notifications"
+            hint="OS notifications for new interview, assessment, and offer mail — and reminders for approved calendar events. Off silences both."
+          >
+            <Toggle
+              value={settings.emailNotifications}
+              onChange={(v) => patch({ emailNotifications: v })}
+            />
+          </Row>
+          <Row
+            label="Reminder lead (minutes)"
+            hint="How long before an approved event's start the 'starting soon' reminder fires (5–240). A day-before reminder always fires too."
+          >
+            <input
+              className="input w-20 text-right"
+              value={reminderLeadDraft}
+              onChange={(e) => setReminderLeadDraft(e.target.value.replace(/\D/g, ''))}
+              onBlur={() => {
+                const n = parseInt(reminderLeadDraft, 10)
+                if (Number.isFinite(n)) {
+                  const clamped = Math.min(240, Math.max(5, n))
+                  setReminderLeadDraft(String(clamped))
+                  patch({ reminderLeadMinutes: clamped })
+                } else {
+                  setReminderLeadDraft(String(settings.reminderLeadMinutes))
+                }
+              }}
             />
           </Row>
           <div className="py-3">
