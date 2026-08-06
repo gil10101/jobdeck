@@ -3,7 +3,7 @@
 // Fixtures use example.com addresses and placeholder companies only.
 import { parseIcs } from '../src/main/email/icsParse.ts'
 import { extractEvent } from '../src/main/email/eventExtract.ts'
-import { classifyEmail } from '../src/main/email/emailClassify.ts'
+import { classifyEmail, deriveJobRelated } from '../src/main/email/emailClassify.ts'
 
 let pass = 0
 let fail = 0
@@ -109,6 +109,78 @@ const cancel = [
 check('cancellation method', parseIcs(cancel)?.invite.method, 'CANCEL')
 check('no VEVENT returns null', parseIcs('BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nEND:VCALENDAR'), null)
 
+// Windows TZIDs (Outlook/Exchange) must map to real zones, not silently fall
+// back to the machine clock.
+const winEuInvite = [
+  'BEGIN:VCALENDAR',
+  'METHOD:REQUEST',
+  'BEGIN:VEVENT',
+  'UID:win1@example.com',
+  'DTSTART;TZID=W. Europe Standard Time:20260810T140000',
+  'DTEND;TZID=W. Europe Standard Time:20260810T150000',
+  'SUMMARY:Interview',
+  'END:VEVENT',
+  'END:VCALENDAR'
+].join('\r\n')
+const winEu = parseIcs(winEuInvite)
+check('Windows EU TZID start (CEST = UTC+2)', winEu?.invite.start, '2026-08-10T12:00:00.000Z')
+check('Windows EU TZID end', winEu?.invite.end, '2026-08-10T13:00:00.000Z')
+
+const winUsInvite = [
+  'BEGIN:VCALENDAR',
+  'METHOD:REQUEST',
+  'BEGIN:VEVENT',
+  'UID:win2@example.com',
+  'DTSTART;TZID=Eastern Standard Time:20260810T100000',
+  'SUMMARY:Interview',
+  'END:VEVENT',
+  'END:VCALENDAR'
+].join('\r\n')
+check(
+  'Windows US TZID honors DST (August EDT = UTC-4)',
+  parseIcs(winUsInvite)?.invite.start,
+  '2026-08-10T14:00:00.000Z'
+)
+
+const winKrInvite = [
+  'BEGIN:VCALENDAR',
+  'METHOD:REQUEST',
+  'BEGIN:VEVENT',
+  'UID:win3@example.com',
+  'DTSTART;TZID=Korea Standard Time:20260810T180000',
+  'SUMMARY:Interview',
+  'END:VEVENT',
+  'END:VCALENDAR'
+].join('\r\n')
+check('Windows Asia TZID maps (KST = UTC+9)', parseIcs(winKrInvite)?.invite.start, '2026-08-10T09:00:00.000Z')
+
+// A Windows TZID absent from the map must resolve from the invite's own
+// VTIMEZONE standard offset, not the machine clock. DAYLIGHT must not win.
+const winUnmappedInvite = [
+  'BEGIN:VCALENDAR',
+  'METHOD:REQUEST',
+  'BEGIN:VTIMEZONE',
+  'TZID:Yakutsk Standard Time',
+  'BEGIN:DAYLIGHT',
+  'TZOFFSETTO:+1000',
+  'END:DAYLIGHT',
+  'BEGIN:STANDARD',
+  'TZOFFSETTO:+0900',
+  'END:STANDARD',
+  'END:VTIMEZONE',
+  'BEGIN:VEVENT',
+  'UID:win4@example.com',
+  'DTSTART;TZID=Yakutsk Standard Time:20260810T180000',
+  'SUMMARY:Interview',
+  'END:VEVENT',
+  'END:VCALENDAR'
+].join('\r\n')
+check(
+  'unmapped Windows TZID falls back to VTIMEZONE standard offset',
+  parseIcs(winUnmappedInvite)?.invite.start,
+  '2026-08-10T09:00:00.000Z'
+)
+
 // ---- extractEvent ----
 
 const nowAug = new Date(2026, 7, 5, 12, 0)
@@ -174,9 +246,75 @@ check(
   ),
   {
     title: 'Interview',
-    start: new Date(2026, 7, 6, 15, 15).toISOString(),
-    end: new Date(2026, 7, 6, 16, 0).toISOString()
+    start: '2026-08-06T19:15:00.000Z',
+    end: '2026-08-06T20:00:00.000Z'
   }
+)
+// The two backfill regressions together: the offset digits must not become a
+// spurious 04:00 time, and a clock later the same day must not bump the year.
+check(
+  'GMT offset survives a same-day afternoon clock',
+  extractEvent(
+    'Interview',
+    'When: Thursday August 06 at 3:15pm - 4:00pm (GMT -04:00)\n\nAdditional details:\nLocation:',
+    new Date(2026, 7, 6, 14, 24)
+  ),
+  {
+    title: 'Interview',
+    start: '2026-08-06T19:15:00.000Z',
+    end: '2026-08-06T20:00:00.000Z'
+  }
+)
+check(
+  'earlier-today time keeps this year',
+  extractEvent('Interview', 'Your interview is on Aug 6 at 9:00 AM ET.', new Date(2026, 7, 6, 14, 24))
+    ?.start,
+  '2026-08-06T13:00:00.000Z'
+)
+check(
+  'bare UTC token after a 24h time',
+  extractEvent('Interview', 'The panel call is on Aug 12 at 15:00 UTC.', nowAug)?.start,
+  '2026-08-12T15:00:00.000Z'
+)
+check(
+  'positive half-hour GMT offset',
+  extractEvent('Interview', 'Interview scheduled for Aug 12 at 10:00 GMT+05:30.', nowAug)?.start,
+  '2026-08-12T04:30:00.000Z'
+)
+
+// ---- extractEvent: quoted / attributed regions ----
+
+check(
+  'gmail attribution line does not poison extraction',
+  extractEvent(
+    'Re: Interview',
+    'On Tue, Aug 4, 2026 at 9:15 AM Recruiting Team <recruiting@example.com> wrote:\n> Sounds good, sending times.\nYour interview is confirmed for Aug 10 at 2pm ET.',
+    nowAug
+  )?.start,
+  '2026-08-10T18:00:00.000Z'
+)
+check(
+  'line-wrapped attribution variant is stripped too',
+  extractEvent(
+    'Re: Interview',
+    'On Tue, Aug 4, 2026 at 9:15 AM Recruiting Team\n<recruiting@example.com> wrote:\n\nInterview confirmed for Aug 10 at 2pm ET.',
+    nowAug
+  )?.start,
+  '2026-08-10T18:00:00.000Z'
+)
+check(
+  'forwarded header block is stripped',
+  extractEvent(
+    'Fwd: Interview',
+    '---------- Forwarded message ----------\nFrom: Recruiting <recruiting@example.com>\nDate: Tue, Aug 4, 2026 at 9:15 AM\nSubject: Interview\nTo: candidate@example.com\n\nYour interview is Aug 10 at 2pm ET.',
+    nowAug
+  )?.start,
+  '2026-08-10T18:00:00.000Z'
+)
+check(
+  'quoted-only date/time still returns null',
+  extractEvent('Re: Interview', '> The interview was Aug 10 at 2pm ET.\nThanks, that worked great!', nowAug),
+  null
 )
 check(
   'calendar-notification layout with dot separator and en-dash range',
@@ -247,6 +385,36 @@ check(
     'Half price on everything — schedule your visit today! Limited-time offer ends August 12.'
   ),
   'other'
+)
+
+// ---- deriveJobRelated ----
+
+check(
+  'interview class from a company domain implies job-related',
+  deriveJobRelated(
+    'recruiter@example.com',
+    'Interview availability',
+    'We would like to schedule a call about the role.',
+    false,
+    'interview'
+  ),
+  true
+)
+check(
+  'assessment class implies job-related without a sweep hit',
+  deriveJobRelated('assessments@example.com', 'Next step', 'Complete your online assessment.', false, 'assessment'),
+  true
+)
+check(
+  'promotional other is still demoted despite a sweep hit',
+  deriveJobRelated(
+    'deals@offers.example.com',
+    'Your exclusive offer ends soon',
+    'Half price on everything — limited-time offer ends August 12.',
+    true,
+    'other'
+  ),
+  false
 )
 
 console.log(`PASS ${pass}/${pass + fail}`)

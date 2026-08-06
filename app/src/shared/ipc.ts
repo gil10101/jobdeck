@@ -317,6 +317,8 @@ export interface IpcPushContract {
   'push:calendarChanged': { proposed: number }
   /** Reminder notification clicked — bring the calendar view forward. */
   'push:calendarFocus': Record<string, never>
+  /** New-mail notification clicked — bring the email view forward. */
+  'push:emailFocus': Record<string, never>
 }
 
 export type IpcPushChannel = keyof IpcPushContract
@@ -453,7 +455,8 @@ export const PUSH_CHANNELS: IpcPushChannel[] = [
   'push:assistantMessage',
   'push:emailChanged',
   'push:calendarChanged',
-  'push:calendarFocus'
+  'push:calendarFocus',
+  'push:emailFocus'
 ]
 
 /** Build a local-file:// URL for a repo-relative path (PDF preview etc.). */

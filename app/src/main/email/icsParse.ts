@@ -58,10 +58,76 @@ function unescapeText(v: string): string {
   return v.replace(/\\(.)/g, (_, c: string) => (c === 'n' || c === 'N' ? '\n' : c))
 }
 
+/** Windows TZIDs (Outlook/Exchange invites) → IANA, a CLDR windowsZones
+ *  subset covering common US/EU/global business zones. Intl throws on Windows
+ *  names, and the catch below would silently reinterpret the wall time in the
+ *  machine's zone — hours of error with no warning. */
+const WINDOWS_ZONES: Record<string, string> = {
+  'Eastern Standard Time': 'America/New_York',
+  'US Eastern Standard Time': 'America/Indianapolis',
+  'Central Standard Time': 'America/Chicago',
+  'Mountain Standard Time': 'America/Denver',
+  'US Mountain Standard Time': 'America/Phoenix',
+  'Pacific Standard Time': 'America/Los_Angeles',
+  'Alaskan Standard Time': 'America/Anchorage',
+  'Hawaiian Standard Time': 'Pacific/Honolulu',
+  'Atlantic Standard Time': 'America/Halifax',
+  'Newfoundland Standard Time': 'America/St_Johns',
+  'Canada Central Standard Time': 'America/Regina',
+  'Central America Standard Time': 'America/Guatemala',
+  'SA Pacific Standard Time': 'America/Bogota',
+  'Pacific SA Standard Time': 'America/Santiago',
+  'E. South America Standard Time': 'America/Sao_Paulo',
+  'Argentina Standard Time': 'America/Buenos_Aires',
+  UTC: 'UTC',
+  'GMT Standard Time': 'Europe/London',
+  'Greenwich Standard Time': 'Atlantic/Reykjavik',
+  'W. Europe Standard Time': 'Europe/Berlin',
+  'Central Europe Standard Time': 'Europe/Budapest',
+  'Central European Standard Time': 'Europe/Warsaw',
+  'Romance Standard Time': 'Europe/Paris',
+  'GTB Standard Time': 'Europe/Bucharest',
+  'FLE Standard Time': 'Europe/Kiev',
+  'E. Europe Standard Time': 'Europe/Chisinau',
+  'Turkey Standard Time': 'Europe/Istanbul',
+  'Russian Standard Time': 'Europe/Moscow',
+  'South Africa Standard Time': 'Africa/Johannesburg',
+  'Egypt Standard Time': 'Africa/Cairo',
+  'Israel Standard Time': 'Asia/Jerusalem',
+  'Arab Standard Time': 'Asia/Riyadh',
+  'Arabian Standard Time': 'Asia/Dubai',
+  'Pakistan Standard Time': 'Asia/Karachi',
+  'India Standard Time': 'Asia/Kolkata',
+  'Bangladesh Standard Time': 'Asia/Dhaka',
+  'SE Asia Standard Time': 'Asia/Bangkok',
+  'Singapore Standard Time': 'Asia/Singapore',
+  'China Standard Time': 'Asia/Shanghai',
+  'Taipei Standard Time': 'Asia/Taipei',
+  'Korea Standard Time': 'Asia/Seoul',
+  'Tokyo Standard Time': 'Asia/Tokyo',
+  'W. Australia Standard Time': 'Australia/Perth',
+  'Cen. Australia Standard Time': 'Australia/Adelaide',
+  'AUS Eastern Standard Time': 'Australia/Sydney',
+  'New Zealand Standard Time': 'Pacific/Auckland'
+}
+
+/** ±HHMM / ±HHMMSS (RFC 5545 UTC-OFFSET) → milliseconds east of UTC. */
+function parseUtcOffset(v: string): number | null {
+  const m = /^([+-])(\d{2})(\d{2})(\d{2})?$/.exec(v.trim())
+  if (!m) return null
+  const sign = m[1] === '-' ? -1 : 1
+  return sign * ((Number(m[2]) * 60 + Number(m[3])) * 60 + Number(m[4] ?? '0')) * 1000
+}
+
+// One warning per unknown TZID per process — sync re-parses invites every pass.
+const warnedTzids = new Set<string>()
+
 /** Convert a wall-clock time in an IANA zone to a UTC ISO string. The zone's
  *  offset for that wall time is found by round-tripping the guess through
- *  Intl.DateTimeFormat — no timezone library. Unknown/invalid zone → the
- *  machine's local clock. */
+ *  Intl.DateTimeFormat — no timezone library. Windows TZIDs map through
+ *  WINDOWS_ZONES first; an unknown/invalid zone falls back to the invite's own
+ *  VTIMEZONE standard offset when the caller has one, else the machine's local
+ *  clock — either fallback logs a warning, never silently. */
 export function zonedTimeToIso(
   tzid: string,
   y: number,
@@ -69,12 +135,14 @@ export function zonedTimeToIso(
   d: number,
   hh: number,
   mi: number,
-  ss: number
+  ss: number,
+  vtimezoneOffset?: string | null
 ): string {
+  const zone = WINDOWS_ZONES[tzid.trim()] ?? tzid
   let dtf: Intl.DateTimeFormat
   try {
     dtf = new Intl.DateTimeFormat('en-US', {
-      timeZone: tzid,
+      timeZone: zone,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -84,6 +152,16 @@ export function zonedTimeToIso(
       hour12: false
     })
   } catch {
+    const offset = vtimezoneOffset ? parseUtcOffset(vtimezoneOffset) : null
+    if (!warnedTzids.has(tzid)) {
+      warnedTzids.add(tzid)
+      console.warn(
+        offset !== null
+          ? `[email] unknown TZID "${tzid}" — using its VTIMEZONE offset ${vtimezoneOffset}`
+          : `[email] unknown TZID "${tzid}" — falling back to the machine's local clock`
+      )
+    }
+    if (offset !== null) return new Date(Date.UTC(y, mo - 1, d, hh, mi, ss) - offset).toISOString()
     return new Date(y, mo - 1, d, hh, mi, ss).toISOString()
   }
   const target = Date.UTC(y, mo - 1, d, hh, mi, ss)
@@ -103,9 +181,14 @@ export function zonedTimeToIso(
   return new Date(t).toISOString()
 }
 
-/** DATE / DATE-TIME value → UTC ISO string. Handles ...Z (UTC), TZID= (IANA
- *  zone), floating (local clock), and VALUE=DATE all-day (local midnight). */
-function parseIcsDate(value: string, params: Record<string, string>): string | null {
+/** DATE / DATE-TIME value → UTC ISO string. Handles ...Z (UTC), TZID= (IANA or
+ *  Windows zone, with the payload's VTIMEZONE offsets as last resort), floating
+ *  (local clock), and VALUE=DATE all-day (local midnight). */
+function parseIcsDate(
+  value: string,
+  params: Record<string, string>,
+  tzOffsets?: Record<string, string>
+): string | null {
   const v = value.trim()
   if (params.VALUE === 'DATE' || /^\d{8}$/.test(v)) {
     const m = /^(\d{4})(\d{2})(\d{2})/.exec(v)
@@ -121,7 +204,9 @@ function parseIcsDate(value: string, params: Record<string, string>): string | n
   const mi = Number(m[5])
   const ss = Number(m[6] ?? '0')
   if (m[7]) return new Date(Date.UTC(y, mo - 1, d, hh, mi, ss)).toISOString()
-  if (params.TZID) return zonedTimeToIso(params.TZID, y, mo, d, hh, mi, ss)
+  if (params.TZID) {
+    return zonedTimeToIso(params.TZID, y, mo, d, hh, mi, ss, tzOffsets?.[params.TZID.trim()] ?? null)
+  }
   return new Date(y, mo - 1, d, hh, mi, ss).toISOString()
 }
 
@@ -130,8 +215,9 @@ const MEET_LINK_RE =
 
 /** Parse an ICS payload into invite metadata. Only the first VEVENT counts;
  *  nested components inside it (VALARM) are skipped — their SUMMARY and
- *  DESCRIPTION describe the reminder, not the event. Returns null when no
- *  VEVENT exists. */
+ *  DESCRIPTION describe the reminder, not the event. VTIMEZONE components are
+ *  mined for per-TZID standard offsets, the fallback when a TZID resolves to
+ *  no known zone. Returns null when no VEVENT exists. */
 export function parseIcs(raw: string): { invite: EmailInvite; uid: string | null } | null {
   // Unfold RFC 5545 continuation lines (CRLF or LF followed by space/tab).
   const lines = raw.replace(/\r?\n[ \t]/g, '').split(/\r?\n/)
@@ -141,13 +227,48 @@ export function parseIcs(raw: string): { invite: EmailInvite; uid: string | null
   let inVevent = false
   let veventDone = false
   let subDepth = 0
+  const tzOffsets: Record<string, string> = {}
+  let inTz = false
+  let inStandard = false
+  let tzName: string | null = null
+  let tzStandard: string | null = null
+  let tzAny: string | null = null
   for (const line of lines) {
     const prop = parseLine(line)
     if (!prop) continue
     if (!inVevent) {
-      if (prop.name === 'BEGIN' && prop.value.trim().toUpperCase() === 'VEVENT' && !veventDone) {
+      const comp =
+        prop.name === 'BEGIN' || prop.name === 'END' ? prop.value.trim().toUpperCase() : ''
+      if (prop.name === 'BEGIN' && comp === 'VEVENT' && !veventDone) {
         sawVevent = true
         inVevent = true
+        inTz = false
+        continue
+      }
+      if (prop.name === 'BEGIN' && comp === 'VTIMEZONE') {
+        inTz = true
+        inStandard = false
+        tzName = null
+        tzStandard = null
+        tzAny = null
+        continue
+      }
+      if (inTz) {
+        // The STANDARD offset is preferred: without expanding transition rules
+        // it is the least-wrong single offset for the whole year.
+        if (prop.name === 'BEGIN' && comp === 'STANDARD') inStandard = true
+        else if (prop.name === 'END' && comp === 'STANDARD') inStandard = false
+        else if (prop.name === 'END' && comp === 'VTIMEZONE') {
+          const off = tzStandard ?? tzAny
+          if (tzName && off) tzOffsets[tzName] = off
+          inTz = false
+        } else if (prop.name === 'TZID' && !tzName) {
+          tzName = prop.value.trim()
+        } else if (prop.name === 'TZOFFSETTO') {
+          const v = prop.value.trim()
+          tzAny ??= v
+          if (inStandard) tzStandard ??= v
+        }
         continue
       }
       // METHOD lives at the VCALENDAR level, outside any VEVENT.
@@ -199,8 +320,8 @@ export function parseIcs(raw: string): { invite: EmailInvite; uid: string | null
     topMethod ?? (status && status.value.trim().toUpperCase() === 'CANCELLED' ? 'CANCEL' : null)
   const invite: EmailInvite = {
     title: summary ? unescapeText(summary.value).trim() || null : null,
-    start: dtStart ? parseIcsDate(dtStart.value, dtStart.params) : null,
-    end: dtEnd ? parseIcsDate(dtEnd.value, dtEnd.params) : null,
+    start: dtStart ? parseIcsDate(dtStart.value, dtStart.params, tzOffsets) : null,
+    end: dtEnd ? parseIcsDate(dtEnd.value, dtEnd.params, tzOffsets) : null,
     location: locationText || null,
     meetLink,
     organizer: organizerText,

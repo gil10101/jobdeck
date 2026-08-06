@@ -2,7 +2,7 @@ import { BrowserWindow, Notification } from 'electron'
 import type { EmailClassification, EmailInvite, EmailMessage, EmailSuggestion, StatusKey, TrackerRow } from '@shared/types'
 import type { Store } from '../store/Store'
 import type { TrackerRepo } from '../store/trackerRepo'
-import { proposeEvent, proposedCount } from '../calendar/calendarStore'
+import { listEvents, proposeEvent, proposedCount, updateEvent } from '../calendar/calendarStore'
 import { gmailConfigured } from './gmailAuth'
 import { getMessageFull, getMessageMeta, listMessages, type GmailMessageMeta } from './gmailClient'
 import { parseIcs } from './icsParse'
@@ -18,6 +18,7 @@ import {
   allCachedMessages,
   applyReclassification,
   calendarBackfillAt,
+  calendarBackfillVersion,
   getCachedMessage,
   markCalendarBackfill,
   openSuggestionCount,
@@ -61,6 +62,10 @@ const NOTIFY_MAX_PER_SYNC = 3
  *  pass stays a bounded number of Gmail fetches. */
 const BACKFILL_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
 const BACKFILL_MAX = 60
+/** Bump when an extraction fix must re-sweep already-stamped caches — the
+ *  stamp alone would leave mail cached under the buggy code unhealed forever.
+ *  v2: message-date clock, direct-recruiter body classification, ICS refetch. */
+const BACKFILL_VERSION = 2
 
 /** Lowercase, punctuation → spaces, collapsed — the comparable form. */
 function normalizeText(text: string): string {
@@ -125,6 +130,19 @@ export function suggestForMessage(
  *  invite carries no SUMMARY. */
 function cleanSubject(subject: string): string {
   return subject.replace(/^\s*(?:(?:re|fwd?|fw)\s*:\s*)+/i, '').trim() || 'Interview'
+}
+
+/** parseIcs with failures surfaced: a throwing or VEVENT-less ICS part must be
+ *  visible in logs, not silently degrade to text detection. */
+function parseIcsLogged(raw: string, messageId: string): ReturnType<typeof parseIcs> {
+  try {
+    const parsed = parseIcs(raw)
+    if (!parsed) console.error(`[email] ICS part had no VEVENT (message ${messageId})`)
+    return parsed
+  } catch (err) {
+    console.error(`[email] ICS parse failed (message ${messageId}):`, err)
+    return null
+  }
 }
 
 /** Bring the app forward from an OS notification click. */
@@ -250,8 +268,16 @@ export class EmailSync {
       // senders get a body fetch, so the extra calls stay bounded; the body is
       // used for classification then discarded (never cached — mail bodies
       // must not touch disk).
-      const bodyWorthy = (m: GmailMessageMeta): boolean =>
-        jobIds.has(m.id) || fromDomainMatch(m.from, [...ATS_DOMAINS, ...ASSESSMENT_DOMAINS])
+      const bodyWorthy = (m: GmailMessageMeta): boolean => {
+        if (jobIds.has(m.id) || fromDomainMatch(m.from, [...ATS_DOMAINS, ...ASSESSMENT_DOMAINS])) {
+          return true
+        }
+        // Direct recruiter mail outside the job sweep: a snippet that already
+        // reads as interview/assessment gets the full body too — the decisive
+        // date/time usually sits past the ~200-char snippet boundary.
+        const cls = classifyEmail(m.from, m.subject, m.snippet)
+        return cls === 'interview' || cls === 'assessment'
+      }
       const bodies = new Map<string, { text: string; ics: string | null }>()
       await mapLimit(
         metas.filter(bodyWorthy),
@@ -282,7 +308,7 @@ export class EmailSync {
           rows,
           full?.text
         )
-        const parsed = full?.ics ? parseIcs(full.ics) : null
+        const parsed = full?.ics ? parseIcsLogged(full.ics, meta.id) : null
         msg.invite = parsed?.invite ?? null
         if (this.proposeFromMessage(msg, parsed, full?.text ?? meta.snippet, rows)) {
           calendarChanged = true
@@ -364,6 +390,7 @@ export class EmailSync {
       this.deps.send('push:emailChanged', { suggestions: openSuggestionCount() })
       if (calendarChanged) this.deps.send('push:calendarChanged', { proposed: proposedCount() })
       this.notifyNewMail(fresh)
+      this.repairDetectedYears()
       await this.backfillCalendar(gen)
       return { fetched: metas.length }
     } finally {
@@ -371,31 +398,76 @@ export class EmailSync {
     }
   }
 
-  /** One-time sweep: mail cached before calendar extraction existed never
-   *  proposed events. Refetch full bodies for recent job mail, re-run
-   *  classification + invite parsing through reclassifyFromBody (which also
-   *  proposes), then stamp the cache so the sweep never repeats. Per-message
-   *  failures are skipped; the stamp lands only after a completed pass, so an
-   *  interrupted sweep retries on the next sync. */
+  /** One-time repair for 'detected' events minted before the extraction clock
+   *  fix: missing years were resolved against the processing clock instead of
+   *  the message's own date, bumping already-past interview times a year
+   *  forward. A detected start whose year-earlier twin still sits at/after its
+   *  source message's own day can only be that spurious bump. Scoped to events
+   *  created no later than the backfill stamp; idempotent — a repaired start
+   *  fails the guard. */
+  private repairDetectedYears(): void {
+    const stamp = calendarBackfillAt()
+    if (!stamp) return
+    const byId = new Map(allCachedMessages().map((m) => [m.id, m]))
+    let changed = false
+    for (const e of listEvents()) {
+      if (e.source !== 'detected' || !e.sourceMessageId || e.createdAt > stamp) continue
+      const msg = byId.get(e.sourceMessageId)
+      if (!msg) continue
+      const start = new Date(e.start)
+      if (Number.isNaN(start.getTime())) continue
+      const shifted = new Date(start)
+      shifted.setUTCFullYear(shifted.getUTCFullYear() - 1)
+      const msgDay = new Date(msg.date)
+      msgDay.setUTCHours(0, 0, 0, 0)
+      if (shifted.getTime() < msgDay.getTime()) continue
+      let end = e.end
+      if (end) {
+        const endDate = new Date(end)
+        endDate.setUTCFullYear(endDate.getUTCFullYear() - 1)
+        end = endDate.toISOString()
+      }
+      // updateEvent re-arms both reminders — the moved start needs them.
+      updateEvent(e.id, { start: shifted.toISOString(), end })
+      changed = true
+    }
+    if (changed) this.deps.send('push:calendarChanged', { proposed: proposedCount() })
+  }
+
+  /** Versioned sweep: mail cached before calendar extraction existed (or under
+   *  a since-fixed extraction, per BACKFILL_VERSION) never proposed events.
+   *  Refetch full bodies for recent job mail, re-run classification + invite
+   *  parsing through reclassifyFromBody (which also proposes), then stamp the
+   *  cache with the current version so the sweep never repeats until the next
+   *  bump. A per-message failure skips that message AND withholds the stamp,
+   *  so an interrupted or rate-limited sweep retries on the next sync. */
   private async backfillCalendar(gen: number): Promise<void> {
-    if (calendarBackfillAt()) return
+    if (calendarBackfillVersion() >= BACKFILL_VERSION) return
     const cutoff = Date.now() - BACKFILL_WINDOW_MS
     const candidates = allCachedMessages()
-      .filter((m) => !m.hidden && m.jobRelated && Date.parse(m.date) >= cutoff)
+      .filter(
+        (m) =>
+          !m.hidden &&
+          (m.jobRelated || m.classification === 'interview' || m.classification === 'assessment') &&
+          Date.parse(m.date) >= cutoff
+      )
       .slice(0, BACKFILL_MAX)
+    let failures = 0
     await mapLimit(candidates, FETCH_CONCURRENCY, async (m) => {
       if (gen !== this.generation) return
       try {
         const { text, ics } = await getMessageFull(m.id)
-        const parsed = ics ? parseIcs(ics) : null
+        const parsed = ics ? parseIcsLogged(ics, m.id) : null
         if (gen !== this.generation) return
         this.reclassifyFromBody(m.id, text, parsed ?? undefined)
       } catch {
-        /* unreadable message: keep its sync-time classification */
+        // Unreadable message: keep its sync-time classification, and count the
+        // miss so the stamp is withheld and the next sync retries.
+        failures++
       }
     })
     if (gen !== this.generation) return
-    markCalendarBackfill()
+    if (failures === 0) markCalendarBackfill(BACKFILL_VERSION)
   }
 
   private buildMessage(
@@ -476,7 +548,9 @@ export class EmailSync {
       }).changed
     }
     if (msg.classification !== 'interview') return false
-    const detected = extractEvent(msg.subject, bodyText, new Date())
+    // The message's own date is the clock: a backfill processing days-old mail
+    // must not bump an already-past interview time into next year.
+    const detected = extractEvent(msg.subject, bodyText, new Date(msg.date))
     if (!detected) return false
     return proposeEvent({
       sourceMessageId: msg.id,
@@ -519,7 +593,12 @@ export class EmailSync {
 
   private showNotification(title: string, body: string): void {
     const n = new Notification({ title, body })
-    n.on('click', () => focusMainWindow())
+    n.on('click', () => {
+      // Mirror the reminder pattern: focus the window, then route to the view
+      // the notification is about.
+      focusMainWindow()
+      this.deps.send('push:emailFocus', {})
+    })
     n.show()
   }
 

@@ -56,6 +56,8 @@ interface TimeHit {
   endHh: number | null
   endMi: number | null
   zone: string | null
+  /** Fixed GMT/UTC offset in minutes ("(GMT -04:00)" → -240); null = none. */
+  offsetMin: number | null
 }
 
 /** Same algorithm as icsParse.zonedTimeToIso: wall time in an IANA zone →
@@ -134,13 +136,25 @@ function findDates(text: string): DateHit[] {
   return hits
 }
 
-/** Timezone token immediately after a time, uppercase only ("PT" must never
- *  match the "pt" in ordinary words). */
-function zoneAfter(text: string, end: number): { zone: string; end: number } | null {
+/** Timezone token immediately after a time: GMT/UTC with an optional ±HH:MM
+ *  offset ("(GMT -04:00)"), or an uppercase-only US abbreviation ("PT" must
+ *  never match the "pt" in ordinary words). The whole token is consumed so its
+ *  offset digits are never re-scanned as a standalone time. */
+function zoneAfter(
+  text: string,
+  end: number
+): { zone: string | null; offsetMin: number | null; end: number } | null {
+  const g = /^[ \t]*\(?[ \t]*(?:GMT|UTC)(?![A-Za-z])(?:[ \t]?([+-])[ \t]?(\d{1,2})(?::?(\d{2}))?)?[ \t]*\)?/.exec(
+    text.slice(end, end + 20)
+  )
+  if (g) {
+    const offsetMin = g[1] ? (g[1] === '-' ? -1 : 1) * (Number(g[2]) * 60 + Number(g[3] ?? '0')) : 0
+    return { zone: null, offsetMin, end: end + g[0].length }
+  }
   const m = /^[ \t]*\(?([A-Z]{2,3})\)?/.exec(text.slice(end, end + 8))
   if (!m) return null
   const zone = ZONES[m[1]]
-  return zone ? { zone, end: end + m[0].length } : null
+  return zone ? { zone, offsetMin: null, end: end + m[0].length } : null
 }
 
 /** Ranges first (4pm - 4:30pm, 4:00–4:30 PM, 16:00-17:00), then single times
@@ -174,8 +188,10 @@ function findTimes(text: string): TimeHit[] {
     if (m[3] === undefined && mer1 && hh * 60 + mi > endHh * 60 + endMi) hh = to24(h1, 'am')
     const end = m.index + m[0].length
     const z = zoneAfter(text, end)
-    spans.push({ index: m.index, end })
-    hits.push({ index: m.index, end, hh, mi, endHh, endMi, zone: z?.zone ?? null })
+    // The span covers the zone token too: "(GMT -04:00)" digits must not be
+    // re-scanned as a spurious standalone time.
+    spans.push({ index: m.index, end: z?.end ?? end })
+    hits.push({ index: m.index, end, hh, mi, endHh, endMi, zone: z?.zone ?? null, offsetMin: z?.offsetMin ?? null })
   }
   const singleRe = /\b(\d{1,2}):(\d{2})\s*(am|pm)?\b|\b(\d{1,2})\s*(am|pm)\b/gi
   for (let m = singleRe.exec(text); m; m = singleRe.exec(text)) {
@@ -202,17 +218,42 @@ function findTimes(text: string): TimeHit[] {
       mi = 0
     }
     const z = zoneAfter(text, end)
-    hits.push({ index, end, hh, mi, endHh: null, endMi: null, zone: z?.zone ?? null })
+    if (z) spans.push({ index: end, end: z.end })
+    hits.push({ index, end, hh, mi, endHh: null, endMi: null, zone: z?.zone ?? null, offsetMin: z?.offsetMin ?? null })
   }
   return hits
 }
 
-/** Missing year → the nearest occurrence at or after `now` within 12 months
- *  (a December mail about "Jan 5" lands in the next year). */
-function resolveYear(month: number, day: number, hh: number, mi: number, now: Date): number {
+/** Missing year → the nearest occurrence whose DAY has not fully passed at
+ *  `now`, within 12 months (a December mail about "Jan 5" lands in the next
+ *  year). Day granularity, resolved once per date hit: a spurious earlier
+ *  time on the same day must not push one pair's start a year out. */
+function resolveYear(month: number, day: number, now: Date): number {
   const y = now.getFullYear()
-  const candidate = new Date(y, month - 1, day, hh, mi)
-  return candidate.getTime() >= now.getTime() ? y : y + 1
+  const dayEnd = new Date(y, month - 1, day + 1)
+  return dayEnd.getTime() > now.getTime() ? y : y + 1
+}
+
+/** Quoted replies, Gmail attribution lines, and forwarded header runs describe
+ *  the OLD mail — their dates and times must not pair with the new content.
+ *  Matched regions are blanked with spaces (newlines kept) so every surviving
+ *  hit keeps its index. */
+function stripQuoted(body: string): string {
+  const blank = (s: string): string => s.replace(/[^\n]/g, ' ')
+  return body
+    .replace(/^[ \t]*>[^\n]*/gm, blank)
+    .replace(/^[ \t]*On [^\n]{0,200}(?:\n[^\n]{0,200})?wrote:[ \t]*$/gm, blank)
+    .replace(/(?:^|(?<=\n))(?:[ \t]*(?:From|Sent|Date|To|Cc|Subject):[^\n]*(?:\n|$)){2,}/gi, blank)
+}
+
+/** One wall time → UTC ISO under the hit's zone: fixed GMT/UTC offset, IANA
+ *  zone, or the machine's local clock when neither was given. */
+function hitToIso(th: TimeHit, year: number, month: number, day: number, hh: number, mi: number): string {
+  if (th.offsetMin !== null) {
+    return new Date(Date.UTC(year, month - 1, day, hh, mi) - th.offsetMin * 60000).toISOString()
+  }
+  if (th.zone) return zonedTimeToIso(th.zone, year, month, day, hh, mi, 0)
+  return new Date(year, month - 1, day, hh, mi).toISOString()
 }
 
 /** Extract one event from an interview mail's subject + body. Returns null
@@ -225,23 +266,19 @@ export function extractEvent(
   now: Date
 ): { title: string; start: string; end: string | null } | null {
   // The subject counts as a body prefix for proximity pairing.
-  const text = subject + '\n' + body
+  const text = subject + '\n' + stripQuoted(body)
   const dates = findDates(text)
   const times = findTimes(text)
   const pairs: { pos: number; start: string; end: string | null }[] = []
   for (const dh of dates) {
+    const year = dh.year ?? resolveYear(dh.month, dh.day, now)
     for (const th of times) {
       const gap = dh.index > th.end ? dh.index - th.end : th.index > dh.end ? th.index - dh.end : 0
       if (gap > PAIR_WINDOW) continue
-      const year = dh.year ?? resolveYear(dh.month, dh.day, th.hh, th.mi, now)
-      const start = th.zone
-        ? zonedTimeToIso(th.zone, year, dh.month, dh.day, th.hh, th.mi, 0)
-        : new Date(year, dh.month - 1, dh.day, th.hh, th.mi).toISOString()
+      const start = hitToIso(th, year, dh.month, dh.day, th.hh, th.mi)
       let end: string | null = null
       if (th.endHh !== null) {
-        end = th.zone
-          ? zonedTimeToIso(th.zone, year, dh.month, dh.day, th.endHh, th.endMi ?? 0, 0)
-          : new Date(year, dh.month - 1, dh.day, th.endHh, th.endMi ?? 0).toISOString()
+        end = hitToIso(th, year, dh.month, dh.day, th.endHh, th.endMi ?? 0)
         if (Date.parse(end) <= Date.parse(start)) end = null
       }
       pairs.push({ pos: Math.min(dh.index, th.index), start, end })

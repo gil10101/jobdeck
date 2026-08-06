@@ -921,7 +921,10 @@ export function registerIpc(services: Services): void {
       icsUid: null,
       company: match?.company ?? null,
       rowId: match?.id ?? null,
-      source: 'ics'
+      source: 'ics',
+      // The card's Propose is an explicit user action — it may resurrect a
+      // mistakenly dismissed proposal (automatic re-proposals never do).
+      restoreDismissed: true
     })
     pushCalendarChanged()
     return listEvents()

@@ -55,6 +55,10 @@ export interface ProposeEventInput {
   source: 'ics' | 'detected'
   /** iCalendar METHOD:CANCEL — the UID-matched event is dismissed, not updated. */
   cancelled?: boolean
+  /** Explicit user re-propose (invite card): a dismissed dedupe match is
+   *  flipped back to 'proposed' instead of silently no-oping. Automatic
+   *  re-proposals must NOT set this — dismissals stay sticky for them. */
+  restoreDismissed?: boolean
 }
 
 /** Normalized-title + start-minute key catches the same event arriving twice
@@ -69,8 +73,14 @@ function startMinute(iso: string): number {
 
 /** Dedupe rules, in order: (1) icsUid match → update in place (a moved start
  *  re-arms both reminders; cancelled → dismissed; an approved event stays
- *  approved through updates). (2) same sourceMessageId → no-op. (3) same
- *  normalized title + start minute → no-op. Else insert as 'proposed'.
+ *  approved through updates). (2) same sourceMessageId → no-op. (2.5) start-
+ *  minute twin across sources — a reminder mail and the real invite for one
+ *  interview share a start minute but not a title: a low-confidence 'detected'
+ *  insert defers to ANY live event at that minute, and a UID-carrying invite
+ *  upgrades a live 'detected' twin in place (adopting uid/title/end/location/
+ *  meetLink, keeping state and reminder stamps). (3) same normalized title +
+ *  start minute → no-op. Rules (2)/(3) resurrect a dismissed match to
+ *  'proposed' when restoreDismissed is set. Else insert as 'proposed'.
  *  A CANCEL that matches nothing proposes nothing. */
 export function proposeEvent(input: ProposeEventInput): {
   event: CalendarEvent | null
@@ -119,16 +129,42 @@ export function proposeEvent(input: ProposeEventInput): {
     }
   }
   if (input.cancelled) return { event: null, changed: false }
+  const restore = (e: CalendarEvent): { event: CalendarEvent; changed: boolean } => {
+    if (e.state === 'dismissed' && input.restoreDismissed) {
+      e.state = 'proposed'
+      persist()
+      return { event: e, changed: true }
+    }
+    return { event: e, changed: false }
+  }
   if (input.sourceMessageId) {
     const same = store.events.find((e) => e.sourceMessageId === input.sourceMessageId)
-    if (same) return { event: same, changed: false }
+    if (same) return restore(same)
+  }
+  const minute = startMinute(input.start)
+  if (input.source === 'detected') {
+    const held = store.events.find((e) => e.state !== 'dismissed' && startMinute(e.start) === minute)
+    if (held) return { event: held, changed: false }
+  } else if (input.icsUid) {
+    const twin = store.events.find(
+      (e) => e.source === 'detected' && e.state !== 'dismissed' && startMinute(e.start) === minute
+    )
+    if (twin) {
+      twin.icsUid = input.icsUid
+      twin.title = input.title
+      twin.end = input.end
+      twin.location = input.location
+      twin.meetLink = input.meetLink
+      twin.source = 'ics'
+      persist()
+      return { event: twin, changed: true }
+    }
   }
   const key = normTitle(input.title)
-  const minute = startMinute(input.start)
   const dupe = store.events.find(
     (e) => normTitle(e.title) === key && startMinute(e.start) === minute
   )
-  if (dupe) return { event: dupe, changed: false }
+  if (dupe) return restore(dupe)
   const event: CalendarEvent = {
     id: randomUUID(),
     sourceMessageId: input.sourceMessageId,

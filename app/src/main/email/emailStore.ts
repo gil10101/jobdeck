@@ -17,8 +17,10 @@ interface EmailCacheFile {
   messages: EmailMessage[]
   lastSyncAt: string | null
   customTags?: string[]
-  /** Stamp of the one-time calendar backfill sweep; null = not yet run. */
+  /** Stamp of the FIRST completed calendar backfill sweep; null = not yet run. */
   calendarBackfillAt?: string | null
+  /** Sweep version that completed; a bumped code version re-runs the sweep. */
+  calendarBackfillVersion?: number
 }
 
 function cacheFile(): string {
@@ -35,7 +37,9 @@ function load(): EmailCacheFile {
       messages: Array.isArray(parsed.messages) ? parsed.messages : [],
       lastSyncAt: parsed.lastSyncAt ?? null,
       customTags: Array.isArray(parsed.customTags) ? parsed.customTags : [],
-      calendarBackfillAt: parsed.calendarBackfillAt ?? null
+      calendarBackfillAt: parsed.calendarBackfillAt ?? null,
+      calendarBackfillVersion:
+        typeof parsed.calendarBackfillVersion === 'number' ? parsed.calendarBackfillVersion : undefined
     }
     // Migrations for per-message user state added after first release.
     for (const m of cache.messages) {
@@ -66,9 +70,20 @@ export function calendarBackfillAt(): string | null {
   return load().calendarBackfillAt ?? null
 }
 
-/** Stamped after a COMPLETED backfill sweep — an interrupted sweep must retry. */
-export function markCalendarBackfill(): void {
-  load().calendarBackfillAt = new Date().toISOString()
+/** Completed sweep version: 0 = never ran; a stamp without a version is the
+ *  pre-versioning sweep (1). */
+export function calendarBackfillVersion(): number {
+  const store = load()
+  return store.calendarBackfillVersion ?? (store.calendarBackfillAt ? 1 : 0)
+}
+
+/** Stamped after a COMPLETED backfill sweep — an interrupted sweep must retry.
+ *  The time stamp is pinned to the FIRST completion: repairDetectedYears
+ *  scopes to events minted before it, and a re-sweep must not widen that. */
+export function markCalendarBackfill(version: number): void {
+  const store = load()
+  store.calendarBackfillAt ??= new Date().toISOString()
+  store.calendarBackfillVersion = version
   persist()
 }
 

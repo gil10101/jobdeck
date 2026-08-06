@@ -114,11 +114,12 @@ export function looksPromotional(from: string, subject: string, snippet: string)
 }
 
 /** True if a message belongs in the Job tab. ATS/assessment senders are always
- *  job mail. Otherwise it must have hit the job sweep — and mail the classifier
- *  could only call 'other' is dropped when it looks promotional, so a retail
- *  "offer"/"schedule" blast that snuck into the sweep does not pollute the tab.
- *  A message the classifier recognized as a real job class (interview, offer,
- *  rejection, …) is never demoted. */
+ *  job mail, and an interview/assessment classification IS the evidence —
+ *  direct recruiter mail from a company domain must not need the Gmail job
+ *  sweep to count. Otherwise it must have hit the job sweep — and mail the
+ *  classifier could only call 'other' is dropped when it looks promotional, so
+ *  a retail "offer"/"schedule" blast that snuck into the sweep does not
+ *  pollute the tab. */
 export function deriveJobRelated(
   from: string,
   subject: string,
@@ -127,6 +128,7 @@ export function deriveJobRelated(
   classification: EmailClassification
 ): boolean {
   if (fromDomainMatch(from, [...ATS_DOMAINS, ...ASSESSMENT_DOMAINS])) return true
+  if (classification === 'interview' || classification === 'assessment') return true
   if (classification === 'other' && looksPromotional(from, subject, snippet)) return false
   return jobHit
 }

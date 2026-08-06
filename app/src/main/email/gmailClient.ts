@@ -64,8 +64,12 @@ interface RawMessage {
 
 interface RawPart {
   mimeType?: string
+  /** Attachment filename — calendar payloads sometimes arrive as generic
+   *  application/octet-stream named *.ics. */
+  filename?: string
   headers?: { name: string; value: string }[]
-  body?: { data?: string; size?: number }
+  /** Large parts carry attachmentId instead of inline data. */
+  body?: { data?: string; size?: number; attachmentId?: string }
   parts?: RawPart[]
 }
 
@@ -133,10 +137,10 @@ function looksLikeHtml(text: string): boolean {
   return (tags?.length ?? 0) >= 4
 }
 
-/** Depth-first hunt for the first part whose mime type passes `match`. */
-function findPartBy(part: RawPart | undefined, match: (mimeType: string) => boolean): string | null {
+/** Depth-first hunt for the first part passing `match`. */
+function findPartBy(part: RawPart | undefined, match: (part: RawPart) => boolean): RawPart | null {
   if (!part) return null
-  if (part.mimeType && match(part.mimeType) && part.body?.data) return part.body.data
+  if (match(part)) return part
   for (const child of part.parts ?? []) {
     const hit = findPartBy(child, match)
     if (hit) return hit
@@ -145,7 +149,7 @@ function findPartBy(part: RawPart | undefined, match: (mimeType: string) => bool
 }
 
 function findPart(part: RawPart | undefined, mimeType: string): string | null {
-  return findPartBy(part, (mt) => mt === mimeType)
+  return findPartBy(part, (p) => p.mimeType === mimeType && !!p.body?.data)?.body?.data ?? null
 }
 
 /** Body as plain text (text/plain part, else stripped text/html). A text/plain
@@ -168,15 +172,45 @@ export async function getMessageBody(id: string): Promise<string> {
   return extractText(msg)
 }
 
-/** One format=full fetch yielding body text plus the raw ICS payload (first
- *  text/calendar part at any depth; some mailers label it application/ics),
- *  so callers never pay for two round trips per message. */
+/** Calendar part: text/calendar / application/ics mime type at any depth, or
+ *  any attachment named *.ics regardless of type (Outlook forwards and ATS
+ *  tooling ship those as application/octet-stream). */
+function isCalendarPart(p: RawPart): boolean {
+  const mt = p.mimeType?.toLowerCase() ?? ''
+  if (mt.startsWith('text/calendar') || mt === 'application/ics') return true
+  return p.filename?.toLowerCase().endsWith('.ics') ?? false
+}
+
+function assertAttachmentId(attachmentId: string): void {
+  if (!/^[A-Za-z0-9_-]+$/.test(attachmentId)) {
+    throw new Error(`invalid attachment id: ${attachmentId}`)
+  }
+}
+
+/** One format=full fetch yielding body text plus the raw ICS payload. A
+ *  calendar part delivered by reference (body.attachmentId, no inline data)
+ *  costs one extra attachments.get — same base64url payload. */
 export async function getMessageFull(id: string): Promise<{ text: string; ics: string | null }> {
   assertMessageId(id)
   const msg = await gmailGet<RawMessage>(`/messages/${id}?format=full`)
-  const ics = findPartBy(
+  const part = findPartBy(
     msg.payload,
-    (mt) => mt.toLowerCase().startsWith('text/calendar') || mt.toLowerCase() === 'application/ics'
+    (p) => isCalendarPart(p) && (!!p.body?.data || !!p.body?.attachmentId)
   )
-  return { text: extractText(msg), ics: ics ? decodeBody(ics) : null }
+  let ics: string | null = null
+  if (part?.body?.data) {
+    ics = decodeBody(part.body.data)
+  } else if (part?.body?.attachmentId) {
+    try {
+      assertAttachmentId(part.body.attachmentId)
+      const att = await gmailGet<{ data?: string }>(
+        `/messages/${id}/attachments/${part.body.attachmentId}`
+      )
+      if (att.data) ics = decodeBody(att.data)
+    } catch (err) {
+      // A lost invite must be visible in logs — but never fail the body fetch.
+      console.error('[email] ICS attachment fetch failed:', err)
+    }
+  }
+  return { text: extractText(msg), ics }
 }

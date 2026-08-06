@@ -572,3 +572,7 @@ onPush('push:calendarChanged', ({ proposed }) => {
 onPush('push:calendarFocus', () => {
   useApp.setState({ route: { view: 'calendar' } })
 })
+
+onPush('push:emailFocus', () => {
+  useApp.setState({ route: { view: 'email' } })
+})
