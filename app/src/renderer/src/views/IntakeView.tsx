@@ -16,6 +16,8 @@ import {
   GripVertical,
   Heart,
   Info,
+  PanelRightClose,
+  PanelRightOpen,
   Play,
   Plus,
   RefreshCw,
@@ -487,6 +489,7 @@ export default function IntakeView(): JSX.Element {
   const [company, setCompany] = useState('')
   const [role, setRole] = useState('')
   const [images, setImages] = useState<PastedImage[]>([])
+  const [composerOpen, setComposerOpen] = useState(true)
 
   const visible = intake.filter((i) => i.state !== 'dismissed')
   const DAY_MS = 24 * 60 * 60 * 1000
@@ -650,10 +653,18 @@ export default function IntakeView(): JSX.Element {
         <button className="btn" onClick={rescan} title="Rescan the TODO folder">
           <RefreshCw size={12} />
         </button>
+        <button
+          className={`btn ${composerOpen ? 'text-cyan-300' : ''}`}
+          onClick={() => setComposerOpen((v) => !v)}
+          title={composerOpen ? 'Hide the add panel' : 'Show the add panel'}
+          aria-label={composerOpen ? 'Hide the add panel' : 'Show the add panel'}
+        >
+          {composerOpen ? <PanelRightClose size={12} /> : <PanelRightOpen size={12} />}
+        </button>
       </div>
 
-      <div className="grid flex-1 grid-cols-2 gap-4 overflow-auto p-4">
-        <div className="flex flex-col gap-2">
+      <div className="flex flex-1 gap-4 overflow-auto p-4">
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
           {creatingFolder && (
             <div className="panel flex flex-col gap-2 p-3">
               <div className="flex gap-2">
@@ -735,40 +746,48 @@ export default function IntakeView(): JSX.Element {
           )}
         </div>
 
-        <div className="flex flex-col gap-2">
-          <div className="text-xs font-semibold uppercase tracking-wide text-muted">
-            Add by URL
-          </div>
-          <div className="panel flex flex-col gap-1.5 p-3">
-            <div className="flex gap-2">
-              <input
-                className="input flex-1"
-                placeholder="https://… job posting link"
-                value={fetchUrl}
-                onChange={(e) => setFetchUrl(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !fetching) void addFromUrl()
-                }}
-              />
-              <button
-                className="btn btn-primary shrink-0"
-                disabled={fetching || !fetchUrl.trim()}
-                onClick={() => void addFromUrl()}
-              >
-                {fetching ? 'Fetching…' : 'Fetch'}
-              </button>
+        {/* The composer slides as one fixed-width unit; the outer div animates
+            width so the clip happens during the slide instead of a reflow. */}
+        <div
+          className={`shrink-0 overflow-hidden transition-all duration-200 motion-reduce:transition-none ${
+            composerOpen ? 'w-[440px] opacity-100' : 'pointer-events-none -ml-4 w-0 opacity-0'
+          }`}
+        >
+          <div className="panel flex w-[440px] flex-col gap-3 p-4">
+            <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted">
+              <Globe size={12} strokeWidth={1.75} /> Add by URL
             </div>
-            <div className="text-[10px] leading-relaxed text-gray-600">
-              Reads the structured JobPosting data most job pages embed (jobright, LinkedIn,
-              Greenhouse, Lever, company sites) — no copy-paste needed. If a page has none,
-              paste the text below instead.
+            <div className="flex flex-col gap-1.5">
+              <div className="flex gap-2">
+                <input
+                  className="input flex-1"
+                  placeholder="https://… job posting link"
+                  value={fetchUrl}
+                  onChange={(e) => setFetchUrl(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !fetching) void addFromUrl()
+                  }}
+                />
+                <button
+                  className="btn btn-primary shrink-0"
+                  disabled={fetching || !fetchUrl.trim()}
+                  onClick={() => void addFromUrl()}
+                >
+                  {fetching ? 'Fetching…' : 'Fetch'}
+                </button>
+              </div>
+              <div className="text-[10px] leading-relaxed text-gray-600">
+                Reads the structured JobPosting data most job pages embed (jobright, LinkedIn,
+                Greenhouse, Lever, company sites) — no copy-paste needed. If a page has none,
+                paste the text below instead.
+              </div>
             </div>
-          </div>
 
-          <div className="mt-1 text-xs font-semibold uppercase tracking-wide text-muted">
-            Paste a posting
-          </div>
-          <div className="panel flex flex-col gap-2 p-3">
+            <div className="border-t border-edge/60" />
+
+            <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted">
+              <Copy size={12} strokeWidth={1.75} /> Paste a posting
+            </div>
             <textarea
               className="input min-h-[280px] w-full resize-y font-mono text-[11px] leading-relaxed"
               placeholder="Paste the full job posting text here — or paste screenshot(s) of the posting (Ctrl+V works for both)…"
@@ -819,11 +838,12 @@ export default function IntakeView(): JSX.Element {
             <button className="btn btn-primary self-start" onClick={addPasted}>
               + Add to intake
             </button>
-          </div>
-          <div className="text-[11px] leading-relaxed text-gray-600">
-            Building an application spawns a Claude agent that tailors the résumé and cover letter,
-            compiles both to exactly one page, writes the answers file, and adds a tracker row.
-            Everything lands in applications/&lt;slug&gt;/ inside your workspace.
+            <div className="border-t border-edge/60" />
+            <div className="text-[11px] leading-relaxed text-gray-600">
+              Building an application spawns a Claude agent that tailors the résumé and cover
+              letter, compiles both to exactly one page, writes the answers file, and adds a
+              tracker row. Everything lands in applications/&lt;slug&gt;/ inside your workspace.
+            </div>
           </div>
         </div>
       </div>
