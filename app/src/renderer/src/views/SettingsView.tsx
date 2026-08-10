@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BookUser, Bot, Briefcase, Check, Cpu, FolderOpen, Mail, Palette, Workflow, X } from 'lucide-react'
+import { Archive, BookUser, Bot, Briefcase, Check, Cpu, FolderOpen, Mail, Palette, Workflow, X } from 'lucide-react'
 import type { AppSettings, BoardId, BoardsStatus, EmailStatus } from '@shared/types'
 import type { CustomBoard } from '@shared/profile'
 import { call } from '../api'
@@ -114,6 +114,7 @@ export default function SettingsView(): JSX.Element {
   const [ollamaCtxDraft, setOllamaCtxDraft] = useState('')
   const [provTest, setProvTest] = useState<{ ok: boolean; message: string } | null>(null)
   const [provBusy, setProvBusy] = useState(false)
+  const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
     void call('master:getContext', undefined)
@@ -461,6 +462,19 @@ export default function SettingsView(): JSX.Element {
       toast(String(err), 'error')
     } finally {
       setEmailBusy(false)
+    }
+  }
+
+  const exportWorkspace = async (): Promise<void> => {
+    setExporting(true)
+    try {
+      const res = await call('workspace:export', undefined)
+      // Canceled dialogs stay silent — nothing happened, nothing to report.
+      if (!res.canceled) toast(`Exported ${res.files} file${res.files === 1 ? '' : 's'}`, 'success')
+    } catch (err) {
+      toast(String(err), 'error')
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -1302,6 +1316,24 @@ export default function SettingsView(): JSX.Element {
               </li>
             </ol>
           </div>
+        </div>
+
+        <div className="panel mt-4 px-4 py-1">
+          <div className="flex items-center gap-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
+            <Archive size={11} aria-hidden="true" /> Workspace data
+          </div>
+          <Row
+            label="Export workspace"
+            hint="Packs your whole workspace — tracker, documents, runs, library — into a verifiable zip you can import on another machine from the setup screen. Credentials and sign-in tokens are never included."
+          >
+            <button
+              className="btn px-2 py-1 text-[10px]"
+              disabled={exporting}
+              onClick={() => void exportWorkspace()}
+            >
+              {exporting ? 'Exporting…' : 'Export workspace…'}
+            </button>
+          </Row>
         </div>
 
         {info && (

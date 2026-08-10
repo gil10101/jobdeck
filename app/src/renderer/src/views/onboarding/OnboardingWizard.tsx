@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeft, ArrowRight, Check, Upload } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Check, FolderDown, Upload } from 'lucide-react'
 import type { ProfileFile } from '@shared/profile'
 import type { RunMeta } from '@shared/types'
 import { call, onPush } from '../../api'
@@ -25,6 +25,7 @@ export default function OnboardingWizard(): JSX.Element {
   const [draft, setDraft] = useState<ProfileFile | null>(null)
   const [gapAnswers, setGapAnswers] = useState<Record<string, string>>({})
   const [runPurpose, setRunPurpose] = useState<'extract' | 'refine'>('extract')
+  const [importRestart, setImportRestart] = useState(false)
 
   // ---- extract/refine run watcher ----
   useEffect(() => {
@@ -65,6 +66,36 @@ export default function OnboardingWizard(): JSX.Element {
       if (!path) return
       await call('workspace:create', { dir: path })
       await useApp.getState().refreshConfig()
+      setStep('sources')
+    } catch (err) {
+      toast(String(err), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const importExport = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      const res = await call('workspace:import', undefined)
+      if (res.error) {
+        toast(res.error, 'error')
+        return
+      }
+      if (!res.imported) return
+      if (res.restartRequired) {
+        // Live services cannot re-root — the import goes live on next launch.
+        setImportRestart(true)
+        return
+      }
+      await useApp.getState().refreshConfig()
+      toast('Workspace imported', 'success')
+      // An archive carrying a profile has nothing left for setup to gather —
+      // asking for CVs would be asking for what was just restored.
+      if (res.hasProfile) {
+        await finish()
+        return
+      }
       setStep('sources')
     } catch (err) {
       toast(String(err), 'error')
@@ -182,10 +213,29 @@ export default function OnboardingWizard(): JSX.Element {
               workspace folder you choose.
             </p>
             <div className="mt-5 flex flex-col gap-2">
-              <button className="btn btn-primary justify-center py-2.5" disabled={busy} onClick={createWorkspace}>
+              <button
+                className="btn btn-primary justify-center py-2.5"
+                disabled={busy || importRestart}
+                onClick={createWorkspace}
+              >
                 Create a new workspace…
               </button>
+              <button
+                className="btn justify-center py-2.5"
+                disabled={busy || importRestart}
+                onClick={importExport}
+              >
+                <FolderDown size={13} /> Import an export…
+              </button>
+              <p className="text-[11px] leading-relaxed text-gray-500">
+                Moving from another machine? Import the zip made with Settings → Export workspace.
+              </p>
             </div>
+            {importRestart && (
+              <p className="mt-3 text-[11px] leading-relaxed text-amber-300">
+                Import complete — quit and reopen the app to load the imported workspace.
+              </p>
+            )}
           </div>
         )}
 

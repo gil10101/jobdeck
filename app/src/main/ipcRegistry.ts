@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain, webContents } from 'electron'
+import { BrowserWindow, app, dialog, ipcMain, webContents } from 'electron'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -38,11 +38,15 @@ import {
   writeGlassdoorFeed
 } from './boards/glassdoorFeed'
 import { APP_DATA_DIR, REPO_ROOT } from './paths'
+import { loadConfig } from './appConfig'
+import { buildArchive } from './workspace/archive'
 import { clearGeminiKey, clearOllamaKey, setGeminiKey, setOllamaKey } from './provider/providerKeyStore'
 import { ollamaModelDetails, providerStatus, testProvider } from './provider/providerRuntime'
 import { validateProfile } from './profile/profileSchema'
+import { buildEnvelope, parseEnvelope, validateModuleData } from './profile/moduleEnvelope'
 import { loadProfile, saveProfile } from './profile/profileStore'
-import type { ProfileFile } from '@shared/profile'
+import type { ProfileFile, ProfileModuleName } from '@shared/profile'
+import { PROFILE_MODULES, PROFILE_SCHEMA_VERSION, emptyProfile } from '@shared/profile'
 import { allCompanies } from './companies/companiesStore'
 import { backfillCompanies, ensureRating, ensureRatingBg, seedFromText } from './companies/ratingService'
 import type { AgentRunner } from './agent/AgentRunner'
@@ -552,13 +556,81 @@ export function registerIpc(services: Services): void {
 
   // ---- profile ----
   handle('profile:get', () => loadProfile())
-  handle('profile:save', ({ profile }) => {
+  // The ONLY write path for profile.json — module applies go through it too.
+  const saveValidatedProfile = (profile: ProfileFile): ProfileFile => {
     const result = validateProfile(profile)
     if (!result.ok) throw new Error(`profile invalid: ${result.problems.join('; ')}`)
     const saved = saveProfile(result.profile)
     // Views showing the profile (Who I am, Settings) refetch on this push.
     send('push:storeChanged', { domains: ['profile'] })
     return saved
+  }
+  handle('profile:save', ({ profile }) => saveValidatedProfile(profile))
+  // Renderer input is untrusted — a bad name would index arbitrary keys.
+  const knownModule = (module: string): ProfileModuleName => {
+    if (!(PROFILE_MODULES as readonly string[]).includes(module)) {
+      throw new Error(`unknown profile module: ${module}`)
+    }
+    return module as ProfileModuleName
+  }
+  handle('profile:exportModule', async ({ module }) => {
+    const name = knownModule(module)
+    const profile = loadProfile()
+    if (!profile) throw new Error('no profile saved yet — save the profile first')
+    // 'local': anything profile.json is allowed to hold must be exportable.
+    const checked = validateModuleData(name, profile[name], 'local')
+    if (!checked.ok) throw new Error(`${name} data invalid: ${checked.problems.join('; ')}`)
+    const win = services.getWindow()
+    const result = await dialog.showSaveDialog(win ?? new BrowserWindow({ show: false }), {
+      title: `Export profile module: ${name}`,
+      defaultPath: `${name}.module.json`,
+      filters: [{ name: 'Profile module JSON', extensions: ['json'] }]
+    })
+    if (result.canceled || !result.filePath) return { canceled: true, path: null }
+    const envelope = buildEnvelope(name, PROFILE_SCHEMA_VERSION, checked.data)
+    fs.writeFileSync(result.filePath, JSON.stringify(envelope, null, 2), 'utf-8')
+    return { canceled: false, path: result.filePath }
+  })
+  handle('profile:importModule', async () => {
+    const win = services.getWindow()
+    const result = await dialog.showOpenDialog(win ?? new BrowserWindow({ show: false }), {
+      title: 'Import a profile module',
+      properties: ['openFile'],
+      filters: [{ name: 'Profile module JSON', extensions: ['json'] }]
+    })
+    const file = result.filePaths[0]
+    const none = { module: null, current: null, incoming: null }
+    if (result.canceled || !file) return { canceled: true, error: null, ...none }
+    try {
+      const envelope = parseEnvelope(fs.readFileSync(file, 'utf-8'))
+      const checked = validateModuleData(envelope.module, envelope.data)
+      if (!checked.ok) {
+        return {
+          canceled: false,
+          error: `${envelope.module} data invalid: ${checked.problems.join('; ')}`,
+          ...none
+        }
+      }
+      // NO write here — both sides go back for side-by-side review.
+      const saved = loadProfile()
+      return {
+        canceled: false,
+        error: null,
+        module: envelope.module,
+        current: saved ? saved[envelope.module] : null,
+        incoming: checked.data
+      }
+    } catch (err) {
+      return { canceled: false, error: err instanceof Error ? err.message : String(err), ...none }
+    }
+  })
+  // Writes through saveValidatedProfile — the single profile.json write path.
+  handle('profile:applyModule', ({ module, data }) => {
+    const name = knownModule(module)
+    const checked = validateModuleData(name, data)
+    if (!checked.ok) throw new Error(`${name} data invalid: ${checked.problems.join('; ')}`)
+    const profile = loadProfile() ?? emptyProfile()
+    saveValidatedProfile({ ...profile, [name]: checked.data } as ProfileFile)
   })
   handle('profile:draft', ({ runId }) => {
     const meta = runner.get(runId).meta
@@ -758,6 +830,23 @@ export function registerIpc(services: Services): void {
   })
   handle('app:absPath', ({ relPath }) => ({ absPath: toAbs(relPath) }))
 
+  // ---- workspace export (portable zip with hashed manifest) ----
+  // workspace:import lives in coreIpc.ts — it must work before any workspace exists.
+  handle('workspace:export', async () => {
+    const workspacePath = loadConfig().workspacePath
+    if (!workspacePath) throw new Error('no workspace configured')
+    const win = services.getWindow()
+    const d = new Date()
+    const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
+    const result = await dialog.showSaveDialog(win ?? new BrowserWindow({ show: false }), {
+      title: 'Export workspace',
+      defaultPath: `workspace-export-${stamp}.zip`,
+      filters: [{ name: 'Zip archive', extensions: ['zip'] }]
+    })
+    if (result.canceled || !result.filePath) return { canceled: true, path: null, files: 0 }
+    const manifest = buildArchive(workspacePath, result.filePath, app.getVersion())
+    return { canceled: false, path: result.filePath, files: manifest.files.length }
+  })
   // ---- apply (experimental) ----
   handle('apply:insertText', async ({ text }) => {
     // webview guests are separate webContents; find the apply browser guest.

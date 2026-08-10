@@ -77,29 +77,36 @@ export function ToggleChips<T extends string>(props: {
   )
 }
 
-/** Collapsible editor section. */
+/** Collapsible editor section. `actions` sit in the header as siblings of the
+ *  toggle button (buttons must not nest), so clicking them never collapses. */
 export function Section(props: {
   title: string
   summary?: string
   defaultOpen?: boolean
+  actions?: ReactNode
   children: ReactNode
 }): JSX.Element {
   const [open, setOpen] = useState(props.defaultOpen ?? false)
   return (
     <div className="border-t border-edge first:border-t-0">
-      <button
-        type="button"
-        className="flex w-full items-center gap-2 py-2.5 text-left"
-        onClick={() => setOpen((o) => !o)}
-      >
-        <span className="w-3 text-gray-500">
-          {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        </span>
-        <span className="text-[11px] font-semibold text-gray-200">{props.title}</span>
-        {props.summary && (
-          <span className="ml-auto text-[10px] text-gray-500">{props.summary}</span>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-2 py-2.5 text-left"
+          onClick={() => setOpen((o) => !o)}
+        >
+          <span className="w-3 text-gray-500">
+            {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          </span>
+          <span className="text-[11px] font-semibold text-gray-200">{props.title}</span>
+          {props.summary && (
+            <span className="ml-auto text-[10px] text-gray-500">{props.summary}</span>
+          )}
+        </button>
+        {props.actions && (
+          <span className="flex shrink-0 items-center gap-1">{props.actions}</span>
         )}
-      </button>
+      </div>
       {open && <div className="pb-4">{props.children}</div>}
     </div>
   )

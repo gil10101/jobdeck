@@ -27,7 +27,7 @@ import type {
   ScoutHistoryEntry,
   TrackerRow
 } from './types'
-import type { CustomBoard, ProfileFile } from './profile'
+import type { CustomBoard, ProfileFile, ProfileModuleName } from './profile'
 
 /** invoke/handle channels: request → response (response is wrapped in IpcResult by the registry). */
 export interface IpcInvokeContract {
@@ -177,6 +177,20 @@ export interface IpcInvokeContract {
   }
   'workspace:choose': { req: { title?: string }; res: { path: string | null } }
   'workspace:create': { req: { dir: string }; res: { workspacePath: string } }
+  /** Zip the whole workspace (denylist-scanned, hashed manifest) to a user-chosen file. */
+  'workspace:export': { req: void; res: { canceled: boolean; path: string | null; files: number } }
+  /** Restore an export into an empty folder and point config at it; live services
+   *  cannot re-root at runtime, so a successful import asks for a relaunch. */
+  'workspace:import': {
+    req: void
+    res: {
+      imported: boolean
+      error: string | null
+      restartRequired: boolean
+      /** The archive carried a profile, so setup has nothing left to ask for. */
+      hasProfile: boolean
+    }
+  }
   'app:pickFile': {
     req: { filters?: { name: string; extensions: string[] }[] }
     res: { path: string | null }
@@ -186,6 +200,28 @@ export interface IpcInvokeContract {
   'profile:draft': {
     req: { runId: string }
     res: { draft: ProfileFile | null; error: string | null }
+  }
+  /** One saved profile section as a standalone <module>.module.json envelope. */
+  'profile:exportModule': {
+    req: { module: ProfileModuleName }
+    res: { canceled: boolean; path: string | null }
+  }
+  /** Parse + validate a module file; NO write — both sides return for review. */
+  'profile:importModule': {
+    req: void
+    res: {
+      canceled: boolean
+      error: string | null
+      module: ProfileModuleName | null
+      current: unknown
+      incoming: unknown
+    }
+  }
+  /** Re-validate the reviewed section and write it through the one profile
+   *  write path (profile:save's logic), so profile.json is never written twice. */
+  'profile:applyModule': {
+    req: { module: ProfileModuleName; data: unknown }
+    res: void
   }
   'onboard:start': {
     req: {
@@ -393,10 +429,15 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'env:check',
   'workspace:choose',
   'workspace:create',
+  'workspace:export',
+  'workspace:import',
   'app:pickFile',
   'profile:get',
   'profile:save',
   'profile:draft',
+  'profile:exportModule',
+  'profile:importModule',
+  'profile:applyModule',
   'onboard:start',
   'library:upload',
   'onboarding:complete',

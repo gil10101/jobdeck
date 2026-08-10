@@ -1,8 +1,10 @@
 import { BrowserWindow, app, dialog, ipcMain } from 'electron'
 import fs from 'node:fs'
+import path from 'node:path'
 import { loadConfig, saveConfig } from './appConfig'
 import { installAllBoards } from './boards/boardsBridge'
-import { resolveLatex } from './paths'
+import { resolveLatex, workspaceReady } from './paths'
+import { readManifest, verifyAndExtract } from './workspace/archive'
 
 /**
  * IPC that must work BEFORE a workspace exists (first-run/onboarding).
@@ -59,6 +61,54 @@ export function registerCoreIpc(deps: {
     saveConfig({ workspacePath: dir })
     await deps.completeSetup(dir)
     return { workspacePath: dir }
+  })
+
+  // Lives here (not ipcRegistry.ts) so onboarding's "Import an export" card
+  // works before any workspace is configured.
+  handle('workspace:import', async () => {
+    const win = deps.getWindow() ?? new BrowserWindow({ show: false })
+    const zipPick = await dialog.showOpenDialog(win, {
+      title: 'Choose a workspace export',
+      properties: ['openFile'],
+      filters: [{ name: 'Workspace export', extensions: ['zip'] }]
+    })
+    const zipPath = zipPick.filePaths[0]
+    if (zipPick.canceled || !zipPath) {
+      return { imported: false, error: null, restartRequired: false, hasProfile: false }
+    }
+    // Manifest problems (wrong schema version, corrupt zip) surface as res.error.
+    let hasProfile = false
+    try {
+      hasProfile = readManifest(zipPath).files.some((f) => f.path === 'profile.json')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return { imported: false, error: message, restartRequired: false, hasProfile: false }
+    }
+    const destPick = await dialog.showOpenDialog(win, {
+      title: 'Choose an empty destination folder for the imported workspace',
+      properties: ['openDirectory', 'createDirectory']
+    })
+    const destDir = destPick.filePaths[0]
+    if (destPick.canceled || !destDir) {
+      return { imported: false, error: null, restartRequired: false, hasProfile: false }
+    }
+    try {
+      verifyAndExtract(zipPath, destDir)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return { imported: false, error: message, restartRequired: false, hasProfile: false }
+    }
+    const workspacePath = path.join(destDir, 'workspace')
+    // Same config write onboarding's workspace:create uses.
+    saveConfig({ workspacePath })
+    if (workspaceReady()) {
+      // Live services (store, watchers, runner) are bound to the old root and
+      // cannot re-root at runtime — the import goes live on next launch.
+      return { imported: true, error: null, restartRequired: true, hasProfile }
+    }
+    // First run: no services exist yet, so the imported workspace boots now.
+    await deps.completeSetup(workspacePath)
+    return { imported: true, error: null, restartRequired: false, hasProfile }
   })
 
   handle('onboarding:complete', () => {
