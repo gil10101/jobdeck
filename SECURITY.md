@@ -30,9 +30,21 @@ sensitive material locally:
 
 ## Trust boundaries worth knowing
 
-- **Job postings and email are untrusted input.** They are third-party text that
-  reaches an AI agent, so they are handled as data, never as instructions.
-  Report anything that looks like it could escape that boundary.
+- **Job postings and email are untrusted input**, and this is the sharpest edge
+  in the app. They are third-party text written by strangers, and they reach an
+  agent that can run commands. Two things stand between a hostile posting and
+  your machine: the text is fenced inside a delimiter carrying a random
+  per-run id, so it cannot close its own block and continue as instructions;
+  and the prompt states that the fenced content is data describing a job and
+  can never redirect the task.
+
+  **Be aware of what that is and is not.** It is a boundary a model is
+  instructed to respect, not a sandbox that enforces it. Build runs currently
+  execute with the agent's full tool set, so a sufficiently persuasive posting
+  is a residual risk rather than an impossibility. Restricting the runner to
+  the tools a build actually needs is planned and is the right fix. Until then:
+  build from postings you found yourself, and treat a build from an unsolicited
+  link the way you would treat running a script from that link.
 - **Embedded pages are isolated.** The Apply and browsing views load real sites
   in `<webview>` guests with no preload, context isolation on, and sandboxed
   popups; guests cannot reach the app's IPC bridge.

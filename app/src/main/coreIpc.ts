@@ -169,10 +169,16 @@ const LEAK_WARNING =
 
 /**
  * A workspace inside a git checkout would commit personal data on the next
- * `git add`, so every entry point that adopts a directory rejects one first.
- * Throws with the remedy; callers surface the message verbatim.
+ * `git add`, so every entry point that adopts a directory screens it. The app
+ * checkout and a directory that is itself a repository are refused outright;
+ * an ancestor repository is a warning the user can accept, because refusing it
+ * would strand anyone whose home directory is a repository. Throws with the
+ * remedy; callers surface the message verbatim.
  */
-function assertUsableWorkspace(dir: string): void {
+async function assertUsableWorkspace(
+  dir: string,
+  win: BrowserWindow | null
+): Promise<void> {
   const abs = path.resolve(dir)
   const checkout = appCheckoutRoot()
   if (checkout && (isWithin(checkout, abs) || isWithin(abs, checkout))) {
@@ -181,11 +187,26 @@ function assertUsableWorkspace(dir: string): void {
     )
   }
   const repo = enclosingGitRoot(abs)
-  if (repo) {
-    const where = repo === abs ? 'is a git repository' : `is inside the git repository at ${repo}`
+  if (!repo) return
+  if (repo === abs) {
     throw new Error(
-      `That folder ${where}. ${LEAK_WARNING}, so pick a folder that is not under version control.`
+      `That folder is a git repository. ${LEAK_WARNING}, so pick a folder that is not under version control.`
     )
+  }
+  // An ANCESTOR repository cannot be fatal: a dotfiles setup (`git init ~`)
+  // puts every folder under the home directory inside one, and refusing them
+  // all leaves first-run setup with nowhere to go. Warn, name the repository,
+  // and let the user decide — the leak is real but theirs to accept.
+  const { response } = await dialog.showMessageBox(win ?? new BrowserWindow({ show: false }), {
+    type: 'warning',
+    buttons: ['Choose a different folder', 'Use this folder anyway'],
+    defaultId: 0,
+    cancelId: 0,
+    message: 'This folder is inside a git repository',
+    detail: `${abs} sits inside the repository at ${repo}. ${LEAK_WARNING}, so committing that repository would publish them. Use this folder only if you are sure it is excluded from commits.`
+  })
+  if (response !== 1) {
+    throw new Error('Workspace setup cancelled — pick a folder outside that repository.')
   }
 }
 
@@ -269,13 +290,13 @@ export function registerCoreIpc(deps: {
       properties: ['openDirectory', 'createDirectory']
     })
     if (result.canceled || !result.filePaths[0]) return { path: null }
-    assertUsableWorkspace(result.filePaths[0])
+    await assertUsableWorkspace(result.filePaths[0], win)
     return { path: result.filePaths[0] }
   })
 
   handle('workspace:create', async ({ dir }: { dir: string }) => {
     if (!dir) throw new Error('no folder chosen')
-    assertUsableWorkspace(dir)
+    await assertUsableWorkspace(dir, deps.getWindow())
     fs.mkdirSync(dir, { recursive: true })
     // Scaffold the bundled job-board CLIs so scout runs work out of the box.
     installAllBoards(dir)
@@ -314,7 +335,7 @@ export function registerCoreIpc(deps: {
       return { imported: false, error: null, restartRequired: false, hasProfile: false }
     }
     try {
-      assertUsableWorkspace(destDir)
+      await assertUsableWorkspace(destDir, win)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       return { imported: false, error: message, restartRequired: false, hasProfile: false }

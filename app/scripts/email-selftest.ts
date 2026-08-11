@@ -202,8 +202,20 @@ check('range with EDT start', e2?.start, '2026-08-10T20:00:00.000Z')
 check('range with EDT end', e2?.end, '2026-08-10T20:30:00.000Z')
 check('Re:/Fwd: runs stripped', e2?.title, 'Phone screen')
 
-const e3 = extractEvent('Next steps', 'Are you free on 8/12 at 4pm for a quick call?', nowAug)
-check('"8/12 at 4pm" start', e3?.start, new Date(2026, 7, 12, 16, 0).toISOString())
+const e3 = extractEvent('Next steps', 'Are you free on 8/20 at 4pm for a quick call?', nowAug)
+check('"8/20 at 4pm" start (day > 12 fixes the field order)', e3?.start, new Date(2026, 7, 20, 16, 0).toISOString())
+// A numeric date whose first two fields are BOTH <= 12 means one thing to a US
+// sender and another to a UK/EU one, and nothing on this path knows which.
+check(
+  'ambiguous D/M-vs-M/D numeric date returns null rather than guessing US order',
+  extractEvent('Interview confirmation', 'Your interview is scheduled for 10/08/2026 at 14:00.', nowAug),
+  null
+)
+check(
+  'ambiguous numeric date with no year is skipped too',
+  extractEvent('Next steps', 'Are you free on 8/12 at 4pm for a quick call?', nowAug),
+  null
+)
 
 const e4 = extractEvent('', 'We can meet 4pm - 4:30pm on Aug 20.', nowAug)
 check('"4pm - 4:30pm" range start', e4?.start, new Date(2026, 7, 20, 16, 0).toISOString())
@@ -228,6 +240,29 @@ check(
   'promo text returns null',
   extractEvent('Huge savings inside', 'Half off everything! Sale ends August 12. Shop before it is gone.', nowAug),
   null
+)
+// Proximity alone cannot pick the appointment: opening-hours and arrival
+// blurbs routinely sit NEARER the date than the slot being scheduled.
+check(
+  'a nearer hours blurb does not outrank the stated slot',
+  extractEvent('Interview', 'August 12: reception 10:00-11:00, then your interview at 2:00 PM ET.', nowAug)
+    ?.start,
+  '2026-08-12T18:00:00.000Z'
+)
+check(
+  'an all-day opening-hours range is not the event',
+  extractEvent('Interview', 'Interview August 12. Office hours 9:00-5:00. Your slot is 2:00 PM ET.', nowAug)
+    ?.start,
+  '2026-08-12T18:00:00.000Z'
+)
+check(
+  'a genuine short range is still kept',
+  extractEvent('Interview', 'Your panel is August 12, 4:00-4:30 PM ET.', nowAug),
+  {
+    title: 'Interview',
+    start: '2026-08-12T20:00:00.000Z',
+    end: '2026-08-12T20:30:00.000Z'
+  }
 )
 check(
   'conflicting date+time pairs return null',

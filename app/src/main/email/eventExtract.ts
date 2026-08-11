@@ -23,8 +23,13 @@ const MONTHS: Record<string, number> = {
   dec: 12
 }
 
-/** US timezone tokens → IANA zones. ET/EST/EDT all map to the zone; the
- *  offset actually applied is the zone's real offset for that date. */
+/** Timezone abbreviations → IANA zones. ET/EST/EDT all map to the zone; the
+ *  offset actually applied is the zone's real offset for that date.
+ *  Deliberately absent: abbreviations that mean different zones in different
+ *  countries (IST = India/Ireland/Israel, AST = Atlantic/Arabia, SAST vs SST).
+ *  An abbreviation that is not in here is treated as UNKNOWN, not as "no zone"
+ *  — see zoneAfter: reinterpreting a stated wall time in the machine's zone
+ *  books the event hours off, which this module's contract forbids. */
 const ZONES: Record<string, string> = {
   ET: 'America/New_York',
   EST: 'America/New_York',
@@ -37,7 +42,30 @@ const ZONES: Record<string, string> = {
   MDT: 'America/Denver',
   PT: 'America/Los_Angeles',
   PST: 'America/Los_Angeles',
-  PDT: 'America/Los_Angeles'
+  PDT: 'America/Los_Angeles',
+  AKST: 'America/Anchorage',
+  AKDT: 'America/Anchorage',
+  HST: 'Pacific/Honolulu',
+  // Europe
+  BST: 'Europe/London',
+  CET: 'Europe/Paris',
+  CEST: 'Europe/Paris',
+  EET: 'Europe/Athens',
+  EEST: 'Europe/Athens',
+  WET: 'Europe/Lisbon',
+  WEST: 'Europe/Lisbon',
+  // Asia-Pacific
+  JST: 'Asia/Tokyo',
+  KST: 'Asia/Seoul',
+  SGT: 'Asia/Singapore',
+  HKT: 'Asia/Hong_Kong',
+  AEST: 'Australia/Sydney',
+  AEDT: 'Australia/Sydney',
+  ACST: 'Australia/Adelaide',
+  ACDT: 'Australia/Adelaide',
+  AWST: 'Australia/Perth',
+  NZST: 'Pacific/Auckland',
+  NZDT: 'Pacific/Auckland'
 }
 
 interface DateHit {
@@ -129,6 +157,11 @@ function findDates(text: string): DateHit[] {
     const month = Number(m[1])
     const day = Number(m[2])
     if (month < 1 || month > 12 || day < 1 || day > 31) continue
+    // Both fields could be the month: "10/08" is 10 August to a UK/EU sender
+    // and 8 October to a US one, and nothing in a mail body says which. The
+    // app has no locale input on this path, so a guess would silently book the
+    // wrong month — skip it (15/08 and 8/12 stay unambiguous and resolve).
+    if (day <= 12) continue
     let year: number | null = m[3] ? Number(m[3]) : null
     if (year !== null && year < 100) year += 2000
     hits.push({ index: m.index, end: m.index + m[0].length, month, day, year })
@@ -137,13 +170,16 @@ function findDates(text: string): DateHit[] {
 }
 
 /** Timezone token immediately after a time: GMT/UTC with an optional ±HH:MM
- *  offset ("(GMT -04:00)"), or an uppercase-only US abbreviation ("PT" must
+ *  offset ("(GMT -04:00)"), or an uppercase-only abbreviation ("PT" must
  *  never match the "pt" in ordinary words). The whole token is consumed so its
- *  offset digits are never re-scanned as a standalone time. */
+ *  offset digits are never re-scanned as a standalone time.
+ *  `unknown: true` means an abbreviation WAS stated but this module cannot
+ *  resolve it — the caller drops that time rather than silently reinterpreting
+ *  the wall clock in the machine's own zone. */
 function zoneAfter(
   text: string,
   end: number
-): { zone: string | null; offsetMin: number | null; end: number } | null {
+): { zone: string | null; offsetMin: number | null; end: number; unknown?: true } | null {
   const g = /^[ \t]*\(?[ \t]*(?:GMT|UTC)(?![A-Za-z])(?:[ \t]?([+-])[ \t]?(\d{1,2})(?::?(\d{2}))?)?[ \t]*\)?/.exec(
     text.slice(end, end + 20)
   )
@@ -151,10 +187,18 @@ function zoneAfter(
     const offsetMin = g[1] ? (g[1] === '-' ? -1 : 1) * (Number(g[2]) * 60 + Number(g[3] ?? '0')) : 0
     return { zone: null, offsetMin, end: end + g[0].length }
   }
-  const m = /^[ \t]*\(?([A-Z]{2,3})\)?/.exec(text.slice(end, end + 8))
+  // The trailing (?![A-Za-z]) keeps a longer ordinary word ("CONFIRMED") from
+  // being clipped to a token-shaped prefix.
+  const m = /^[ \t]*\(?([A-Z]{2,5})\)?(?![A-Za-z])/.exec(text.slice(end, end + 10))
   if (!m) return null
   const zone = ZONES[m[1]]
-  return zone ? { zone, offsetMin: null, end: end + m[0].length } : null
+  if (zone) return { zone, offsetMin: null, end: end + m[0].length }
+  // Nearly every English zone abbreviation ends in T ("…Time"); MSK is the one
+  // common exception. Anything else after a time is an ordinary word, not a
+  // zone we failed to recognize, so it keeps the old no-zone reading.
+  if (!/T$/.test(m[1]) && m[1] !== 'MSK') return null
+  console.warn(`[email] unrecognized timezone "${m[1]}" after a time — that time is not used`)
+  return { zone: null, offsetMin: null, end: end + m[0].length, unknown: true }
 }
 
 /** Ranges first (4pm - 4:30pm, 4:00–4:30 PM, 16:00-17:00), then single times
@@ -189,8 +233,11 @@ function findTimes(text: string): TimeHit[] {
     const end = m.index + m[0].length
     const z = zoneAfter(text, end)
     // The span covers the zone token too: "(GMT -04:00)" digits must not be
-    // re-scanned as a spurious standalone time.
+    // re-scanned as a spurious standalone time. It is pushed even when the zone
+    // is unresolvable, so the dropped range's digits are not picked up as
+    // machine-local single times instead.
     spans.push({ index: m.index, end: z?.end ?? end })
+    if (z?.unknown) continue
     hits.push({ index: m.index, end, hh, mi, endHh, endMi, zone: z?.zone ?? null, offsetMin: z?.offsetMin ?? null })
   }
   const singleRe = /\b(\d{1,2}):(\d{2})\s*(am|pm)?\b|\b(\d{1,2})\s*(am|pm)\b/gi
@@ -219,9 +266,25 @@ function findTimes(text: string): TimeHit[] {
     }
     const z = zoneAfter(text, end)
     if (z) spans.push({ index: end, end: z.end })
+    if (z?.unknown) continue
     hits.push({ index, end, hh, mi, endHh: null, endMi: null, zone: z?.zone ?? null, offsetMin: z?.offsetMin ?? null })
   }
   return hits
+}
+
+/** Opening-hours and logistics blurbs sit beside interview times and often
+ *  land NEARER the date than the slot itself, so proximity cannot separate
+ *  them. Two signals demote a time to an aside: the words introducing it, and
+ *  a span no interview occupies. */
+const ASIDE_LEAD = /\b(?:office|business|support|opening|store|reception|desk|lobby|arrive|arrival|check[- ]?in|open|available|walk[- ]?in)\b[^.\n]{0,24}$/i
+/** Longest plausible interview block; a wider range is opening hours. */
+const MAX_EVENT_MS = 4 * 60 * 60 * 1000
+
+/** Whether this time reads as context rather than the appointment: introduced
+ *  by an opening-hours phrase, or spanning longer than any interview. */
+function isAside(text: string, th: TimeHit, start: string, end: string | null): boolean {
+  if (end && Date.parse(end) - Date.parse(start) > MAX_EVENT_MS) return true
+  return ASIDE_LEAD.test(text.slice(Math.max(0, th.index - 40), th.index))
 }
 
 /** Missing year → the nearest occurrence whose DAY has not fully passed at
@@ -269,7 +332,13 @@ export function extractEvent(
   const text = subject + '\n' + stripQuoted(body)
   const dates = findDates(text)
   const times = findTimes(text)
-  const pairs: { pos: number; start: string; end: string | null }[] = []
+  const pairs: {
+    gap: number
+    pos: number
+    start: string
+    end: string | null
+    aside: boolean
+  }[] = []
   for (const dh of dates) {
     const year = dh.year ?? resolveYear(dh.month, dh.day, now)
     for (const th of times) {
@@ -281,13 +350,22 @@ export function extractEvent(
         end = hitToIso(th, year, dh.month, dh.day, th.endHh, th.endMi ?? 0)
         if (Date.parse(end) <= Date.parse(start)) end = null
       }
-      pairs.push({ pos: Math.min(dh.index, th.index), start, end })
+      // The TIME's own position, not min(date,time): with min() every time
+      // paired with one date collapses to that date's index, the sort below
+      // becomes a no-op, and insertion order decides — and findTimes emits
+      // every range before every single time. A trailing "Reception
+      // 10:00-11:00" would then outrank the stated "2:00 PM" interview slot.
+      pairs.push({ gap, pos: th.index, start, end, aside: isAside(text, th, start, end) })
     }
   }
   if (pairs.length === 0) return null
   const stamps = pairs.map((p) => Date.parse(p.start))
   if (Math.max(...stamps) - Math.min(...stamps) > 24 * 60 * 60 * 1000) return null
-  pairs.sort((a, b) => a.pos - b.pos)
+  // Asides lose to any real candidate; then nearest time to its date wins, and
+  // equal distance falls back to text order. Proximity alone is not enough:
+  // "August 12: reception 10:00-11:00, then your interview at 2:00 PM" puts
+  // the distractor CLOSER to the date than the slot being scheduled.
+  pairs.sort((a, b) => Number(a.aside) - Number(b.aside) || a.gap - b.gap || a.pos - b.pos)
   const title = subject.replace(/^\s*(?:(?:re|fwd?|fw)\s*:\s*)+/i, '').trim() || 'Interview'
   return { title, start: pairs[0].start, end: pairs[0].end }
 }

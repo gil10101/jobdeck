@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { ProfileFile } from '@shared/profile'
@@ -31,6 +32,22 @@ const SCOUT_TEMPLATE_PATH = path.join(APP_DIR, 'resources', 'prompts', 'scout_jo
 const INTERVIEW_TEMPLATE_PATH = path.join(APP_DIR, 'resources', 'prompts', 'interview_prep.md')
 const ONBOARD_TEMPLATE_PATH = path.join(APP_DIR, 'resources', 'prompts', 'onboard_profile.md')
 const REFINE_TEMPLATE_PATH = path.join(APP_DIR, 'resources', 'prompts', 'refine_profile.md')
+
+/**
+ * Fence a block of untrusted third-party text so the text cannot break out of
+ * it. A fixed tag is forgeable: a posting containing the literal closing tag
+ * would end the data region and have everything after it read as prompt. The
+ * tag therefore carries a per-call random id the author cannot predict, and
+ * any lookalike closing tag in the content is defanged as well, so neither
+ * guessing nor echoing an earlier run's id can escape.
+ */
+export function fenceUntrusted(kind: string, text: string): string {
+  const id = randomBytes(6).toString('hex')
+  const body = text.replace(new RegExp(`</?${kind}(-[0-9a-f]{12})?>`, 'gi'), (m) =>
+    m.replace('<', '‹').replace('>', '›')
+  )
+  return `<${kind}-${id}>\n${body}\n</${kind}-${id}>`
+}
 
 function fill(template: string, replacements: Record<string, string>): string {
   let out = template
@@ -189,9 +206,11 @@ export function buildPrompt(slots: PromptSlots, profile: ProfileFile): string {
     EXAMPLE_FOLDER_LINE: exampleFolderLine(),
     PDFTOTEXT_LINE: pdftotextLine(),
     SLUG: slots.slug,
-    POSTING_TEXT:
+    POSTING_BLOCK: fenceUntrusted(
+      'posting',
       slots.postingText.trim() ||
-      '(no text provided — use the screenshots below and/or WebFetch the apply URL to obtain the posting)',
+        '(no text provided — use the screenshots below and/or WebFetch the apply URL to obtain the posting)'
+    ),
     IMAGES_SECTION: imagesSection(slots.imagePaths),
     APPLY_URL: slots.applyUrl ?? 'not provided (note "apply on company site" in the answers file)',
     COMPANY_HINT: slots.companyHint || 'derive from the posting',
