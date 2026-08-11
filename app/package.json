@@ -2,6 +2,11 @@
   "name": "ohmo",
   "private": true,
   "version": "2.0.0-dev",
+  "description": "A local-first desktop app that scouts job postings, tailors an ATS-safe resume and cover letter per posting, tracks applications, and preps interviews - driven by AI agents running on your own machine.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.6.0"
+  },
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {

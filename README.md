@@ -96,7 +96,7 @@ Key design decisions:
 ## Requirements
 
 - **[Claude Code](https://claude.com/claude-code)** installed and logged in — agent runs execute under your Claude subscription via the Agent SDK; the app shows token/context usage, and nothing is billed per-run beyond your plan. The CLI is still required when the model provider is Gemini or Ollama — it runs the agent loop either way; only the model calls are redirected.
-- **Node.js 20+ and npm** (to run the app in development).
+- **Node.js 22.6+ and npm.** There is no packaged installer yet — you run the app from source (`npm run dev`), so Node is required to use it, not only to develop it. The bundled self-tests execute TypeScript directly, which is why 22.6 is the floor.
 - **[bun](https://bun.sh)** — runs the job-board search CLIs. Auto-detected (including version-manager installs); Settings offers a one-click install if missing.
 - **A LaTeX engine** — [tectonic](https://tectonic-typesetting.github.io) (single binary, recommended) or any TeX distribution providing pdflatex/xelatex/lualatex. Auto-detected, with a manual path override in Settings.
 - Optional: `pdftotext` from [poppler](https://poppler.freedesktop.org/) for the ATS text-layer check (the check degrades gracefully without it).
@@ -167,4 +167,8 @@ assets/mascot/        Pip
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
+
+Bundled third-party assets keep their own licenses: the Lato fonts under
+`cover_letters/OpenFonts/fonts/` are distributed under the
+[SIL Open Font License 1.1](https://openfontlicense.org/).

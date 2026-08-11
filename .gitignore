@@ -83,16 +83,39 @@ upskill/*.md
 .agents/skills/*/.feed-cache.lock
 .agents/skills/*/.throttle
 
-# Mission-control app (app/) build output + personal data store
+# Desktop app build output
 app/out/
 app/dist/
-app-data/
 
-# Brainstorm mockups (superpowers visual companion) - never ship
-.superpowers/
+# Secrets in dotfiles — the app injects provider keys into agent subprocesses,
+# so an .env is the likeliest way a key reaches a commit.
+.env
+.env.*
+!.env.example
+
+# Workspace artifacts. A user may point the app at this checkout as their
+# workspace; these are the files it would then write here. They are personal
+# data and must never be committed.
+/profile.json
+/profile.json.bak
+/tracker.json
+/companies.json
+/board-creds.json
+/applications/
+/runs/
+/scout/
+/master/
+/templates/
+/onboarding/
+/uploads/
+/intake-images/
+/exports/
+/assistant/
+/tmp/
+
 # Internal planning artifacts (machine paths, not product)
-docs/superpowers/
 .superpowers/
+docs/superpowers/
 
 # Development docs (plans, reviews) are working material, never published
-docs/
+/docs/
