@@ -68,7 +68,7 @@ export function IdentityForm({ value: p, onChange }: SectionFormProps): JSX.Elem
         />
       </div>
       <div className="mt-2">
-        <TextField label="Current status" value={p.identity.status} onChange={(v) => identity({ status: v })} placeholder="e.g. M.S. candidate, actively looking" />
+        <TextField label="Current status" value={p.identity.status} onChange={(v) => identity({ status: v })} placeholder="e.g. employed and open to offers, or actively looking" />
       </div>
       <div className="mt-2">
         <EntryList

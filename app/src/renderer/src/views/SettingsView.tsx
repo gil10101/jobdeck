@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react'
-import { Archive, BookUser, Bot, Briefcase, Check, Cpu, FolderOpen, Mail, Palette, Workflow, X } from 'lucide-react'
-import type { AppSettings, BoardId, BoardsStatus, EmailStatus } from '@shared/types'
+import { Archive, BookUser, Bot, Briefcase, Check, Cpu, FolderOpen, Mail, Palette, Terminal, Workflow, X } from 'lucide-react'
+import type {
+  AppSettings,
+  BoardId,
+  BoardsStatus,
+  EmailStatus,
+  EnvCheck,
+  ToolName,
+  ToolStatus
+} from '@shared/types'
 import type { CustomBoard } from '@shared/profile'
 import { call } from '../api'
 import { modelOptionsWith } from '../lib/models'
@@ -41,6 +49,33 @@ function Row({
       <div className="shrink-0 pt-0.5">{children}</div>
     </div>
   )
+}
+
+/** The two external binaries the builder shells out to. */
+const TOOLS: { id: ToolName; label: string; hint: string }[] = [
+  {
+    id: 'pdflatex',
+    label: 'LaTeX engine',
+    hint: 'Compiles the résumé and cover letter. pdflatex, xelatex, lualatex and tectonic all work. Leave the box empty to auto-detect.'
+  },
+  {
+    id: 'pdftotext',
+    label: 'pdftotext',
+    hint: 'From poppler. Optional — it powers the ATS text-layer check that reads the finished PDF back. Builds skip the check when it is missing.'
+  }
+]
+
+/** One line describing what the app will actually run for a tool. */
+function toolDetail(status: ToolStatus | null): string {
+  if (!status) return 'Checking…'
+  if (status.overrideError) {
+    return status.ok
+      ? `Saved path is unusable (${status.overrideError}); falling back to ${status.path}.`
+      : `Saved path is unusable (${status.overrideError}) and nothing else was found.`
+  }
+  if (!status.ok) return 'Not found on PATH or in the usual install locations.'
+  const kind = status.kind ? ` (${status.kind})` : ''
+  return `${status.source === 'override' ? 'Manual path' : 'Detected'}: ${status.path}${kind}`
 }
 
 function Toggle({
@@ -115,6 +150,23 @@ export default function SettingsView(): JSX.Element {
   const [provTest, setProvTest] = useState<{ ok: boolean; message: string } | null>(null)
   const [provBusy, setProvBusy] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [env, setEnv] = useState<EnvCheck | null>(null)
+  // Holds the override the user is editing; empty means "auto-detect".
+  const [toolDrafts, setToolDrafts] = useState<Record<ToolName, string>>({
+    pdflatex: '',
+    pdftotext: ''
+  })
+  const [toolBusy, setToolBusy] = useState<ToolName | null>(null)
+
+  // Declared before the mount effect that calls it (hoisted): env:check is the
+  // single source for both the drafts and the detection lines.
+  function applyEnv(next: EnvCheck): void {
+    setEnv(next)
+    setToolDrafts({
+      pdflatex: next.pdflatex.override ?? '',
+      pdftotext: next.pdftotext.override ?? ''
+    })
+  }
 
   useEffect(() => {
     void call('master:getContext', undefined)
@@ -127,6 +179,7 @@ export default function SettingsView(): JSX.Element {
       })
       .catch(() => undefined)
     void call('app:info', undefined).then(setInfo).catch(() => undefined)
+    void call('env:check', undefined).then(applyEnv).catch(() => undefined)
     void call('boards:getStatus', undefined)
       .then((s) => {
         setBoards(s)
@@ -475,6 +528,34 @@ export default function SettingsView(): JSX.Element {
       toast(String(err), 'error')
     } finally {
       setExporting(false)
+    }
+  }
+
+  /** Persist an override (null clears it). Main rejects a path it cannot run. */
+  const saveToolPath = async (tool: ToolName, value: string | null): Promise<void> => {
+    setToolBusy(tool)
+    try {
+      applyEnv(await call('env:setToolPath', { tool, path: value }))
+      toast(value ? 'Path saved' : 'Override cleared — back to auto-detection', 'success')
+    } catch (err) {
+      toast(String(err), 'error')
+    } finally {
+      setToolBusy(null)
+    }
+  }
+
+  const browseToolPath = async (tool: ToolName): Promise<void> => {
+    try {
+      const picked = await call('app:pickFile', {
+        // Windows binaries need the filter; POSIX executables have no extension.
+        filters:
+          env?.platform === 'win32'
+            ? [{ name: 'Programs', extensions: ['exe', 'bat', 'cmd'] }]
+            : undefined
+      })
+      if (picked.path) await saveToolPath(tool, picked.path)
+    } catch (err) {
+      toast(String(err), 'error')
     }
   }
 
@@ -1316,6 +1397,61 @@ export default function SettingsView(): JSX.Element {
               </li>
             </ol>
           </div>
+        </div>
+
+        {/* Detection is automatic (PATH, then the usual install locations); these
+            rows exist for the installs it cannot see — a GUI launch inherits a
+            minimal PATH, and portable TeX distributions live anywhere. */}
+        <div className="panel mt-4 px-4 py-1">
+          <div className="flex items-center gap-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
+            <Terminal size={11} aria-hidden="true" /> Document tools
+          </div>
+          {TOOLS.map((tool) => {
+            const status = env ? env[tool.id] : null
+            return (
+              <Row key={tool.id} label={tool.label} hint={`${tool.hint} ${toolDetail(status)}`}>
+                <div className="flex items-center gap-1.5">
+                  <span
+                    aria-hidden="true"
+                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                      !status ? 'bg-gray-500' : status.ok ? 'bg-green-300' : 'bg-red-400'
+                    }`}
+                  />
+                  <input
+                    className="input w-56 font-mono text-[10px]"
+                    placeholder={status?.path ?? 'auto-detect'}
+                    value={toolDrafts[tool.id]}
+                    onChange={(e) =>
+                      setToolDrafts((d) => ({ ...d, [tool.id]: e.target.value }))
+                    }
+                  />
+                  <button
+                    className="btn px-2 py-1 text-[10px]"
+                    disabled={toolBusy === tool.id}
+                    onClick={() => void browseToolPath(tool.id)}
+                  >
+                    Browse…
+                  </button>
+                  <button
+                    className="btn px-2 py-1 text-[10px]"
+                    disabled={toolBusy === tool.id || !toolDrafts[tool.id].trim()}
+                    onClick={() => void saveToolPath(tool.id, toolDrafts[tool.id])}
+                  >
+                    Save
+                  </button>
+                  {status?.override && (
+                    <button
+                      className="btn px-2 py-1 text-[10px]"
+                      disabled={toolBusy === tool.id}
+                      onClick={() => void saveToolPath(tool.id, null)}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </Row>
+            )
+          })}
         </div>
 
         <div className="panel mt-4 px-4 py-1">

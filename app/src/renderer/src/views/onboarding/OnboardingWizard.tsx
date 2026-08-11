@@ -1,5 +1,14 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeft, ArrowRight, Check, FolderDown, Upload } from 'lucide-react'
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  ExternalLink,
+  FolderDown,
+  RefreshCw,
+  Upload
+} from 'lucide-react'
 import type { ProfileFile } from '@shared/profile'
 import type { RunMeta } from '@shared/types'
 import { call, onPush } from '../../api'
@@ -8,6 +17,85 @@ import ProfileEditor from '../../components/profile/ProfileEditor'
 import GapAnswers from '../../components/profile/GapAnswers'
 
 type Step = 'workspace' | 'sources' | 'extract' | 'review' | 'done'
+
+/** One host prerequisite as reported by env:check. */
+interface PrereqTool {
+  id: string
+  label: string
+  ok: boolean
+  /** false = only the feature named in `remedy` is lost. */
+  required: boolean
+  detail: string
+  remedy: string
+  url: string
+}
+
+/** The slice of env:check this view reads. `tools` is optional because the
+ *  shared IPC contract types only the tool-detection fields Settings needs;
+ *  coreIpc's handler always sends it. */
+interface PreflightEnv {
+  platform: string
+  tools?: PrereqTool[]
+}
+
+/** IPC rejections arrive as Error — show the message, not "Error: message". */
+function errText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+/** What is missing on this host and how to fix it. Advisory only: setup never
+ *  blocks on it, because a check can be wrong and the user may know better. */
+function PrereqPanel({
+  tools,
+  checking,
+  onRecheck
+}: {
+  tools: PrereqTool[]
+  checking: boolean
+  onRecheck: () => void
+}): JSX.Element | null {
+  if (!tools.length) return null
+  const missing = tools.filter((t) => !t.ok)
+  if (!missing.length) {
+    return (
+      <p className="mt-4 text-[11px] text-green-300">
+        <Check size={11} className="mr-1 inline" />
+        Claude Code, a LaTeX engine and bun were all found on this machine.
+      </p>
+    )
+  }
+  return (
+    <div className="mt-4 rounded-md border border-amber-700 bg-amber-950/30 p-3">
+      <div className="flex items-center gap-2 text-[11px] font-medium text-amber-300">
+        <AlertTriangle size={12} className="shrink-0" />
+        {missing.length} prerequisite{missing.length === 1 ? '' : 's'} not found
+        <button className="btn ml-auto py-0.5 text-[10px]" disabled={checking} onClick={onRecheck}>
+          <RefreshCw size={10} /> {checking ? 'Checking…' : 'Re-check'}
+        </button>
+      </div>
+      <ul className="mt-2 flex flex-col gap-2">
+        {missing.map((t) => (
+          <li key={t.id} className="text-[11px] leading-relaxed">
+            <span className="text-amber-200">{t.label}</span>
+            {!t.required && <span className="ml-1 text-[10px] text-gray-500">(optional)</span>}
+            <span className="text-gray-500"> — {t.detail}</span>
+            <div className="text-gray-400">{t.remedy}</div>
+            <button
+              className="text-cyan-300 hover:underline"
+              onClick={() => void call('app:openExternal', { url: t.url })}
+            >
+              {t.url} <ExternalLink size={9} className="inline" />
+            </button>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 text-[10px] leading-relaxed text-gray-500">
+        You can continue anyway. Extraction runs the Claude Code agent, so it will fail while a
+        required item above is unresolved.
+      </p>
+    </div>
+  )
+}
 
 /**
  * First-run setup: workspace → feed the agent everything → extracted profile
@@ -26,6 +114,29 @@ export default function OnboardingWizard(): JSX.Element {
   const [gapAnswers, setGapAnswers] = useState<Record<string, string>>({})
   const [runPurpose, setRunPurpose] = useState<'extract' | 'refine'>('extract')
   const [importRestart, setImportRestart] = useState(false)
+  // null until the first check answers; [] when the check itself failed.
+  const [prereqs, setPrereqs] = useState<PrereqTool[] | null>(null)
+  const [checking, setChecking] = useState(false)
+
+  // ---- host prerequisites ----
+  // Runs before the user can start an agent run, so a missing Claude Code
+  // runtime, LaTeX engine or bun shows as guidance instead of a raw SDK error.
+  const checkPrereqs = async (): Promise<void> => {
+    setChecking(true)
+    try {
+      const env: PreflightEnv = await call('env:check', undefined)
+      setPrereqs(env.tools ?? [])
+    } catch (err) {
+      console.error('[onboarding] prerequisite check failed:', err)
+      setPrereqs([])
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  useEffect(() => {
+    void checkPrereqs()
+  }, [])
 
   // ---- extract/refine run watcher ----
   useEffect(() => {
@@ -68,7 +179,7 @@ export default function OnboardingWizard(): JSX.Element {
       await useApp.getState().refreshConfig()
       setStep('sources')
     } catch (err) {
-      toast(String(err), 'error')
+      toast(errText(err), 'error')
     } finally {
       setBusy(false)
     }
@@ -98,7 +209,7 @@ export default function OnboardingWizard(): JSX.Element {
       }
       setStep('sources')
     } catch (err) {
-      toast(String(err), 'error')
+      toast(errText(err), 'error')
     } finally {
       setBusy(false)
     }
@@ -113,7 +224,7 @@ export default function OnboardingWizard(): JSX.Element {
         toast(`${added} file${added === 1 ? '' : 's'} added to your library`, 'success')
       }
     } catch (err) {
-      toast(String(err), 'error')
+      toast(errText(err), 'error')
     }
   }
 
@@ -130,7 +241,7 @@ export default function OnboardingWizard(): JSX.Element {
       setStep('extract')
       void useApp.getState().refreshRuns()
     } catch (err) {
-      toast(String(err), 'error')
+      toast(errText(err), 'error')
     } finally {
       setBusy(false)
     }
@@ -152,7 +263,7 @@ export default function OnboardingWizard(): JSX.Element {
       setStep('extract')
       void useApp.getState().refreshRuns()
     } catch (err) {
-      toast(String(err), 'error')
+      toast(errText(err), 'error')
     } finally {
       setBusy(false)
     }
@@ -166,7 +277,7 @@ export default function OnboardingWizard(): JSX.Element {
       toast(`Profile saved: ${saved.identity.fullName}`, 'success')
       setStep('done')
     } catch (err) {
-      toast(String(err), 'error')
+      toast(errText(err), 'error')
     } finally {
       setBusy(false)
     }
@@ -208,9 +319,20 @@ export default function OnboardingWizard(): JSX.Element {
 
         {step === 'workspace' && (
           <div className="mt-6">
+            {config?.configError && (
+              <div className="mb-4 rounded-md border border-red-900 bg-panel2 p-3 text-[11px] leading-relaxed text-red-400">
+                <AlertTriangle size={12} className="mr-1 inline" />
+                Your saved settings could not be read, so this may not be a first run: {config.configError}
+                <div className="mt-1 text-gray-400">
+                  If you already have a workspace, quit and repair that file first — setting up a new
+                  one moves the unreadable copy aside and points the app at the new folder.
+                </div>
+              </div>
+            )}
             <p className="text-xs leading-relaxed text-gray-400">
               Everything — tracker, tailored documents, agent runs, your library — lives inside one
-              workspace folder you choose.
+              workspace folder you choose. Pick a folder outside this app&apos;s source checkout: it
+              will hold your profile and run transcripts.
             </p>
             <div className="mt-5 flex flex-col gap-2">
               <button
@@ -266,6 +388,9 @@ export default function OnboardingWizard(): JSX.Element {
               value={pasteText}
               onChange={(e) => setPasteText(e.target.value)}
             />
+            {prereqs && (
+              <PrereqPanel tools={prereqs} checking={checking} onRecheck={() => void checkPrereqs()} />
+            )}
             <div className="mt-4 flex items-center gap-2">
               <button
                 className="btn btn-primary"

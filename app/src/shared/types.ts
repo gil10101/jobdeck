@@ -530,3 +530,32 @@ export interface LibraryCategory {
 }
 
 export type IpcResult<T> = { ok: true; data: T } | { ok: false; error: string }
+
+/** External LaTeX engines the builder knows how to drive. */
+export type LatexKind = 'pdflatex' | 'xelatex' | 'lualatex' | 'tectonic'
+
+/** Where an external command-line tool was found on this host. */
+export type ToolName = 'pdflatex' | 'pdftotext'
+
+/**
+ * Resolution outcome for one external tool. `path` is what the app will
+ * actually run; `override` is echoed back even when unusable so Settings can
+ * show the offending value together with `overrideError`.
+ */
+export interface ToolStatus {
+  tool: ToolName
+  ok: boolean
+  path: string | null
+  source: 'override' | 'detected' | 'none'
+  override: string | null
+  overrideError: string | null
+  /** LaTeX flavour of `path`; always null for pdftotext. */
+  kind: LatexKind | null
+}
+
+export interface EnvCheck {
+  pdflatex: ToolStatus
+  pdftotext: ToolStatus
+  platform: string
+  appVersion: string
+}

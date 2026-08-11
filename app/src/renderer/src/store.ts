@@ -45,6 +45,10 @@ export interface Toast {
 export interface AppConfigInfo {
   workspacePath: string | null
   onboardedAt: string | null
+  /** Set by main when config.json exists but could not be read — a null
+   *  workspacePath then means "unknown", not "first run". Optional because the
+   *  shared IPC contract types only the two fields above. */
+  configError?: string | null
 }
 
 export interface AssistantSlice {
@@ -202,8 +206,9 @@ export const useApp = create<AppState>((set, get) => ({
   refreshConfig: async () => {
     try {
       set({ config: await call('config:get', undefined) })
-    } catch {
-      /* main not ready yet */
+    } catch (err) {
+      // main may not be ready yet; a persistent failure must still be traceable
+      console.error('[store] config:get failed:', err)
     }
   },
 
@@ -221,22 +226,23 @@ export const useApp = create<AppState>((set, get) => ({
         call('intake:listFolders', undefined)
       ])
       set({ intake, intakeFolders })
-    } catch {
-      /* ignore */
+    } catch (err) {
+      // A hydration failure leaves this slice empty; the log is the only trace.
+      console.error('[store] intake refresh failed:', err)
     }
   },
   refreshCandidates: async () => {
     try {
       set({ candidates: await call('candidates:list', undefined) })
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.error('[store] candidates:list failed:', err)
     }
   },
   refreshRuns: async () => {
     try {
       set({ runs: await call('runs:list', undefined) })
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.error('[store] runs:list failed:', err)
     }
   },
   refreshSettings: async () => {
@@ -244,23 +250,23 @@ export const useApp = create<AppState>((set, get) => ({
       const settings = await call('settings:get', undefined)
       document.documentElement.dataset.theme = settings.theme
       set({ settings })
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.error('[store] settings:get failed:', err)
     }
   },
   refreshCompanies: async () => {
     try {
       set({ companies: await call('companies:get', undefined) })
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.error('[store] companies:get failed:', err)
     }
   },
   refreshCalendarProposed: async () => {
     try {
       const events = await call('calendar:list', undefined)
       set({ calendarProposed: events.filter((e) => e.state === 'proposed').length })
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.error('[store] calendar:list failed:', err)
     }
   },
   toggleTheme: async () => {
@@ -481,8 +487,8 @@ export const useApp = create<AppState>((set, get) => ({
     try {
       const history = await call('assistant:listConversations', undefined)
       set((s) => ({ assistant: { ...s.assistant, history } }))
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.error('[store] assistant:listConversations failed:', err)
     }
   }
 }))

@@ -18,6 +18,7 @@ import type {
   EmailInvite,
   EmailMessage,
   EmailStatus,
+  EnvCheck,
   IntakeFolder,
   IntakeItem,
   LibraryCategory,
@@ -25,6 +26,7 @@ import type {
   RunMeta,
   ScanResult,
   ScoutHistoryEntry,
+  ToolName,
   TrackerRow
 } from './types'
 import type { CustomBoard, ProfileFile, ProfileModuleName } from './profile'
@@ -170,11 +172,18 @@ export interface IpcInvokeContract {
   /** Live round-trip against the active provider's backend. */
   'provider:test': { req: void; res: { ok: boolean; message: string } }
   'app:info': { req: void; res: { repoRoot: string; appDataDir: string } }
-  'config:get': { req: void; res: { workspacePath: string | null; onboardedAt: string | null } }
-  'env:check': {
+  /** workspacePath is reported null when the configured workspace failed to
+   *  boot — no workspace IPC exists in that session, so the renderer must show
+   *  first-run recovery rather than an app wired to dead channels. */
+  'config:get': {
     req: void
-    res: { pdflatex: { ok: boolean; path: string }; platform: string; appVersion: string }
+    res: { workspacePath: string | null; onboardedAt: string | null; bootError: string | null }
   }
+  /** External-tool detection (LaTeX engine + pdftotext) for the Settings rows. */
+  'env:check': { req: void; res: EnvCheck }
+  /** Persist a manual tool path. Empty/null clears the override and falls back
+   *  to detection; a path the app cannot execute is rejected with an error. */
+  'env:setToolPath': { req: { tool: ToolName; path: string | null }; res: EnvCheck }
   'workspace:choose': { req: { title?: string }; res: { path: string | null } }
   'workspace:create': { req: { dir: string }; res: { workspacePath: string } }
   /** Zip the whole workspace (denylist-scanned, hashed manifest) to a user-chosen file. */
@@ -427,6 +436,7 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'app:info',
   'config:get',
   'env:check',
+  'env:setToolPath',
   'workspace:choose',
   'workspace:create',
   'workspace:export',

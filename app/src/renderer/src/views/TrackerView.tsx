@@ -232,7 +232,7 @@ export default function TrackerView(): JSX.Element {
               <tr>
                 <td colSpan={columns.length} className="px-4 py-16 text-center text-gray-500">
                   {rows.length === 0
-                    ? 'No applications yet. Click "Import xlsx" to migrate applications.xlsx, or "Rescan folders" to discover application folders on disk.'
+                    ? 'No applications yet. Click "Import xlsx" to bring in a spreadsheet you already track applications in, or "Rescan folders" to discover application folders on disk.'
                     : 'Nothing matches the current filter.'}
                 </td>
               </tr>
@@ -253,7 +253,7 @@ export default function TrackerView(): JSX.Element {
 
       <ConfirmDialog
         open={confirmImport}
-        title="Import from applications.xlsx"
+        title="Import from a spreadsheet"
         body="Merge keeps existing app rows and only adds/fills from the xlsx. Replace wipes the app tracker first and re-imports everything (folders are re-bound automatically). The xlsx file itself is never modified."
         confirmLabel="Merge import"
         onConfirm={() => void doImport('merge')}

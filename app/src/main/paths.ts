@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import type { LatexKind, ToolName, ToolStatus } from '@shared/types'
 import { loadConfig } from './appConfig'
 
 /**
@@ -91,7 +92,7 @@ function assertReady(): void {
   }
 }
 
-export type LatexKind = 'pdflatex' | 'xelatex' | 'lualatex' | 'tectonic'
+export type { LatexKind }
 export interface LatexEngine {
   path: string
   kind: LatexKind
@@ -105,31 +106,187 @@ function inferLatexKind(p: string): LatexKind {
   return 'pdflatex'
 }
 
-// Common install locations, best-first: real pdflatex, then tectonic (a common
-// single-binary engine on macOS/Homebrew), then xe/lua, then the Windows
-// TinyTeX path. A config override (Settings) wins over all of these.
-const LATEX_CANDIDATES: LatexEngine[] = [
-  { path: '/Library/TeX/texbin/pdflatex', kind: 'pdflatex' },
-  { path: '/usr/local/bin/pdflatex', kind: 'pdflatex' },
-  { path: '/opt/homebrew/bin/pdflatex', kind: 'pdflatex' },
-  { path: '/usr/bin/pdflatex', kind: 'pdflatex' },
-  { path: '/opt/homebrew/bin/tectonic', kind: 'tectonic' },
-  { path: '/usr/local/bin/tectonic', kind: 'tectonic' },
-  { path: '/usr/bin/tectonic', kind: 'tectonic' },
-  { path: '/Library/TeX/texbin/xelatex', kind: 'xelatex' },
-  { path: '/Library/TeX/texbin/lualatex', kind: 'lualatex' },
-  { path: path.join(process.env.APPDATA ?? '', 'TinyTeX', 'bin', 'windows', 'pdflatex.exe'), kind: 'pdflatex' }
-]
+/** True only for a real file this process is allowed to execute. Windows has
+ *  no execute bit, so there the file existing is the whole test. */
+export function isExecutableFile(p: string): boolean {
+  try {
+    if (!fs.statSync(p).isFile()) return false
+    if (process.platform === 'win32') return true
+    fs.accessSync(p, fs.constants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
 
-/** Resolve an available LaTeX engine on this host: config override → known
- *  install locations. Returns null when none is installed. */
-export function resolveLatex(): LatexEngine | null {
-  const override = loadConfig().pdflatexPath
-  if (override && fs.existsSync(override)) return { path: override, kind: inferLatexKind(override) }
-  for (const c of LATEX_CANDIDATES) {
-    if (c.path && fs.existsSync(c.path)) return c
+/** Filenames a bare command can have on disk: win32 expands PATHEXT (nothing
+ *  is executable there without an extension), POSIX uses the name verbatim. */
+function commandFileNames(command: string): string[] {
+  if (process.platform !== 'win32' || path.extname(command)) return [command]
+  const exts = (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD')
+    .split(';')
+    .map((e) => e.trim())
+    .filter(Boolean)
+  return exts.map((e) => command + e.toLowerCase())
+}
+
+/** First executable named `command` on PATH, else null. A filesystem scan, not
+ *  a spawn, so it costs nothing when the tool is absent and cannot hang. */
+export function lookupOnPath(command: string): string | null {
+  const dirs = (process.env.PATH ?? '').split(path.delimiter)
+  const names = commandFileNames(command)
+  for (const raw of dirs) {
+    const dir = raw.trim().replace(/^"|"$/g, '')
+    if (!dir) continue
+    for (const name of names) {
+      const full = path.join(dir, name)
+      if (isExecutableFile(full)) return full
+    }
   }
   return null
+}
+
+/** TeX Live installs under an unknown year and architecture
+ *  (…/texlive/<year>/bin/<arch>), so the tree is enumerated, never guessed. */
+function texliveBinDirs(): string[] {
+  const roots =
+    process.platform === 'win32' ? ['C:\\texlive'] : ['/usr/local/texlive', '/opt/texlive']
+  const out: string[] = []
+  for (const root of roots) {
+    let years: string[] = []
+    try {
+      years = fs.readdirSync(root)
+    } catch {
+      continue
+    }
+    for (const year of years) {
+      const bin = path.join(root, year, 'bin')
+      try {
+        for (const arch of fs.readdirSync(bin)) out.push(path.join(bin, arch))
+      } catch {
+        /* not a TeX Live year directory */
+      }
+    }
+  }
+  return out
+}
+
+/** Searched only after PATH misses: a GUI-launched app inherits a minimal PATH
+ *  (macOS gives it /usr/bin:/bin:/usr/sbin:/sbin), which omits every TeX and
+ *  poppler install. Order is best-first within each platform. */
+function toolFallbackDirs(): string[] {
+  const home = os.homedir()
+  const dirs = [
+    '/Library/TeX/texbin', // MacTeX / BasicTeX symlink farm
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+    '/usr/bin',
+    '/bin',
+    '/opt/local/bin', // MacPorts
+    '/snap/bin',
+    path.join(home, '.local', 'bin'),
+    path.join(home, '.cargo', 'bin'), // tectonic installed with cargo
+    path.join(home, 'bin')
+  ]
+  if (process.platform === 'win32') {
+    const windowsRoots: [string, string[]][] = [
+      ['APPDATA', ['TinyTeX', 'bin', 'windows']],
+      ['LOCALAPPDATA', ['Programs', 'MiKTeX', 'miktex', 'bin', 'x64']],
+      ['ProgramFiles', ['MiKTeX', 'miktex', 'bin', 'x64']],
+      ['ProgramFiles', ['poppler', 'Library', 'bin']],
+      ['ProgramFiles', ['poppler', 'bin']]
+    ]
+    for (const [envVar, tail] of windowsRoots) {
+      const base = process.env[envVar]
+      if (base) dirs.push(path.join(base, ...tail))
+    }
+  }
+  return [...dirs, ...texliveBinDirs()]
+}
+
+/** Locate `command` in the well-known install dirs, honouring the win32
+ *  executable suffix. */
+function findInFallbackDirs(command: string): string | null {
+  const exe = process.platform === 'win32' ? '.exe' : ''
+  for (const dir of toolFallbackDirs()) {
+    const full = path.join(dir, command + exe)
+    if (isExecutableFile(full)) return full
+  }
+  return null
+}
+
+// Engine preference: real pdflatex, then tectonic (a common single-binary
+// engine), then the Unicode engines. A Settings override beats all of them.
+const LATEX_ENGINES: LatexKind[] = ['pdflatex', 'tectonic', 'xelatex', 'lualatex']
+
+/** Resolve a LaTeX engine on this host: Settings override → PATH → well-known
+ *  install locations. Returns null when nothing runnable exists. */
+export function resolveLatex(): LatexEngine | null {
+  const override = loadConfig().pdflatexPath
+  if (override && isExecutableFile(override)) {
+    return { path: override, kind: inferLatexKind(override) }
+  }
+  for (const kind of LATEX_ENGINES) {
+    const hit = lookupOnPath(kind)
+    if (hit) return { path: hit, kind }
+  }
+  for (const kind of LATEX_ENGINES) {
+    const hit = findInFallbackDirs(kind)
+    if (hit) return { path: hit, kind }
+  }
+  return null
+}
+
+/** Resolve poppler's `pdftotext` (the ATS text-layer check): Settings override
+ *  → PATH → well-known install locations. Null when it is not installed. */
+export function resolvePdftotext(): string | null {
+  const override = loadConfig().pdftotextPath
+  if (override && isExecutableFile(override)) return override
+  return lookupOnPath('pdftotext') ?? findInFallbackDirs('pdftotext')
+}
+
+/** Why a configured override cannot be used, or null when it is fine. */
+function overrideProblem(p: string | null): string | null {
+  if (!p) return null
+  if (!fs.existsSync(p)) return 'file not found'
+  if (!isExecutableFile(p)) return 'not an executable file'
+  return null
+}
+
+/** Detection report for the Settings rows and env:check. */
+export function toolStatus(tool: ToolName): ToolStatus {
+  const config = loadConfig()
+  const override = tool === 'pdflatex' ? config.pdflatexPath : config.pdftotextPath
+  const overrideError = overrideProblem(override)
+  const engine = tool === 'pdflatex' ? resolveLatex() : null
+  const resolved = tool === 'pdflatex' ? (engine?.path ?? null) : resolvePdftotext()
+  return {
+    tool,
+    ok: !!resolved,
+    path: resolved,
+    source: !resolved ? 'none' : override && !overrideError ? 'override' : 'detected',
+    override,
+    overrideError,
+    kind: engine?.kind ?? null
+  }
+}
+
+/**
+ * Turn user input from the Settings row into a storable override.
+ * Blank clears the override; a bare command is looked up on PATH; anything the
+ * app could not execute is rejected loudly rather than silently ignored later.
+ */
+export function normalizeToolOverride(input: string | null): string | null {
+  const trimmed = (input ?? '').trim().replace(/^"|"$/g, '')
+  if (!trimmed) return null
+  if (!path.isAbsolute(trimmed)) {
+    const hit = lookupOnPath(trimmed)
+    if (!hit) throw new Error(`${trimmed}: not an absolute path and not found on PATH`)
+    return hit
+  }
+  const problem = overrideProblem(trimmed)
+  if (problem) throw new Error(`${trimmed}: ${problem}`)
+  return trimmed
 }
 
 /** Resolve the `bun` runtime (runs the job-board search CLIs): the standard

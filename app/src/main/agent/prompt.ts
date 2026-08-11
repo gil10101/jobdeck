@@ -2,9 +2,18 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { ProfileFile } from '@shared/profile'
 import { emptyProfile } from '@shared/profile'
-import { APP_DIR, MASTER_DIR, REPO_ROOT, resolveBun, resolveLatex, toAbs, todayISO, todayMMDD } from '../paths'
+import {
+  APP_DIR,
+  MASTER_DIR,
+  REPO_ROOT,
+  resolveBun,
+  resolveLatex,
+  resolvePdftotext,
+  toAbs,
+  todayISO,
+  todayMMDD
+} from '../paths'
 import { boardsAvailabilityNote } from '../boards/boardsBridge'
-import { loadConfig } from '../appConfig'
 import { pickExampleFolder } from '../fsops/FolderScanner'
 import {
   renderAnswersInfoMd,
@@ -124,8 +133,8 @@ function exampleFolderLine(): string {
 }
 
 function pdftotextLine(): string {
-  const configured = loadConfig().pdftotextPath
-  if (configured && fs.existsSync(configured)) {
+  const configured = resolvePdftotext()
+  if (configured) {
     return `Run \`"${configured}" -layout <resume pdf> -\` and verify: name/email/phone extract as literal text, no ligature garbage (e.g. "eciency"), top posting keywords present in the text layer. Record the outcome in report.json atsCheck.`
   }
   return 'pdftotext is not available on this machine — set `"atsCheck": "skipped"` in report.json (do not fail the build over this).'

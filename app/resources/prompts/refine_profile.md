@@ -13,7 +13,7 @@ The candidate reviewed their profile draft and answered follow-up questions. Mer
 
 ## MERGE RULES
 - Apply ONLY what the answers state. Change nothing the answers do not cover. Never invent.
-- One answer may touch several fields (e.g. "M.S. student graduating Aug 2026, available now" → `identity.status` AND `searchConfig.availability`).
+- One answer may touch several fields (e.g. "leaving my current role in Aug 2026, available from then" → `identity.status` AND `searchConfig.availability`).
 - Preserve exact numbers, dates, and phrasing from the answers.
 - After merging, set `gaps` to `[]` — questions the candidate left unanswered are dismissed, do not carry them over.
 - Output must keep the exact schema of the draft (same keys and types, `schema`/`revision`/`updatedAt` unchanged).
