@@ -80,7 +80,7 @@ write(ws, '.agents/skills/jobright-search/.session.json', '{"sessionId":"nope"}'
 const zipPath = path.join(tmpRoot, 'export.zip')
 const manifest = buildArchive(ws, zipPath, '2.0.0-test')
 
-check('manifest schema', manifest.schema, 'jobdeck-export.v1')
+check('manifest schema', manifest.schema, 'ohmo-export.v1')
 check('manifest appVersion', manifest.appVersion, '2.0.0-test')
 check(
   'manifest lists exactly the expected files',
@@ -120,7 +120,7 @@ const futureZip = path.join(tmpRoot, 'future.zip')
 const future = new AdmZip()
 future.addFile(
   'manifest.json',
-  Buffer.from(JSON.stringify({ schema: 'jobdeck-export.v2', appVersion: 'x', createdAt: 'x', files: [] }))
+  Buffer.from(JSON.stringify({ schema: 'ohmo-export.v2', appVersion: 'x', createdAt: 'x', files: [] }))
 )
 future.writeZip(futureZip)
 checkThrows('unknown schema version rejected', () => readManifest(futureZip), 'unsupported export schema')
@@ -150,7 +150,7 @@ fs.rmSync(tmpRoot, { recursive: true, force: true })
 
 const skillsData = [{ category: 'Data', items: ['SQL', 'dbt'] }]
 const envelope = buildEnvelope('skills', 1, skillsData)
-check('envelope schema id', envelope.schema, 'jobdeck-profile-module.v1')
+check('envelope schema id', envelope.schema, 'ohmo-profile-module.v1')
 const parsedEnvelope = parseEnvelope(JSON.stringify(envelope))
 check(
   'envelope round-trips through JSON',
@@ -167,7 +167,7 @@ checkThrows(
 checkThrows('malformed JSON rejected', () => parseEnvelope('{not json'), 'not valid JSON')
 checkThrows(
   'foreign schema id rejected',
-  () => parseEnvelope(JSON.stringify({ ...envelope, schema: 'jobdeck-profile-module.v2' })),
+  () => parseEnvelope(JSON.stringify({ ...envelope, schema: 'ohmo-profile-module.v2' })),
   'unsupported profile module schema'
 )
 check(

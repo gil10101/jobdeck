@@ -14,6 +14,7 @@ import type {
   RunMeta,
   TrackerRow
 } from '@shared/types'
+import type { IpcInvokeContract } from '@shared/ipc'
 import { call, onPush } from './api'
 
 /** Normalize a company name into the key used by the main-process companies map. */
@@ -42,14 +43,9 @@ export interface Toast {
   text: string
 }
 
-export interface AppConfigInfo {
-  workspacePath: string | null
-  onboardedAt: string | null
-  /** Set by main when config.json exists but could not be read — a null
-   *  workspacePath then means "unknown", not "first run". Optional because the
-   *  shared IPC contract types only the two fields above. */
-  configError?: string | null
-}
+/** Exactly what config:get returns — aliased off the contract so a field the
+ *  handler stops sending is a compile error here, not a silent UI degradation. */
+export type AppConfigInfo = IpcInvokeContract['config:get']['res']
 
 export interface AssistantSlice {
   open: boolean

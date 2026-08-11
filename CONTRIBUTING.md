@@ -8,8 +8,9 @@ npm install
 npm run dev
 ```
 
-Requirements are listed in the [README](README.md#requirements). Node 22.6+ is
-the floor because the self-test scripts execute TypeScript directly.
+Requirements are listed in the [README](README.md#requirements). Node 22.18+ is
+the floor: the self-test scripts execute TypeScript directly, which Node runs
+without a flag from 22.18 and 23.6 onward.
 
 The app is Electron + React + TypeScript:
 

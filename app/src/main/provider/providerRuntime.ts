@@ -78,14 +78,28 @@ export function stopShim(): void {
 }
 
 /**
- * Env for spawning an agent subprocess under the active provider. Claude:
- * plain inherited env. Gemini/Ollama: the CLI is pointed at the shim with its
- * per-launch secret — the real Gemini key never reaches the subprocess.
+ * Env for spawning an agent subprocess under the active provider.
+ *
+ * Claude: the inherited env, minus ANTHROPIC_API_KEY when nothing else in the
+ * env indicates deliberate routing. The app has no in-app setting for that key,
+ * so a lone value is one the developer's shell exported for something else —
+ * forwarding it would silently bill every agent token to that key's account
+ * instead of using the Claude Code subscription login the app documents. When
+ * ANTHROPIC_BASE_URL or ANTHROPIC_AUTH_TOKEN is set the whole trio is passed
+ * through untouched: that combination is a gateway the user pointed the CLI at,
+ * and gateways commonly authenticate with the key, so stripping it would turn a
+ * working setup into an auth failure on every run.
+ *
+ * Gemini/Ollama: the CLI is pointed at the shim with its per-launch secret —
+ * the real Gemini key never reaches the subprocess.
  */
 export async function providerEnv(): Promise<Record<string, string>> {
   const base = { ...process.env } as Record<string, string>
   const config = currentProviderConfig()
-  if (config.provider === 'claude') return base
+  if (config.provider === 'claude') {
+    if (!base.ANTHROPIC_BASE_URL && !base.ANTHROPIC_AUTH_TOKEN) delete base.ANTHROPIC_API_KEY
+    return base
+  }
   if (config.provider === 'ollama') prewarmOllama(config)
   const handle = await ensureShim()
   return {

@@ -1,5 +1,4 @@
 import { app } from 'electron'
-import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -292,7 +291,9 @@ export function normalizeToolOverride(input: string | null): string | null {
 /** Resolve the `bun` runtime (runs the job-board search CLIs): the standard
  *  per-user install, common system locations, then a PATH lookup (catches
  *  version-manager installs like nvm/mise), else the bare command so execFile
- *  falls back to PATH. Never hardcodes a specific machine/user. */
+ *  falls back to PATH. Never hardcodes a specific machine/user.
+ *  Filesystem scans only — this runs on every env:check, and spawning a
+ *  which/where here would block the main process exactly when bun is absent. */
 export function resolveBun(): string {
   const home = os.homedir()
   const exe = process.platform === 'win32' ? 'bun.exe' : 'bun'
@@ -305,16 +306,7 @@ export function resolveBun(): string {
   for (const c of candidates) {
     if (fs.existsSync(c)) return c
   }
-  try {
-    const lookup = process.platform === 'win32' ? 'where' : 'which'
-    const hit = execFileSync(lookup, ['bun'], { encoding: 'utf-8', timeout: 3000 })
-      .trim()
-      .split(/\r?\n/)[0]
-    if (hit && fs.existsSync(hit)) return hit
-  } catch {
-    /* not on PATH either */
-  }
-  return 'bun'
+  return lookupOnPath('bun') ?? 'bun'
 }
 
 /** Workspace-relative path with forward slashes. */
@@ -323,10 +315,26 @@ export function toRel(absPath: string): string {
   return path.relative(REPO_ROOT, absPath).split(path.sep).join('/')
 }
 
-/** Absolute path from a workspace-relative one (either slash direction). */
+/**
+ * Absolute path from a workspace-relative one (either slash direction).
+ *
+ * Jail: the result is always the workspace root or something under it. IPC
+ * handlers reach this with renderer-supplied strings, so an absolute path, a
+ * drive-qualified one, or any '..' that climbs out is rejected rather than
+ * resolved — the same containment the local-file protocol handler enforces.
+ * Every caller passes a path produced by toRel() or built from workspace
+ * folder names, so nothing legitimate needs to escape.
+ */
 export function toAbs(relPath: string): string {
   assertReady()
-  return path.join(REPO_ROOT, ...relPath.split(/[\\/]/))
+  if (path.isAbsolute(relPath) || /^[a-zA-Z]:/.test(relPath)) {
+    throw new Error(`path must be workspace-relative: ${relPath}`)
+  }
+  const abs = path.resolve(REPO_ROOT, ...relPath.split(/[\\/]/).filter(Boolean))
+  if (abs !== REPO_ROOT && !abs.startsWith(REPO_ROOT + path.sep)) {
+    throw new Error(`path escapes the workspace: ${relPath}`)
+  }
+  return abs
 }
 
 export const DONE_PREFIX_RE = /^\[DONE\]\s*/

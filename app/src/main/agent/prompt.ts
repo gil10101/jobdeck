@@ -114,15 +114,22 @@ function imagesSection(imagePaths: string[]): string {
   ].join('\n')
 }
 
+/** The ONLY filenames read as a master résumé from the workspace master/
+ *  folder: the profile's own output stem, then the shipped starter template's
+ *  name. A file under any other name there is ignored. */
+function masterResumeNames(fileBasename: string): [string, string] {
+  return [`${fileBasename}_Resume.tex`, 'main_example.tex']
+}
+
 function masterResumePath(p: ProfileFile): string {
-  const candidates = [
-    path.join(MASTER_DIR, `${p.documents.fileBasename}_Resume.tex`),
-    path.join(MASTER_DIR, 'main_example.tex') // fallback name for a user-provided master résumé
-  ]
-  for (const c of candidates) {
-    if (fs.existsSync(c)) return `master/${path.basename(c)}`
+  const names = masterResumeNames(p.documents.fileBasename)
+  for (const name of names) {
+    if (fs.existsSync(path.join(MASTER_DIR, name))) return `master/${name}`
   }
-  return '(no master résumé yet — construct the preamble yourself: article class, ATS-safe single column, lmodern, glyphtounicode)'
+  // The accepted names are spelled out so a master résumé saved under some
+  // other name reads as a fixable mistake instead of a missing file.
+  const accepted = names.map((n) => `\`master/${n}\``).join(' or ')
+  return `(no master résumé — the only names read are ${accepted}, and a file under any other name in master/ is ignored. Construct the preamble yourself: article class, ATS-safe single column, lmodern, glyphtounicode)`
 }
 
 function exampleFolderLine(): string {
@@ -153,11 +160,11 @@ function latexLine(): string {
       '`\\input glyphtounicode` / `\\pdfgentounicode=1` MUST be wrapped in',
       '`\\ifdefined\\pdfgentounicode ... \\fi` so it is skipped under tectonic (XeTeX already',
       'embeds a real Unicode text layer).',
-      'PAGE COUNT: read it from the engine log, nowhere else —',
-      '`grep "Output written" <file>.log` prints `(N pages`/`(1 page` after every compile.',
-      'Do NOT use `mdls` (Spotlight indexes new files asynchronously, so it returns null or',
-      'stale counts) and do NOT grep the PDF bytes for `/Type /Page` or `/Count` (tectonic',
-      'writes compressed object streams, so both find nothing).'
+      'PAGE COUNT: take it from the engine log `<file>.log`, nowhere else — Read that file and',
+      'find its `Output written on <file>.pdf (N pages, ...)` line, written after every compile.',
+      'Do NOT ask the operating system for PDF metadata (file-indexing services answer with stale',
+      'or empty values for a file written seconds ago) and do NOT search the PDF bytes for',
+      '`/Type /Page` or `/Count` (tectonic writes compressed object streams, so both find nothing).'
     ].join(' ')
   }
   return `Compile with ${eng.kind}: \`"${eng.path}" -interaction=nonstopmode <file.tex>\` run TWICE per document (hyperref). Confirm the log says \`(1 page\`.`

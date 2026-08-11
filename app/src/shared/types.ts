@@ -553,9 +553,31 @@ export interface ToolStatus {
   kind: LatexKind | null
 }
 
+/** One host prerequisite, as shown by the onboarding preflight. */
+export interface PrereqTool {
+  id: 'claude' | 'claudeAuth' | 'latex' | 'bun'
+  label: string
+  ok: boolean
+  /** false = the app still runs; only the feature named in `remedy` is lost. */
+  required: boolean
+  /** What was (not) found on this host. */
+  detail: string
+  /** One line the user can act on. */
+  remedy: string
+  url: string
+}
+
+/** Detection of the two external tools Settings can override. */
 export interface EnvCheck {
   pdflatex: ToolStatus
   pdftotext: ToolStatus
   platform: string
   appVersion: string
+}
+
+/** env:check's full response: the tool rows above plus every host prerequisite,
+ *  worst-first, for the onboarding preflight. env:setToolPath returns the
+ *  EnvCheck half alone — it re-detects the two tools, not the whole host. */
+export interface EnvPreflight extends EnvCheck {
+  tools: PrereqTool[]
 }

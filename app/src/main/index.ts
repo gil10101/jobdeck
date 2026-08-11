@@ -22,28 +22,6 @@ if (!app.isPackaged) {
   app.setPath('userData', path.join(app.getPath('appData'), 'OhmoDev'))
 }
 
-// Single instance: a second launch focuses the existing window instead.
-if (!app.requestSingleInstanceLock()) {
-  app.quit()
-}
-app.on('second-instance', () => {
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore()
-    mainWindow.focus()
-  }
-})
-
-// Electron ships no FedCM browser UI, but the API surface feature-detects as
-// present under our plain-Chrome UA — Google's "Continue as …" sign-in chips
-// then take the FedCM path and stall silently on click. Disabling the feature
-// makes Google Identity Services fall back to its popup flow, which the
-// sandboxed-popup handler in window.ts supports. Must run before ready.
-app.commandLine.appendSwitch('disable-features', 'FedCm,FedCmIdpSigninStatus')
-
-// Must run before app.whenReady().
-registerLocalFileScheme()
-installWebviewHardening()
-
 let mainWindow: BrowserWindow | null = null
 let store: Store | null = null
 let runner: AgentRunner | null = null
@@ -126,81 +104,114 @@ function bootWorkspace(workspacePath: string): void {
   send('push:storeChanged', { domains: ['rows', 'intake', 'candidates', 'settings'] })
 }
 
-app.whenReady().then(() => {
-  installLocalFileHandler()
-
-  registerCoreIpc({
-    getWindow: () => mainWindow,
-    completeSetup: (workspacePath) => bootWorkspace(workspacePath),
-    bootError: () => bootError
-  })
-
-  const config = loadConfig()
-  if (config.workspacePath && fs.existsSync(config.workspacePath)) {
-    // A failed boot must never cost the user their window: the app still opens
-    // (on first-run recovery, since config:get then reports no workspace) and
-    // the lifecycle handlers below are still registered.
-    try {
-      bootWorkspace(config.workspacePath)
-    } catch (err) {
-      bootError = err instanceof Error ? err.message : String(err)
-      console.error('[boot] workspace failed to start:', bootError)
-    }
-  } else if (config.workspacePath) {
-    // A configured folder that is gone (moved, deleted, unmounted, config
-    // copied from another machine) must set bootError too: without it config:get
-    // still reports the stale path and the renderer skips first-run recovery
-    // into a UI whose workspace channels were never registered.
-    bootError = `The workspace folder ${config.workspacePath} no longer exists.`
-    console.error('[boot] workspace missing:', bootError)
-  }
-
-  // Registered before the first window exists: macOS keeps the app alive with
-  // no windows, and this handler is the only way back to one.
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      mainWindow = createMainWindow(store?.state.settings.theme)
+/** Everything this process registers with Electron. Runs only in the instance
+ *  that owns the single-instance lock. */
+function start(): void {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.focus()
     }
   })
 
-  const theme = store?.state.settings.theme ?? 'dark'
-  mainWindow = createMainWindow(theme)
-  mainWindow.on('closed', () => {
-    mainWindow = null
-  })
-  mainWindow.on('focus', () => todo?.rescan())
+  // Electron ships no FedCM browser UI, but the API surface feature-detects as
+  // present under our plain-Chrome UA — Google's "Continue as …" sign-in chips
+  // then take the FedCM path and stall silently on click. Disabling the feature
+  // makes Google Identity Services fall back to its popup flow, which the
+  // sandboxed-popup handler in window.ts supports. Must run before ready.
+  app.commandLine.appendSwitch('disable-features', 'FedCm,FedCmIdpSigninStatus')
 
-  if (bootError) {
-    void dialog.showMessageBox(mainWindow, {
-      type: 'error',
-      title: 'Workspace could not be opened',
-      message: `The workspace at ${config.workspacePath} could not be opened.`,
-      detail: `${bootError}\n\nThe app has started without it. Check that the folder exists and is writable, then pick it again in setup.`,
-      buttons: ['OK']
+  // Must run before app.whenReady().
+  registerLocalFileScheme()
+  installWebviewHardening()
+
+  app.whenReady().then(() => {
+    installLocalFileHandler()
+
+    registerCoreIpc({
+      getWindow: () => mainWindow,
+      completeSetup: (workspacePath) => bootWorkspace(workspacePath),
+      bootError: () => bootError,
+      workspaceBooted: () => workspaceBooted
     })
-  }
-}).catch((err: unknown) => {
-  // Last resort: startup failed outside bootWorkspace (window creation, scheme
-  // handler). Without this the promise rejects silently and the app sits in the
-  // dock with no window and no explanation.
-  const message = err instanceof Error ? err.message : String(err)
-  console.error('[boot] startup failed:', message)
-  dialog.showErrorBox('The app could not start', message)
-  app.quit()
-})
 
-app.on('window-all-closed', () => {
-  app.quit()
-})
+    const config = loadConfig()
+    if (config.workspacePath && fs.existsSync(config.workspacePath)) {
+      // A failed boot must never cost the user their window: the app still opens
+      // (on first-run recovery, since config:get then reports no workspace) and
+      // the lifecycle handlers below are still registered.
+      try {
+        bootWorkspace(config.workspacePath)
+      } catch (err) {
+        bootError = err instanceof Error ? err.message : String(err)
+        console.error('[boot] workspace failed to start:', bootError)
+      }
+    } else if (config.workspacePath) {
+      // A configured folder that is gone (moved, deleted, unmounted, config
+      // copied from another machine) must set bootError too: without it config:get
+      // still reports the stale path and the renderer skips first-run recovery
+      // into a UI whose workspace channels were never registered.
+      bootError = `The workspace folder ${config.workspacePath} no longer exists.`
+      console.error('[boot] workspace missing:', bootError)
+    }
 
-let quitting = false
-app.on('before-quit', (event) => {
-  if (quitting) return
-  quitting = true
-  event.preventDefault()
-  runner?.abortAll('app quit')
-  stopShim()
-  void (store?.flush() ?? Promise.resolve()).finally(() => {
+    // Registered before the first window exists: macOS keeps the app alive with
+    // no windows, and this handler is the only way back to one.
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        mainWindow = createMainWindow(store?.state.settings.theme)
+      }
+    })
+
+    const theme = store?.state.settings.theme ?? 'dark'
+    mainWindow = createMainWindow(theme)
+    mainWindow.on('closed', () => {
+      mainWindow = null
+    })
+    mainWindow.on('focus', () => todo?.rescan())
+
+    if (bootError) {
+      void dialog.showMessageBox(mainWindow, {
+        type: 'error',
+        title: 'Workspace could not be opened',
+        message: `The workspace at ${config.workspacePath} could not be opened.`,
+        detail: `${bootError}\n\nThe app has started without it. Check that the folder exists and is writable, then pick it again in setup.`,
+        buttons: ['OK']
+      })
+    }
+  }).catch((err: unknown) => {
+    // Last resort: startup failed outside bootWorkspace (window creation, scheme
+    // handler). Without this the promise rejects silently and the app sits in the
+    // dock with no window and no explanation.
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('[boot] startup failed:', message)
+    dialog.showErrorBox('The app could not start', message)
     app.quit()
   })
-})
+
+  app.on('window-all-closed', () => {
+    app.quit()
+  })
+
+  let quitting = false
+  app.on('before-quit', (event) => {
+    if (quitting) return
+    quitting = true
+    event.preventDefault()
+    runner?.abortAll('app quit')
+    stopShim()
+    void (store?.flush() ?? Promise.resolve()).finally(() => {
+      app.quit()
+    })
+  })
+}
+
+// Single instance: a second launch hands off to the running one and this
+// process registers nothing. app.quit() does not stop the module, so the
+// registrations must sit behind the lock — two processes booting the same
+// workspace would fight over its files.
+if (app.requestSingleInstanceLock()) {
+  start()
+} else {
+  app.quit()
+}

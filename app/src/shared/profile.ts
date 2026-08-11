@@ -231,7 +231,7 @@ export const PROFILE_MODULES = [
 
 export type ProfileModuleName = (typeof PROFILE_MODULES)[number]
 
-export const PROFILE_MODULE_SCHEMA_ID = 'jobdeck-profile-module.v1'
+export const PROFILE_MODULE_SCHEMA_ID = 'ohmo-profile-module.v1'
 
 /** One profile section serialized as a standalone, reviewable file. */
 export interface ProfileModuleEnvelope {

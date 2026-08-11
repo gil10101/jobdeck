@@ -19,6 +19,7 @@ import type {
   EmailMessage,
   EmailStatus,
   EnvCheck,
+  EnvPreflight,
   IntakeFolder,
   IntakeItem,
   LibraryCategory,
@@ -174,13 +175,21 @@ export interface IpcInvokeContract {
   'app:info': { req: void; res: { repoRoot: string; appDataDir: string } }
   /** workspacePath is reported null when the configured workspace failed to
    *  boot — no workspace IPC exists in that session, so the renderer must show
-   *  first-run recovery rather than an app wired to dead channels. */
+   *  first-run recovery rather than an app wired to dead channels.
+   *  configError is set when config.json exists but could not be read: a null
+   *  workspacePath then means "unknown", not "first run". */
   'config:get': {
     req: void
-    res: { workspacePath: string | null; onboardedAt: string | null; bootError: string | null }
+    res: {
+      workspacePath: string | null
+      onboardedAt: string | null
+      bootError: string | null
+      configError: string | null
+    }
   }
-  /** External-tool detection (LaTeX engine + pdftotext) for the Settings rows. */
-  'env:check': { req: void; res: EnvCheck }
+  /** External-tool detection (LaTeX engine + pdftotext) for the Settings rows,
+   *  plus the full host-prerequisite list the onboarding preflight renders. */
+  'env:check': { req: void; res: EnvPreflight }
   /** Persist a manual tool path. Empty/null clears the override and falls back
    *  to detection; a path the app cannot execute is rejected with an error. */
   'env:setToolPath': { req: { tool: ToolName; path: string | null }; res: EnvCheck }

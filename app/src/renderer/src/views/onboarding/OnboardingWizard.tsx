@@ -10,33 +10,13 @@ import {
   Upload
 } from 'lucide-react'
 import type { ProfileFile } from '@shared/profile'
-import type { RunMeta } from '@shared/types'
+import type { PrereqTool, RunMeta } from '@shared/types'
 import { call, onPush } from '../../api'
 import { useApp } from '../../store'
 import ProfileEditor from '../../components/profile/ProfileEditor'
 import GapAnswers from '../../components/profile/GapAnswers'
 
 type Step = 'workspace' | 'sources' | 'extract' | 'review' | 'done'
-
-/** One host prerequisite as reported by env:check. */
-interface PrereqTool {
-  id: string
-  label: string
-  ok: boolean
-  /** false = only the feature named in `remedy` is lost. */
-  required: boolean
-  detail: string
-  remedy: string
-  url: string
-}
-
-/** The slice of env:check this view reads. `tools` is optional because the
- *  shared IPC contract types only the tool-detection fields Settings needs;
- *  coreIpc's handler always sends it. */
-interface PreflightEnv {
-  platform: string
-  tools?: PrereqTool[]
-}
 
 /** IPC rejections arrive as Error — show the message, not "Error: message". */
 function errText(err: unknown): string {
@@ -47,14 +27,36 @@ function errText(err: unknown): string {
  *  blocks on it, because a check can be wrong and the user may know better. */
 function PrereqPanel({
   tools,
+  error,
   checking,
   onRecheck
 }: {
-  tools: PrereqTool[]
+  /** null until the first check answers — the panel stays hidden until then. */
+  tools: PrereqTool[] | null
+  /** Why the check itself could not run; null when it did. */
+  error: string | null
   checking: boolean
   onRecheck: () => void
 }): JSX.Element | null {
-  if (!tools.length) return null
+  const recheck = (
+    <button className="btn ml-auto py-0.5 text-[10px]" disabled={checking} onClick={onRecheck}>
+      <RefreshCw size={10} /> {checking ? 'Checking…' : 'Re-check'}
+    </button>
+  )
+  // A check that failed must never look like a check that passed.
+  if (error) {
+    return (
+      <div className="mt-4 rounded-md border border-amber-700 bg-amber-950/30 p-3">
+        <div className="flex items-center gap-2 text-[11px] font-medium text-amber-300">
+          <AlertTriangle size={12} className="shrink-0" />
+          Could not check prerequisites
+          {recheck}
+        </div>
+        <p className="mt-1 text-[11px] leading-relaxed text-gray-400">{error}</p>
+      </div>
+    )
+  }
+  if (!tools || !tools.length) return null
   const missing = tools.filter((t) => !t.ok)
   if (!missing.length) {
     return (
@@ -69,9 +71,7 @@ function PrereqPanel({
       <div className="flex items-center gap-2 text-[11px] font-medium text-amber-300">
         <AlertTriangle size={12} className="shrink-0" />
         {missing.length} prerequisite{missing.length === 1 ? '' : 's'} not found
-        <button className="btn ml-auto py-0.5 text-[10px]" disabled={checking} onClick={onRecheck}>
-          <RefreshCw size={10} /> {checking ? 'Checking…' : 'Re-check'}
-        </button>
+        {recheck}
       </div>
       <ul className="mt-2 flex flex-col gap-2">
         {missing.map((t) => (
@@ -99,7 +99,7 @@ function PrereqPanel({
 
 /**
  * First-run setup: workspace → feed the agent everything → extracted profile
- * → review → go. Mirrors the repo's /setup flow, in-app.
+ * → review → go. The only path that creates a workspace and a profile.
  */
 export default function OnboardingWizard(): JSX.Element {
   const config = useApp((s) => s.config)
@@ -114,8 +114,10 @@ export default function OnboardingWizard(): JSX.Element {
   const [gapAnswers, setGapAnswers] = useState<Record<string, string>>({})
   const [runPurpose, setRunPurpose] = useState<'extract' | 'refine'>('extract')
   const [importRestart, setImportRestart] = useState(false)
-  // null until the first check answers; [] when the check itself failed.
+  // null until the first check answers. A failed check keeps it null and sets
+  // prereqError instead, so "nothing missing" and "could not look" stay distinct.
   const [prereqs, setPrereqs] = useState<PrereqTool[] | null>(null)
+  const [prereqError, setPrereqError] = useState<string | null>(null)
   const [checking, setChecking] = useState(false)
 
   // ---- host prerequisites ----
@@ -124,11 +126,12 @@ export default function OnboardingWizard(): JSX.Element {
   const checkPrereqs = async (): Promise<void> => {
     setChecking(true)
     try {
-      const env: PreflightEnv = await call('env:check', undefined)
-      setPrereqs(env.tools ?? [])
+      const env = await call('env:check', undefined)
+      setPrereqs(env.tools)
+      setPrereqError(null)
     } catch (err) {
-      console.error('[onboarding] prerequisite check failed:', err)
-      setPrereqs([])
+      setPrereqs(null)
+      setPrereqError(errText(err))
     } finally {
       setChecking(false)
     }
@@ -319,6 +322,17 @@ export default function OnboardingWizard(): JSX.Element {
 
         {step === 'workspace' && (
           <div className="mt-6">
+            {config?.bootError && (
+              <div className="mb-4 rounded-md border border-red-900 bg-panel2 p-3 text-[11px] leading-relaxed text-red-400">
+                <AlertTriangle size={12} className="mr-1 inline" />
+                Your saved workspace could not be opened, so this session started without one:{' '}
+                {config.bootError}
+                <div className="mt-1 text-gray-400">
+                  Make that folder reachable and writable, then quit and reopen the app to load it —
+                  or pick a different folder below.
+                </div>
+              </div>
+            )}
             {config?.configError && (
               <div className="mb-4 rounded-md border border-red-900 bg-panel2 p-3 text-[11px] leading-relaxed text-red-400">
                 <AlertTriangle size={12} className="mr-1 inline" />
@@ -388,9 +402,12 @@ export default function OnboardingWizard(): JSX.Element {
               value={pasteText}
               onChange={(e) => setPasteText(e.target.value)}
             />
-            {prereqs && (
-              <PrereqPanel tools={prereqs} checking={checking} onRecheck={() => void checkPrereqs()} />
-            )}
+            <PrereqPanel
+              tools={prereqs}
+              error={prereqError}
+              checking={checking}
+              onRecheck={() => void checkPrereqs()}
+            />
             <div className="mt-4 flex items-center gap-2">
               <button
                 className="btn btn-primary"

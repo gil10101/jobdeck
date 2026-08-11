@@ -3,27 +3,13 @@ import fs from 'node:fs'
 import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
-import type { EnvCheck, ToolName } from '@shared/types'
+import type { EnvCheck, EnvPreflight, PrereqTool, ToolName } from '@shared/types'
 import { configError, loadConfig, saveConfig } from './appConfig'
 import { installAllBoards } from './boards/boardsBridge'
-import { normalizeToolOverride, resolveBun, resolveLatex, toolStatus, workspaceReady } from './paths'
+import { normalizeToolOverride, resolveBun, resolveLatex, toolStatus } from './paths'
 import { readManifest, verifyAndExtract } from './workspace/archive'
 
 const requireFrom = createRequire(import.meta.url)
-
-/** One host prerequisite, as shown by the onboarding preflight. */
-interface PrereqTool {
-  id: 'claude' | 'claudeAuth' | 'latex' | 'bun'
-  label: string
-  ok: boolean
-  /** false = the app still runs; only the feature named in `remedy` is lost. */
-  required: boolean
-  /** What was (not) found on this host. */
-  detail: string
-  /** One line the user can act on. */
-  remedy: string
-  url: string
-}
 
 /**
  * Path of the Claude Code binary the Agent SDK spawns, or null when no native
@@ -45,27 +31,66 @@ function claudeRuntimePath(): string | null {
   return null
 }
 
-/**
- * Best-effort evidence of a Claude Code sign-in. Credentials live in the OS
- * keychain on macOS, so absence of every signal means "unconfirmed", never
- * "definitely signed out" — the preflight wording must not claim more.
- */
-function claudeSignedIn(): boolean {
-  if (process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN) return true
-  const home = os.homedir()
-  if (fs.existsSync(path.join(home, '.claude', '.credentials.json'))) return true
+/** ~/.claude.json reaches tens of megabytes for heavy users (it accumulates
+ *  per-project history), and this runs on every preflight, so the file is
+ *  streamed rather than read whole. JSON key order follows insertion, so the
+ *  account block is NOT reliably near the front — scanning only a head would
+ *  report "signed out" to precisely the users whose file is large. */
+const SCAN_CHUNK_BYTES = 64 * 1024
+
+/** Whether `file` contains `needle`, scanned in fixed-size chunks so memory
+ *  stays bounded while coverage is not. Consecutive chunks overlap by
+ *  needle.length - 1 bytes, or a match straddling a chunk boundary would be
+ *  missed. Returns false for an unreadable or absent file. */
+async function fileContains(file: string, needle: string): Promise<boolean> {
+  const pattern = Buffer.from(needle)
+  const overlap = pattern.length - 1
+  let handle: fs.promises.FileHandle | null = null
   try {
-    return fs.readFileSync(path.join(home, '.claude.json'), 'utf-8').includes('"oauthAccount"')
+    handle = await fs.promises.open(file, 'r')
+    const buf = Buffer.alloc(SCAN_CHUNK_BYTES + overlap)
+    let carried = 0
+    let position = 0
+    for (;;) {
+      const { bytesRead } = await handle.read(buf, carried, SCAN_CHUNK_BYTES, position)
+      if (bytesRead === 0) return false
+      const filled = carried + bytesRead
+      if (buf.subarray(0, filled).includes(pattern)) return true
+      position += bytesRead
+      // Carry the tail forward so the next window can complete a split match.
+      carried = Math.min(overlap, filled)
+      buf.copy(buf, 0, filled - carried, filled)
+    }
   } catch {
     return false
+  } finally {
+    await handle?.close()
   }
+}
+
+/**
+ * Best-effort evidence of a Claude Code sign-in — the signal found, or null.
+ * Credentials live in the OS keychain on macOS, so absence of every signal
+ * means "unconfirmed", never "definitely signed out": the preflight wording
+ * must not claim more. ANTHROPIC_API_KEY on its own is deliberately NOT a
+ * signal — agent runs under the Claude provider strip a bare key (see
+ * providerRuntime.providerEnv), so it is not the credential a run would use.
+ */
+async function claudeSignInSignal(): Promise<string | null> {
+  if (process.env.ANTHROPIC_AUTH_TOKEN) return 'ANTHROPIC_AUTH_TOKEN is set in the environment'
+  const home = os.homedir()
+  const credentials = path.join(home, '.claude', '.credentials.json')
+  if (fs.existsSync(credentials)) return credentials
+  const claudeJson = path.join(home, '.claude.json')
+  if (await fileContains(claudeJson, '"oauthAccount"')) return `a signed-in account in ${claudeJson}`
+  return null
 }
 
 /** Host prerequisites, worst-first, so the onboarding preflight can show what
  *  is missing before the user triggers an agent run. */
-function checkPrereqs(): PrereqTool[] {
+async function checkPrereqs(): Promise<PrereqTool[]> {
   const runtime = claudeRuntimePath()
-  const signedIn = claudeSignedIn()
+  const signal = await claudeSignInSignal()
   const engine = resolveLatex()
   const bun = resolveBun()
   const tools: PrereqTool[] = [
@@ -81,9 +106,9 @@ function checkPrereqs(): PrereqTool[] {
     {
       id: 'claudeAuth',
       label: 'Claude Code sign-in',
-      ok: signedIn,
+      ok: !!signal,
       required: true,
-      detail: 'none found for this user (a keychain-stored login cannot be seen from here)',
+      detail: signal ?? 'none found for this user (a keychain-stored login cannot be seen from here)',
       remedy:
         'Run claude in a terminal and finish the login — or switch the model provider to Gemini/Ollama in Settings.',
       url: 'https://docs.claude.com/en/docs/claude-code/setup'
@@ -174,6 +199,10 @@ export function registerCoreIpc(deps: {
   completeSetup: (workspacePath: string) => Promise<void> | void
   /** Why the configured workspace failed to come up, else null. */
   bootError: () => string | null
+  /** True only once a boot ran to completion — live services exist and are
+   *  bound to the current root. A half-finished boot is false here even
+   *  though workspaceReady() already flipped. */
+  workspaceBooted: () => boolean
 }): void {
   function envCheck(): EnvCheck {
     return {
@@ -199,9 +228,9 @@ export function registerCoreIpc(deps: {
   handle('config:get', () => {
     const c = loadConfig()
     const failure = deps.bootError()
-    // configError is extra to the shared contract's response type: it exists so
-    // an unreadable config.json is visible in the UI instead of looking like a
-    // first run. Consumers read it as an optional field.
+    // configError is part of the config:get contract and is non-null only when
+    // config.json exists but could not be read — an unreadable config must be
+    // visible in the UI instead of looking like a first run.
     return {
       // A workspace that failed to boot registered no workspace IPC, so it is
       // reported as absent: the renderer shows first-run recovery instead of an
@@ -213,11 +242,16 @@ export function registerCoreIpc(deps: {
     }
   })
 
-  handle('env:check', () => ({
+  // Async on purpose: Settings, onboarding and every Re-check hit this, and
+  // the sign-in probe reads a file that can be huge. Nothing here may block
+  // the main process.
+  // The explicit return type is the contract: EnvPreflight is what
+  // IpcInvokeContract declares for this channel, so producer and consumer
+  // cannot drift. The per-tool fields serve Settings; `tools` powers
+  // onboarding's preflight.
+  handle('env:check', async (): Promise<EnvPreflight> => ({
     ...envCheck(),
-    // Extra to the shared contract: the full prerequisite list powering
-    // onboarding's preflight. The per-tool fields above serve Settings.
-    tools: checkPrereqs()
+    tools: await checkPrereqs()
   }))
 
   // Manual overrides for the two external tools. Validation happens here, so a
@@ -294,12 +328,15 @@ export function registerCoreIpc(deps: {
     const workspacePath = path.join(destDir, 'workspace')
     // Same config write onboarding's workspace:create uses.
     saveConfig({ workspacePath })
-    if (workspaceReady()) {
+    if (deps.workspaceBooted()) {
       // Live services (store, watchers, runner) are bound to the old root and
       // cannot re-root at runtime — the import goes live on next launch.
+      // Gated on the boot completing, not on workspaceReady(): a failed boot
+      // also sets the paths, and the user importing to recover from it must
+      // not be told to restart when the import can simply come up now.
       return { imported: true, error: null, restartRequired: true, hasProfile }
     }
-    // First run: no services exist yet, so the imported workspace boots now.
+    // First run (or a failed boot): no live services, so the import boots now.
     await deps.completeSetup(workspacePath)
     return { imported: true, error: null, restartRequired: false, hasProfile }
   })

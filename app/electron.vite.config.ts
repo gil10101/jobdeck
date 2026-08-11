@@ -25,7 +25,10 @@ export default defineConfig({
     }
   },
   renderer: {
-    server: { port: 5174, strictPort: true }, // v1 dev uses 5173 — run both at once
+    // Preferred dev port only: strictPort stays off so a busy 5174 falls
+    // through to the next free one. The main process reads the address vite
+    // actually bound from ELECTRON_RENDERER_URL, never a hardcoded port.
+    server: { port: 5174 },
     plugins: [react()],
     resolve: {
       alias: {

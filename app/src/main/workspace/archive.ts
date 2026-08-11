@@ -6,13 +6,13 @@ import path from 'node:path'
 import AdmZip from 'adm-zip'
 
 export interface ExportManifest {
-  schema: 'jobdeck-export.v1'
+  schema: 'ohmo-export.v1'
   appVersion: string
   createdAt: string
   files: { path: string; bytes: number; sha256: string }[]
 }
 
-const SCHEMA = 'jobdeck-export.v1'
+const SCHEMA = 'ohmo-export.v1'
 
 /** All files in the zip live under this prefix; manifest.json sits beside it at the root. */
 const ZIP_PREFIX = 'workspace/'

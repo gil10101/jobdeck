@@ -5,7 +5,7 @@
   "description": "A local-first desktop app that scouts job postings, tailors an ATS-safe resume and cover letter per posting, tracks applications, and preps interviews - driven by AI agents running on your own machine.",
   "license": "MIT",
   "engines": {
-    "node": ">=22.6.0"
+    "node": ">=22.18.0"
   },
   "type": "module",
   "main": "./out/main/index.js",
@@ -14,6 +14,7 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test": "node scripts/email-selftest.ts && node scripts/portable-selftest.ts",
     "probe:agent": "node scripts/probe-agent.mjs"
   },
   "dependencies": {
