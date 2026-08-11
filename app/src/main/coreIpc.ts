@@ -1,10 +1,10 @@
 import { BrowserWindow, app, dialog, ipcMain } from 'electron'
 import fs from 'node:fs'
 import { createRequire } from 'node:module'
-import os from 'node:os'
 import path from 'node:path'
 import type { EnvCheck, EnvPreflight, PrereqTool, ToolName } from '@shared/types'
 import { configError, loadConfig, saveConfig } from './appConfig'
+import { claudeCredentialSignal } from './claudeAuth'
 import { installAllBoards } from './boards/boardsBridge'
 import { normalizeToolOverride, resolveBun, resolveLatex, toolStatus } from './paths'
 import { readManifest, verifyAndExtract } from './workspace/archive'
@@ -31,66 +31,11 @@ function claudeRuntimePath(): string | null {
   return null
 }
 
-/** ~/.claude.json reaches tens of megabytes for heavy users (it accumulates
- *  per-project history), and this runs on every preflight, so the file is
- *  streamed rather than read whole. JSON key order follows insertion, so the
- *  account block is NOT reliably near the front — scanning only a head would
- *  report "signed out" to precisely the users whose file is large. */
-const SCAN_CHUNK_BYTES = 64 * 1024
-
-/** Whether `file` contains `needle`, scanned in fixed-size chunks so memory
- *  stays bounded while coverage is not. Consecutive chunks overlap by
- *  needle.length - 1 bytes, or a match straddling a chunk boundary would be
- *  missed. Returns false for an unreadable or absent file. */
-async function fileContains(file: string, needle: string): Promise<boolean> {
-  const pattern = Buffer.from(needle)
-  const overlap = pattern.length - 1
-  let handle: fs.promises.FileHandle | null = null
-  try {
-    handle = await fs.promises.open(file, 'r')
-    const buf = Buffer.alloc(SCAN_CHUNK_BYTES + overlap)
-    let carried = 0
-    let position = 0
-    for (;;) {
-      const { bytesRead } = await handle.read(buf, carried, SCAN_CHUNK_BYTES, position)
-      if (bytesRead === 0) return false
-      const filled = carried + bytesRead
-      if (buf.subarray(0, filled).includes(pattern)) return true
-      position += bytesRead
-      // Carry the tail forward so the next window can complete a split match.
-      carried = Math.min(overlap, filled)
-      buf.copy(buf, 0, filled - carried, filled)
-    }
-  } catch {
-    return false
-  } finally {
-    await handle?.close()
-  }
-}
-
-/**
- * Best-effort evidence of a Claude Code sign-in — the signal found, or null.
- * Credentials live in the OS keychain on macOS, so absence of every signal
- * means "unconfirmed", never "definitely signed out": the preflight wording
- * must not claim more. ANTHROPIC_API_KEY on its own is deliberately NOT a
- * signal — agent runs under the Claude provider strip a bare key (see
- * providerRuntime.providerEnv), so it is not the credential a run would use.
- */
-async function claudeSignInSignal(): Promise<string | null> {
-  if (process.env.ANTHROPIC_AUTH_TOKEN) return 'ANTHROPIC_AUTH_TOKEN is set in the environment'
-  const home = os.homedir()
-  const credentials = path.join(home, '.claude', '.credentials.json')
-  if (fs.existsSync(credentials)) return credentials
-  const claudeJson = path.join(home, '.claude.json')
-  if (await fileContains(claudeJson, '"oauthAccount"')) return `a signed-in account in ${claudeJson}`
-  return null
-}
-
 /** Host prerequisites, worst-first, so the onboarding preflight can show what
  *  is missing before the user triggers an agent run. */
 async function checkPrereqs(): Promise<PrereqTool[]> {
   const runtime = claudeRuntimePath()
-  const signal = await claudeSignInSignal()
+  const signal = await claudeCredentialSignal()
   const engine = resolveLatex()
   const bun = resolveBun()
   const tools: PrereqTool[] = [
@@ -110,7 +55,7 @@ async function checkPrereqs(): Promise<PrereqTool[]> {
       required: true,
       detail: signal ?? 'none found for this user (a keychain-stored login cannot be seen from here)',
       remedy:
-        'Run claude in a terminal and finish the login — or switch the model provider to Gemini/Ollama in Settings.',
+        'Run claude in a terminal and finish the login, export ANTHROPIC_API_KEY, or switch the model provider to Gemini/Ollama in Settings.',
       url: 'https://docs.claude.com/en/docs/claude-code/setup'
     },
     {

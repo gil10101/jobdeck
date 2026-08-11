@@ -21,12 +21,31 @@ sensitive material locally:
 - **Job-board credentials** — stored encrypted via the OS keychain, never in the
   workspace, never in the repository.
 - **Gmail access** — read-only OAuth scope through an OAuth client *you* create.
-  The refresh token and client secret are keychain-encrypted; cached message
-  headers are written with owner-only permissions; message bodies are never
-  written to disk; signing out wipes the cache.
-- **Workspace exports** — the export archive deliberately excludes credentials,
-  tokens, and cached sessions. Export files still contain your career data, so
-  treat them as personal documents.
+  The refresh token and client secret are keychain-encrypted, and signing out
+  wipes the cache. The app's own message cache holds headers plus Gmail's short
+  snippet — never the body — and is written with owner-only permissions.
+
+  **Bodies are a different story.** They are fetched on demand and are not
+  added to that cache, but a body handed to an agent does reach disk: asking the
+  in-app assistant to open a message (its `get_email` tool) or generating a
+  reply draft puts the message text into that run's Claude Agent SDK
+  transcript, and the SDK writes transcripts as plain, unencrypted `.jsonl`
+  files under `~/.claude/projects/<slug of the run's working directory>/` —
+  the same files Claude Code itself keeps. Hiding or deleting the mail in the
+  app does not remove them. If that matters to you, prune that directory, and
+  do not ask the assistant to read mail you would not want written down.
+- **Workspace exports** — the archive is a copy of your workspace folder minus a
+  **filename** filter, not a content scan. It skips the `tmp/` subtree,
+  `.DS_Store` and `*.tmp`, and any file whose name is `board-creds.json`,
+  contains `credential`, or contains `token`/`session` and ends in `.json`
+  (that last pattern is what catches the live board-CLI sessions the bundled
+  CLIs write to `.agents/skills/*/.session.json`). The secrets that matter are
+  safe for a stronger reason: job-board passwords, Gmail tokens and model API
+  keys are held in the OS keychain and app-data directory, outside the
+  workspace, so they are never candidates for export in the first place. A
+  secret *you* drop into the workspace under some other name will be exported.
+  Export files also carry your whole career history — treat them as personal
+  documents.
 
 ## Trust boundaries worth knowing
 

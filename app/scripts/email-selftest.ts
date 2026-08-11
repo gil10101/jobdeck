@@ -1,9 +1,10 @@
 // Selftest for the pure email parsing modules. Runs under plain node type
 // stripping (node >= 23): `node scripts/email-selftest.ts` from app/.
 // Fixtures use example.com addresses and placeholder companies only.
-import { parseIcs } from '../src/main/email/icsParse.ts'
+import { icsDedupeKey, parseIcs } from '../src/main/email/icsParse.ts'
 import { extractEvent } from '../src/main/email/eventExtract.ts'
-import { classifyEmail, deriveJobRelated } from '../src/main/email/emailClassify.ts'
+import { classifyEmail, deriveJobRelated, reviseJobRelated } from '../src/main/email/emailClassify.ts'
+import { GmailHttpError, isPermanentFetchFailure } from '../src/main/email/gmailErrors.ts'
 
 let pass = 0
 let fail = 0
@@ -181,6 +182,48 @@ check(
   '2026-08-10T09:00:00.000Z'
 )
 
+// A RECURRENCE-ID scopes its message to ONE occurrence. Keyed by the bare UID
+// it would update or dismiss the whole series, so it must key separately.
+const instanceCancel = [
+  'BEGIN:VCALENDAR',
+  'METHOD:CANCEL',
+  'BEGIN:VEVENT',
+  'UID:series1@example.com',
+  'RECURRENCE-ID;TZID=America/New_York:20260812T160000',
+  'DTSTART;TZID=America/New_York:20260812T160000',
+  'SUMMARY:Interview loop',
+  'STATUS:CANCELLED',
+  'END:VEVENT',
+  'END:VCALENDAR'
+].join('\r\n')
+const inst = parseIcs(instanceCancel)
+check('instance-scoped cancel exposes its RECURRENCE-ID', inst?.recurrenceId, '2026-08-12T20:00:00.000Z')
+check(
+  'instance dedupe key differs from the series UID',
+  icsDedupeKey(inst?.uid ?? null, inst?.recurrenceId ?? null),
+  'series1@example.com#2026-08-12T20:00:00.000Z'
+)
+check('series message has no RECURRENCE-ID', parseIcs(googleInvite)?.recurrenceId, null)
+check(
+  'series dedupe key is the bare UID',
+  icsDedupeKey('abc123@example.com', null),
+  'abc123@example.com'
+)
+check('no UID means no dedupe key', icsDedupeKey(null, '2026-08-12T20:00:00.000Z'), null)
+
+// ---- gmailErrors ----
+
+// The backfill sweep stamps completion only when every failure is permanent —
+// treating a rate limit as permanent would mark unswept mail as done, and
+// treating a deleted message as transient refetches every candidate forever.
+check('404 is permanent', isPermanentFetchFailure(new GmailHttpError(404, 'gone')), true)
+check('400 is permanent', isPermanentFetchFailure(new GmailHttpError(400, 'bad id')), true)
+check('410 is permanent', isPermanentFetchFailure(new GmailHttpError(410, 'gone')), true)
+check('429 rate limit is transient', isPermanentFetchFailure(new GmailHttpError(429, 'slow down')), false)
+check('403 rate limit is transient', isPermanentFetchFailure(new GmailHttpError(403, 'quota')), false)
+check('500 is transient', isPermanentFetchFailure(new GmailHttpError(500, 'server')), false)
+check('a network error is transient', isPermanentFetchFailure(new Error('fetch failed')), false)
+
 // ---- extractEvent ----
 
 const nowAug = new Date(2026, 7, 5, 12, 0)
@@ -267,6 +310,41 @@ check(
 check(
   'conflicting date+time pairs return null',
   extractEvent('Scheduling', 'We could do Aug 12 at 10am or Sep 3 at 2pm — let me know.', nowAug),
+  null
+)
+
+// A year-less date is always resolved FORWARD, so a look-back would otherwise
+// book an event most of a year out.
+check(
+  'a retrospective year-less date is not booked into next year',
+  extractEvent(
+    'Thank you for your time',
+    'It was a pleasure interviewing you on March 3 at 2:00 PM ET. We will be in touch.',
+    nowAug
+  ),
+  null
+)
+check(
+  'a stated year is trusted even far ahead',
+  extractEvent('Interview', 'Your interview is on March 3, 2027 at 2:00 PM ET.', nowAug)?.start,
+  '2027-03-03T19:00:00.000Z'
+)
+check(
+  'a year-less date inside the horizon still resolves',
+  extractEvent('Interview', 'Your interview is on November 20 at 2:00 PM ET.', nowAug)?.start,
+  '2026-11-20T19:00:00.000Z'
+)
+
+// Zone abbreviations that do not end in T are real zones too — reinterpreting
+// their wall time in the machine's zone books the event hours off.
+check(
+  'a non-T zone abbreviation is dropped, not read as machine-local',
+  extractEvent('Interview', 'Your interview is on Aug 12 at 3:00 PM WIB.', nowAug),
+  null
+)
+check(
+  'an unrecognized T-suffixed abbreviation is still dropped',
+  extractEvent('Interview', 'Your interview is on Aug 12 at 3:00 PM IST.', nowAug),
   null
 )
 
@@ -431,13 +509,21 @@ check(
     'Interview availability',
     'We would like to schedule a call about the role.',
     false,
-    'interview'
+    'interview',
+    false
   ),
   true
 )
 check(
   'assessment class implies job-related without a sweep hit',
-  deriveJobRelated('assessments@example.com', 'Next step', 'Complete your online assessment.', false, 'assessment'),
+  deriveJobRelated(
+    'assessments@example.com',
+    'Next step',
+    'Complete your online assessment for the analyst position.',
+    false,
+    'assessment',
+    false
+  ),
   true
 )
 check(
@@ -447,9 +533,128 @@ check(
     'Your exclusive offer ends soon',
     'Half price on everything — limited-time offer ends August 12.',
     true,
-    'other'
+    'other',
+    false
   ),
   false
+)
+
+// Scheduling language is how ordinary mail talks too: without a job signal an
+// 'interview' classification must NOT put personal mail in the Job tab (which
+// is also what gates the "Interview email" toast).
+check(
+  'personal "let\'s schedule a call" is not job mail',
+  deriveJobRelated(
+    'friend@example.com',
+    'Sunday',
+    "Hi! Let's schedule a call this weekend to talk about the trip.",
+    false,
+    'interview',
+    false
+  ),
+  false
+)
+check(
+  'personal "book a time" is not job mail',
+  deriveJobRelated(
+    'clinic@example.com',
+    'Appointment',
+    'Please book a time for your annual check-up.',
+    false,
+    'interview',
+    false
+  ),
+  false
+)
+check(
+  'a family calendar invite is not job mail',
+  deriveJobRelated(
+    'office@example.com',
+    'Parent evening',
+    'Calendar invite attached for the parent-teacher meeting on Thursday.',
+    false,
+    'interview',
+    false
+  ),
+  false
+)
+// The reason the class-implies-job-mail rule exists: the Gmail sweep only
+// searches SUBJECTS, so body-only recruiter outreach never hits it.
+check(
+  'direct recruiter outreach that misses the subject sweep is still job mail',
+  deriveJobRelated(
+    'sarah@example.com',
+    'Hello from Acme',
+    'I came across your profile — could we schedule a call about a Senior Engineer role on our team?',
+    false,
+    'interview',
+    false
+  ),
+  true
+)
+check(
+  'a tracked company named in the message is a job signal on its own',
+  deriveJobRelated(
+    'sarah@example.com',
+    'Following up',
+    'Are you free Thursday at 3pm for a quick chat?',
+    false,
+    'interview',
+    true
+  ),
+  true
+)
+check(
+  'an ATS sender is job mail regardless of class',
+  deriveJobRelated('no-reply@example.greenhouse.io', 'Update', 'Some update.', false, 'other', false),
+  true
+)
+
+// ---- reviseJobRelated (cached messages: snippet only, body long gone) ----
+
+check(
+  'a body-decided job message is not demoted when only its snippet is left',
+  reviseJobRelated(
+    'sarah@example.com',
+    'Hello from Acme',
+    'I came across your profile — could we schedule a call this week?',
+    false,
+    'interview',
+    false,
+    true
+  ),
+  true
+)
+check(
+  'a cached personal message stays out of the Job tab',
+  reviseJobRelated(
+    'friend@example.com',
+    'Sunday',
+    "Hi! Let's schedule a call this weekend to talk about the trip.",
+    false,
+    'interview',
+    false,
+    false
+  ),
+  false
+)
+check(
+  'a cached promotional message is still demoted',
+  reviseJobRelated(
+    'deals@offers.example.com',
+    'Your exclusive offer ends soon',
+    'Half price on everything — limited-time offer ends August 12.',
+    true,
+    'other',
+    false,
+    true
+  ),
+  false
+)
+check(
+  'entering the job sweep later upgrades a cached message',
+  reviseJobRelated('someone@example.com', 'Application', 'Some text.', true, 'other', false, false),
+  true
 )
 
 console.log(`PASS ${pass}/${pass + fail}`)

@@ -195,8 +195,13 @@ export interface IpcInvokeContract {
   'env:setToolPath': { req: { tool: ToolName; path: string | null }; res: EnvCheck }
   'workspace:choose': { req: { title?: string }; res: { path: string | null } }
   'workspace:create': { req: { dir: string }; res: { workspacePath: string } }
-  /** Zip the whole workspace (denylist-scanned, hashed manifest) to a user-chosen file. */
-  'workspace:export': { req: void; res: { canceled: boolean; path: string | null; files: number } }
+  /** Zip the whole workspace (denylist-scanned, hashed manifest) to a user-chosen
+   *  file. `skipped` counts credential files held back, so the export never
+   *  drops anything without saying so. */
+  'workspace:export': {
+    req: void
+    res: { canceled: boolean; path: string | null; files: number; skipped: number }
+  }
   /** Restore an export into an empty folder and point config at it; live services
    *  cannot re-root at runtime, so a successful import asks for a relaunch. */
   'workspace:import': {

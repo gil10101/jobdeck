@@ -169,6 +169,11 @@ function findDates(text: string): DateHit[] {
   return hits
 }
 
+/** Real zone abbreviations that do NOT end in T, so the "…T = Time" heuristic
+ *  below would read them as ordinary words and silently keep the machine's own
+ *  zone. Listed here they are treated as stated-but-unresolvable instead. */
+const NON_T_ZONE_TOKENS = new Set(['MSK', 'WIB', 'WITA', 'MEZ', 'MESZ', 'HAEC'])
+
 /** Timezone token immediately after a time: GMT/UTC with an optional ±HH:MM
  *  offset ("(GMT -04:00)"), or an uppercase-only abbreviation ("PT" must
  *  never match the "pt" in ordinary words). The whole token is consumed so its
@@ -193,10 +198,10 @@ function zoneAfter(
   if (!m) return null
   const zone = ZONES[m[1]]
   if (zone) return { zone, offsetMin: null, end: end + m[0].length }
-  // Nearly every English zone abbreviation ends in T ("…Time"); MSK is the one
-  // common exception. Anything else after a time is an ordinary word, not a
-  // zone we failed to recognize, so it keeps the old no-zone reading.
-  if (!/T$/.test(m[1]) && m[1] !== 'MSK') return null
+  // Nearly every English zone abbreviation ends in T ("…Time"); the ones that
+  // do not are listed above. Anything else after a time is an ordinary word,
+  // not a zone we failed to recognize, so it keeps the old no-zone reading.
+  if (!/T$/.test(m[1]) && !NON_T_ZONE_TOKENS.has(m[1])) return null
   console.warn(`[email] unrecognized timezone "${m[1]}" after a time — that time is not used`)
   return { zone: null, offsetMin: null, end: end + m[0].length, unknown: true }
 }
@@ -297,6 +302,13 @@ function resolveYear(month: number, day: number, now: Date): number {
   return dayEnd.getTime() > now.getTime() ? y : y + 1
 }
 
+/** resolveYear always looks FORWARD, so a retrospective mention with no year
+ *  ("it was a pleasure meeting you on March 3") resolves to next year and
+ *  proposes an event most of a year out. Past this horizon a missing year is
+ *  far likelier to be a look-back than a booking, so that reading is dropped;
+ *  a stated year is trusted and never checked against it. */
+const MAX_INFERRED_AHEAD_MS = 180 * 24 * 60 * 60 * 1000
+
 /** Quoted replies, Gmail attribution lines, and forwarded header runs describe
  *  the OLD mail — their dates and times must not pair with the new content.
  *  Matched regions are blanked with spaces (newlines kept) so every surviving
@@ -338,6 +350,7 @@ export function extractEvent(
     start: string
     end: string | null
     aside: boolean
+    inferredYear: boolean
   }[] = []
   for (const dh of dates) {
     const year = dh.year ?? resolveYear(dh.month, dh.day, now)
@@ -355,7 +368,14 @@ export function extractEvent(
       // becomes a no-op, and insertion order decides — and findTimes emits
       // every range before every single time. A trailing "Reception
       // 10:00-11:00" would then outrank the stated "2:00 PM" interview slot.
-      pairs.push({ gap, pos: th.index, start, end, aside: isAside(text, th, start, end) })
+      pairs.push({
+        gap,
+        pos: th.index,
+        start,
+        end,
+        aside: isAside(text, th, start, end),
+        inferredYear: dh.year === null
+      })
     }
   }
   if (pairs.length === 0) return null
@@ -366,6 +386,8 @@ export function extractEvent(
   // "August 12: reception 10:00-11:00, then your interview at 2:00 PM" puts
   // the distractor CLOSER to the date than the slot being scheduled.
   pairs.sort((a, b) => Number(a.aside) - Number(b.aside) || a.gap - b.gap || a.pos - b.pos)
+  const best = pairs[0]
+  if (best.inferredYear && Date.parse(best.start) - now.getTime() > MAX_INFERRED_AHEAD_MS) return null
   const title = subject.replace(/^\s*(?:(?:re|fwd?|fw)\s*:\s*)+/i, '').trim() || 'Interview'
-  return { title, start: pairs[0].start, end: pairs[0].end }
+  return { title, start: best.start, end: best.end }
 }

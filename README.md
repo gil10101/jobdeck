@@ -50,6 +50,8 @@ Plus an **in-app AI assistant**: it answers questions about your runs, applicati
 - **Browser** — an embedded browser with tabs, split view (two independent panes, each with its own toolbar and history sidebar), bookmarks, and browsing history. Logins are shared with the Apply view. The **Build button** turns the listing you are looking at into a queued build — the page you see is parsed for its posting, filed into Intake, and sent through the normal build pipeline without copy-paste.
 - **Assistant panel** — streaming chat with conversation history, session resume across restarts, per-reply model picker, a context-usage donut, long-term memory notes, and a draggable expanded window. It can search your synced email (read-only), diagnose scout/board failures, start scouts, rebuild dead builds, and edit your profile through natural language — every state-changing action behind an Approve/Deny card.
 - **Who I am** — one tab showing everything the agents know about you: the full profile, master-résumé context, and knowledge base, with an in-tab section editor. The knowledge base holds background-only material (transcripts, notes, files) agents may use for judgment and answers but never place on a résumé or cover letter.
+- **Profile module export/import** — every section header in the profile editor (Identity, Experience, Skills, Job search, Tailoring, Documents, …) carries its own download/upload pair, in Settings → Candidate profile and in Who I am's edit mode. Export writes that one saved section as a small versioned JSON envelope (`identity.module.json` and friends: schema id, module name, schema version, data). Import validates the file through the same schema path a whole profile takes — a payload that isn't recognizably that module is refused, not merged — then shows Current vs Incoming side by side; nothing touches `profile.json` until you hit Apply.
+- **Workspace export/import** — **Settings → Workspace data → Export workspace…** packs the entire workspace (profile, tracker, applications, generated documents, runs, library) into a zip carrying a `manifest.json` that lists every file with its size and SHA-256. **Import an export…** on the setup screen re-hashes every entry against that manifest before writing and aborts the whole import on any mismatch, so a truncated or tampered archive can't half-restore. Two things to know: the export deliberately leaves credentials out (see [SECURITY.md](SECURITY.md) for exactly what the filter catches — your board passwords, Gmail tokens and API keys live in the OS keychain outside the workspace and never travel), and import requires an **empty destination folder**, into which it writes a `workspace/` directory. Importing over a workspace the app already has open takes effect on the next launch.
 - **Runs view** — a live timeline for every agent run: each tool call, streamed text, errors, and end-of-run context usage. The exact prompt each run received is saved to disk for audit.
 - **Library** — browse and preview everything the app has generated in your workspace.
 
@@ -137,9 +139,14 @@ Everything lives in **Settings**:
 
 ## Data & privacy
 
-- **Local-first**: your profile, applications, generated documents, run transcripts, and assistant conversations are plain files in your chosen workspace folder. The app phones nothing home.
-- **What leaves your machine**: agent runs send their prompts (which include relevant profile data) to Anthropic through your own Claude login, exactly like using Claude Code directly; scout runs and the rating lookup query the job boards / search from your IP; the email feature talks directly to Google's Gmail API with your own OAuth client.
-- **Email stays yours**: Gmail access is read-only scope through an OAuth client you create; the refresh token and client secret are encrypted with the OS keychain, message headers are cached locally with owner-only file permissions, and signing out wipes the cache. Email content is treated as untrusted third-party data everywhere agents can see it. Calendar entries are derived facts (title, time, location, meeting link) held under the same owner-only permissions — message bodies are never copied into them, and no calendar service is contacted.
+- **Local-first**: your profile, applications, generated documents, run transcripts, and assistant conversations are plain files in your chosen workspace folder. There is no telemetry, no analytics, and no update check — this project operates no server and receives nothing about you.
+- **What leaves your machine**, in full:
+  - agent runs send their prompts (which include relevant profile data) to Anthropic through your own Claude login, exactly like using Claude Code directly — or to Gemini / your Ollama server instead, if you configured one;
+  - scout runs and the Glassdoor rating lookup query the job boards and search engines from your IP;
+  - the email feature talks directly to Google's Gmail API with your own OAuth client;
+  - the **Browser view fetches favicons from a third party**: every open tab, bookmark row and history row requests `https://icons.duckduckgo.com/ip3/<hostname>.ico`. That sends the *hostname* of each of those pages to DuckDuckGo (nothing else — no path, no query, no page content), and it is the only remote host the renderer's content-security policy allows to serve images. The Apply and Browser `<webview>`s themselves load real sites, so those sites see you as an ordinary visitor.
+- **Agent transcripts are files too**: the Claude Agent SDK stores each run's conversation as plain `.jsonl` under `~/.claude/projects/`, outside your workspace. Anything an agent read — posting text, and Gmail message bodies when you ask the assistant to open one or draft a reply — is in there. See [SECURITY.md](SECURITY.md).
+- **Email stays yours**: Gmail access is read-only scope through an OAuth client you create; the refresh token and client secret are encrypted with the OS keychain, message headers and snippets (never bodies) are cached locally with owner-only file permissions, and signing out wipes the cache. Email content is treated as untrusted third-party data everywhere agents can see it. Calendar entries are derived facts (title, time, location, meeting link) held under the same owner-only permissions — message bodies are never copied into them, and no calendar service is contacted.
 - **Job-board access is personal-use**: the CLIs use your own accounts and public endpoints, deliberately rate-limited to human-scale traffic. Keep volume low; respect each site's terms.
 
 ## Repository layout
@@ -155,9 +162,11 @@ app/                  the Electron app
   resources/skills/   bundled job-board CLIs (scaffolded into workspaces)
 .agents/skills/       source of truth for the job-board CLIs
 cv/                   starter master-résumé template (main_example.tex)
-cover_letters/        cover.cls (the xelatex cover-letter class the build agent
-                      writes against), its example letter, and the Lato/Raleway
-                      fonts it loads by relative path
+cover_letters/        standalone LaTeX reference: cover.cls (fontspec-based, so
+                      xelatex/lualatex only), an example letter using it, and
+                      the Lato/Raleway fonts it loads by relative path. No code
+                      path reads any of it — build runs write a self-contained
+                      `article` cover letter matching the résumé's font
 assets/mascot/        mascot GIFs
 ```
 

@@ -843,9 +843,16 @@ export function registerIpc(services: Services): void {
       defaultPath: `workspace-export-${stamp}.zip`,
       filters: [{ name: 'Zip archive', extensions: ['zip'] }]
     })
-    if (result.canceled || !result.filePath) return { canceled: true, path: null, files: 0 }
-    const manifest = buildArchive(workspacePath, result.filePath, app.getVersion())
-    return { canceled: false, path: result.filePath, files: manifest.files.length }
+    if (result.canceled || !result.filePath) {
+      return { canceled: true, path: null, files: 0, skipped: 0 }
+    }
+    const { manifest, skipped } = buildArchive(workspacePath, result.filePath, app.getVersion())
+    return {
+      canceled: false,
+      path: result.filePath,
+      files: manifest.files.length,
+      skipped: skipped.length
+    }
   })
   // ---- apply (experimental) ----
   handle('apply:insertText', async ({ text }) => {

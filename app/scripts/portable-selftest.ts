@@ -67,44 +67,83 @@ const included = [
   'master/résumé–nötes ✓.md'
 ]
 for (const rel of included) write(ws, rel, `content of ${rel}\n`)
+// Innocuous user files whose NAMES look credential-ish: a substring denylist
+// drops them silently, which is the bug these cases guard against.
+const lookalikes = [
+  'token-notes.json',
+  'session-notes.json',
+  'interviews/session-2-questions.json',
+  'library/my-credentials-checklist.md',
+  'tokenizer-benchmarks.json'
+]
+for (const rel of lookalikes) write(ws, rel, `content of ${rel}\n`)
 // Excluded: tmp/ subtree, *.tmp, .DS_Store.
 write(ws, 'tmp/scratch.txt', 'scratch')
 write(ws, 'applications/draft.tmp', 'half-written')
 write(ws, '.DS_Store', 'finder junk')
-// Denied: credentials must never enter the archive.
+// Denied: real credential stores must never enter the archive.
+const denied = [
+  'board-creds.json',
+  '.agents/skills/jobright-search/credentials.json',
+  '.agents/skills/jobright-search/.session.json'
+]
 write(ws, 'board-creds.json', '{"email":"user@example.com","password":"nope"}')
-write(ws, 'master/gmail-token-cache.json', '{"refresh":"nope"}')
-write(ws, 'library/acme-credentials.txt', 'nope')
+write(ws, '.agents/skills/jobright-search/credentials.json', '{"password":"nope"}')
 write(ws, '.agents/skills/jobright-search/.session.json', '{"sessionId":"nope"}')
+// Board-CLI machine state is dropped too, but it is NOT a credential and must
+// not be counted as one — the export toast reports the skipped list verbatim.
+write(ws, '.agents/skills/jobright-search/.feed-cache.json', '{"rows":[]}')
+write(ws, '.agents/skills/jobright-search/.throttle', '1')
 
 const zipPath = path.join(tmpRoot, 'export.zip')
-const manifest = buildArchive(ws, zipPath, '2.0.0-test')
+const { manifest, skipped } = buildArchive(ws, zipPath, '2.0.0-test')
+const carried = [...included, ...lookalikes]
 
 check('manifest schema', manifest.schema, 'ohmo-export.v1')
 check('manifest appVersion', manifest.appVersion, '2.0.0-test')
 check(
   'manifest lists exactly the expected files',
   manifest.files.map((f) => f.path).sort(),
-  [...included].sort()
+  [...carried].sort()
+)
+check(
+  'credential-lookalike user files are exported, not silently dropped',
+  lookalikes.filter((f) => !manifest.files.some((m) => m.path === f)),
+  []
+)
+check('every real credential file is reported as skipped', [...skipped].sort(), [...denied].sort())
+// Caches and throttle stamps are dropped silently: calling them credentials in
+// the export toast would overstate what was held back.
+check(
+  'board-CLI machine state is dropped without being called a credential',
+  skipped.filter((p) => /feed-cache|throttle/.test(p)),
+  []
+)
+check(
+  'board-CLI machine state is not in the archive either',
+  manifest.files.filter((f) => /feed-cache|throttle/.test(f.path)),
+  []
 )
 const zipEntries = new AdmZip(zipPath).getEntries().map((e) => e.entryName)
 check(
-  'no denied/excluded name appears anywhere in the zip',
-  zipEntries.filter((n) => /creds|credential|token|session|\.tmp$|DS_Store|^workspace\/tmp\//i.test(n)),
+  'no credential file or excluded name appears anywhere in the zip',
+  zipEntries.filter((n) =>
+    /creds\.json|\/credentials\.json|\.session\.json|\.tmp$|DS_Store|^workspace\/tmp\//i.test(n)
+  ),
   []
 )
-check('zip carries manifest.json plus one entry per file', zipEntries.length, included.length + 1)
+check('zip carries manifest.json plus one entry per file', zipEntries.length, carried.length + 1)
 check('readManifest round-trips the written manifest', readManifest(zipPath), manifest)
 
 // ---- verifyAndExtract: round-trip ----
 
 const dest = path.join(tmpRoot, 'dest')
 fs.mkdirSync(dest)
-check('extract returns the file count', verifyAndExtract(zipPath, dest), { files: included.length })
+check('extract returns the file count', verifyAndExtract(zipPath, dest), { files: carried.length })
 check(
   'extracted tree is byte-identical (per-file sha256)',
-  included.map((rel) => sha256(fs.readFileSync(path.join(dest, 'workspace', ...rel.split('/'))))).sort(),
-  included.map((rel) => sha256(fs.readFileSync(path.join(ws, ...rel.split('/'))))).sort()
+  carried.map((rel) => sha256(fs.readFileSync(path.join(dest, 'workspace', ...rel.split('/'))))).sort(),
+  carried.map((rel) => sha256(fs.readFileSync(path.join(ws, ...rel.split('/'))))).sort()
 )
 checkThrows('non-empty destination throws', () => verifyAndExtract(zipPath, dest), 'not empty')
 
@@ -248,6 +287,128 @@ check(
   'the same payload is still refused on ingest',
   validateModuleData('experience', looseExperience),
   { ok: false, problems: ['experience: entry 0 is not an experience entry'] }
+)
+
+// ---- nested entries: the fields ARRAY_MODULE_ELEMENT never reaches ----
+// A role profile without `match` and a story without `use` both parse as
+// objects, so element identity accepts them; renderTailoringRulesMd then calls
+// .join() and renderStoriesMd calls .includes() on undefined and every build
+// run and detail chat throws. Ingest must name the entry instead.
+check(
+  'a role profile missing match is refused, naming the entry and the field',
+  validateModuleData('tailoring', { roleProfiles: [{ label: 'Data' }], hardRules: [] }),
+  { ok: false, problems: ['tailoring.roleProfiles[0] is not a role profile: missing match'] }
+)
+check(
+  'a story missing use is refused',
+  validateModuleData('narrative', {
+    whatExcites: [],
+    targetSectors: [],
+    dealBreakers: [],
+    stories: [{ id: 's1', title: 'T', text: 'x' }]
+  }),
+  { ok: false, problems: ['narrative.stories[0] is not a story: missing use'] }
+)
+check(
+  'a language missing proficiency is refused',
+  validateModuleData('identity', {
+    fullName: 'A B',
+    email: 'a@example.com',
+    location: '',
+    phone: '',
+    linkedin: '',
+    github: '',
+    website: '',
+    languages: [{ name: 'French' }],
+    workAuth: '',
+    status: ''
+  }),
+  { ok: false, problems: ['identity.languages[0] is not a language: missing proficiency'] }
+)
+check(
+  'non-string members of a nested string array are refused',
+  validateModuleData('skills', [{ category: 'Data', items: ['SQL', 42] }]),
+  { ok: false, problems: ['skills[0].items[1] is not a string'] }
+)
+// Export ('local') still never refuses what the profile already holds — the
+// same payloads heal instead, so the render path can no longer throw.
+const healedTailoring = validateModuleData(
+  'tailoring',
+  { roleProfiles: [{ label: 'Data' }], hardRules: [] },
+  'local'
+)
+check(
+  'local-source role profiles heal their missing arrays',
+  healedTailoring.ok ? healedTailoring.data : healedTailoring,
+  {
+    roleProfiles: [
+      {
+        match: [],
+        label: 'Data',
+        skillCategoryOrder: [],
+        projectPriority: [],
+        profileStatement: null,
+        notes: null
+      }
+    ],
+    hardRules: []
+  }
+)
+const healedSkills = validateModuleData('skills', [{ category: 'Data', items: ['SQL', 42] }], 'local')
+check(
+  'local-source nested string arrays drop non-strings instead of failing',
+  healedSkills.ok ? healedSkills.data : healedSkills,
+  [{ category: 'Data', items: ['SQL'] }]
+)
+// A complete nested entry must still pass untouched.
+const goodTailoring = {
+  roleProfiles: [
+    {
+      match: ['analyst'],
+      label: 'Data',
+      skillCategoryOrder: ['SQL'],
+      projectPriority: [],
+      profileStatement: null,
+      notes: null
+    }
+  ],
+  hardRules: ['no em-dashes']
+}
+check(
+  'a complete tailoring payload imports unchanged',
+  validateModuleData('tailoring', goodTailoring),
+  { ok: true, data: goodTailoring, healed: [] }
+)
+
+// ---- scout prompt: the untrusted-data guard must cover every source ----
+// INVARIANT: every third-party source STEP 2 tells the scout to read is named
+// by the guard. Custom boards and Glassdoor carry their own guard sentence in
+// their generated sections (src/main/agent/prompt.ts); the template must cover
+// the sources that have no generated section of their own, or a hostile job
+// posting reaches the agent through an unguarded path.
+const scoutTemplate = fs.readFileSync(
+  path.join(import.meta.dirname, '..', 'resources', 'prompts', 'scout_jobs.md'),
+  'utf-8'
+)
+const guardLine = scoutTemplate
+  .split('\n')
+  .find((line) => line.startsWith('**UNTRUSTED DATA'))
+const guarded = (source: string): boolean =>
+  (guardLine ?? '').toLowerCase().includes(source)
+check(
+  'scout template carries an untrusted-data guard naming every STEP 2 source',
+  {
+    present: guardLine !== undefined,
+    unnamed: ['jobright', 'linkedin', 'freehire', 'websearch', 'webfetch', 'glassdoor'].filter(
+      (s) => !guarded(s)
+    )
+  },
+  { present: true, unnamed: [] }
+)
+check(
+  'the guard states the data-not-instructions rule',
+  /never as instructions/.test(guardLine ?? ''),
+  true
 )
 
 console.log(`PASS ${pass}/${pass + fail}`)

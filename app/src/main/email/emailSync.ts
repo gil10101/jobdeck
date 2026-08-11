@@ -5,14 +5,16 @@ import type { TrackerRepo } from '../store/trackerRepo'
 import { listEvents, proposeEvent, proposedCount, updateEvent } from '../calendar/calendarStore'
 import { gmailConfigured } from './gmailAuth'
 import { getMessageFull, getMessageMeta, listMessages, type GmailMessageMeta } from './gmailClient'
-import { parseIcs } from './icsParse'
+import { icsDedupeKey, parseIcs } from './icsParse'
 import { extractEvent } from './eventExtract'
+import { isPermanentFetchFailure } from './gmailErrors'
 import {
   ASSESSMENT_DOMAINS,
   ATS_DOMAINS,
   classifyEmail,
   deriveJobRelated,
-  fromDomainMatch
+  fromDomainMatch,
+  reviseJobRelated
 } from './emailClassify'
 import {
   allCachedMessages,
@@ -175,6 +177,9 @@ export class EmailSync {
   // Bumped on stop(): a sync already in flight must not write its results
   // after sign-out, or it would resurrect the cache clearEmailCache wiped.
   private generation = 0
+  // Messages the calendar backfill can never fetch (deleted server-side): they
+  // are dropped from the sweep instead of blocking its completion stamp.
+  private backfillSkips = new Set<string>()
 
   constructor(private deps: EmailSyncDeps) {
     // Interval changes land immediately, not after the old interval elapses.
@@ -213,6 +218,8 @@ export class EmailSync {
     this.generation++
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
+    // Sign-out wipes the cache; message ids must not outlive the account.
+    this.backfillSkips.clear()
   }
 
   private schedule(): void {
@@ -329,12 +336,14 @@ export class EmailSync {
         // body-detected rejection back to "other". Keep the stored class; a
         // stale one heals when the message is opened (reclassifyFromBody).
         const classification = known.classification
-        const jobRelated = deriveJobRelated(
+        const jobRelated = reviseJobRelated(
           known.from,
           known.subject,
           known.snippet,
           jobIds.has(id),
-          classification
+          classification,
+          matchTrackerRow(known.from, known.subject, known.snippet, rows) !== null,
+          known.jobRelated
         )
         let { suggestion, suggestionState } = known
         if (suggestionState === 'open' || suggestionState === null) {
@@ -439,8 +448,11 @@ export class EmailSync {
    *  Refetch full bodies for recent job mail, re-run classification + invite
    *  parsing through reclassifyFromBody (which also proposes), then stamp the
    *  cache with the current version so the sweep never repeats until the next
-   *  bump. A per-message failure skips that message AND withholds the stamp,
-   *  so an interrupted or rate-limited sweep retries on the next sync. */
+   *  bump. Only a TRANSIENT failure (rate limit, 5xx, network) withholds the
+   *  stamp, so an interrupted sweep retries on the next sync. A message that is
+   *  permanently unfetchable — deleted server-side, malformed id — is recorded
+   *  and skipped forever: counting it would leave the sweep unstamped and
+   *  refetch every candidate body on every poll for the life of the cache. */
   private async backfillCalendar(gen: number): Promise<void> {
     if (calendarBackfillVersion() >= BACKFILL_VERSION) return
     const cutoff = Date.now() - BACKFILL_WINDOW_MS
@@ -448,11 +460,12 @@ export class EmailSync {
       .filter(
         (m) =>
           !m.hidden &&
+          !this.backfillSkips.has(m.id) &&
           (m.jobRelated || m.classification === 'interview' || m.classification === 'assessment') &&
           Date.parse(m.date) >= cutoff
       )
       .slice(0, BACKFILL_MAX)
-    let failures = 0
+    let transientFailures = 0
     await mapLimit(candidates, FETCH_CONCURRENCY, async (m) => {
       if (gen !== this.generation) return
       try {
@@ -460,14 +473,18 @@ export class EmailSync {
         const parsed = ics ? parseIcsLogged(ics, m.id) : null
         if (gen !== this.generation) return
         this.reclassifyFromBody(m.id, text, parsed ?? undefined)
-      } catch {
-        // Unreadable message: keep its sync-time classification, and count the
-        // miss so the stamp is withheld and the next sync retries.
-        failures++
+      } catch (err) {
+        // Unreadable message: keep its sync-time classification either way.
+        if (isPermanentFetchFailure(err)) {
+          console.error(`[email] calendar backfill skipping message ${m.id} for good:`, err)
+          this.backfillSkips.add(m.id)
+        } else {
+          transientFailures++
+        }
       }
     })
     if (gen !== this.generation) return
-    if (failures === 0) markCalendarBackfill(BACKFILL_VERSION)
+    if (transientFailures === 0) markCalendarBackfill(BACKFILL_VERSION)
   }
 
   private buildMessage(
@@ -481,7 +498,14 @@ export class EmailSync {
     // meta.snippet is still stored for the list preview.
     const scan = body ?? meta.snippet
     const classification = classifyEmail(meta.from, meta.subject, scan)
-    const jobRelated = deriveJobRelated(meta.from, meta.subject, scan, jobHit, classification)
+    const jobRelated = deriveJobRelated(
+      meta.from,
+      meta.subject,
+      scan,
+      jobHit,
+      classification,
+      matchTrackerRow(meta.from, meta.subject, scan, rows) !== null
+    )
     const suggestion = suggestForMessage(classification, meta.from, meta.subject, scan, rows)
     return {
       ...meta,
@@ -503,21 +527,25 @@ export class EmailSync {
    *  must have a start to be schedulable. A CANCEL is terminal: it dismisses
    *  the UID-matched event even when its own DTSTART failed to parse, and it
    *  never falls through to text detection — the mail describes a removed
-   *  event, not a new one. Text detection only runs for interview-class mail
-   *  with no usable ICS event. Returns whether the calendar store changed. */
+   *  event, not a new one. Dedupe runs on icsDedupeKey, not the bare UID, so a
+   *  message scoped to one occurrence (RECURRENCE-ID) can only ever update or
+   *  cancel that occurrence — never the series it belongs to. Text detection
+   *  only runs for interview-class mail with no usable ICS event. Returns
+   *  whether the calendar store changed. */
   private proposeFromMessage(
     msg: EmailMessage,
-    parsed: { invite: EmailInvite; uid: string | null } | null,
+    parsed: { invite: EmailInvite; uid: string | null; recurrenceId?: string | null } | null,
     bodyText: string,
     rows: TrackerRow[]
   ): boolean {
     const match = matchTrackerRow(msg.from, msg.subject, bodyText, rows)
     const invite = parsed?.invite ?? null
+    const dedupeKey = icsDedupeKey(parsed?.uid ?? null, parsed?.recurrenceId ?? null)
     if (invite?.method === 'CANCEL') {
-      if (!parsed?.uid) return false
+      if (!dedupeKey) return false
       return proposeEvent({
         sourceMessageId: msg.id,
-        icsUid: parsed.uid,
+        icsUid: dedupeKey,
         title: invite.title ?? cleanSubject(msg.subject),
         company: match?.company ?? null,
         rowId: match?.id ?? null,
@@ -535,7 +563,7 @@ export class EmailSync {
     if (invite?.start && (msg.classification === 'interview' || invite.method !== null)) {
       return proposeEvent({
         sourceMessageId: msg.id,
-        icsUid: parsed?.uid ?? null,
+        icsUid: dedupeKey,
         title: invite.title ?? cleanSubject(msg.subject),
         company: match?.company ?? null,
         rowId: match?.id ?? null,
@@ -567,14 +595,18 @@ export class EmailSync {
     }).changed
   }
 
-  /** OS toasts for new high-stakes mail: recent messages only (a backfill of
-   *  old mail is not news), capped per pass, overflow collapsed into one
-   *  summary. A notification failure must never fail the sync. */
+  /** OS toasts for new high-stakes mail: job mail only (the sweeps also pull
+   *  the whole recent inbox, and "let's schedule a call" from a friend
+   *  classifies as 'interview' — it must never raise an "Interview email"
+   *  toast), recent messages only (a backfill of old mail is not news), capped
+   *  per pass, overflow collapsed into one summary. A notification failure must
+   *  never fail the sync. */
   private notifyNewMail(fresh: EmailMessage[]): void {
     if (!this.deps.store.state.settings.emailNotifications) return
     const now = Date.now()
     const notable = fresh.filter(
       (m) =>
+        m.jobRelated &&
         NOTIFY_CLASSES.includes(m.classification) &&
         Math.abs(now - Date.parse(m.date)) <= NOTIFY_WINDOW_MS
     )
@@ -613,13 +645,20 @@ export class EmailSync {
   reclassifyFromBody(
     id: string,
     body: string,
-    parsed?: { invite: EmailInvite; uid: string | null } | null
+    parsed?: { invite: EmailInvite; uid: string | null; recurrenceId?: string | null } | null
   ): void {
     const msg = getCachedMessage(id)
     if (!msg || msg.hidden) return
     const rows = this.deps.tracker.listRows()
     const classification = classifyEmail(msg.from, msg.subject, body)
-    const jobRelated = deriveJobRelated(msg.from, msg.subject, body, msg.jobRelated, classification)
+    const jobRelated = deriveJobRelated(
+      msg.from,
+      msg.subject,
+      body,
+      msg.jobRelated,
+      classification,
+      matchTrackerRow(msg.from, msg.subject, body, rows) !== null
+    )
     let suggestion = msg.suggestion
     let suggestionState = msg.suggestionState
     if (suggestionState === 'open' || suggestionState === null) {

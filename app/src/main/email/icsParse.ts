@@ -210,6 +210,15 @@ function parseIcsDate(
   return new Date(y, mo - 1, d, hh, mi, ss).toISOString()
 }
 
+/** Dedupe identity for an ICS event. A RECURRENCE-ID scopes its message to ONE
+ *  occurrence of a series, so it must never key the same event as the series'
+ *  bare UID — otherwise a single-instance update rewrites the series' time and
+ *  a single-instance cancellation dismisses the whole series. */
+export function icsDedupeKey(uid: string | null, recurrenceId: string | null): string | null {
+  if (!uid) return null
+  return recurrenceId ? `${uid}#${recurrenceId}` : uid
+}
+
 const MEET_LINK_RE =
   /https:\/\/(?:meet\.google\.com|[a-z0-9.-]*zoom\.us\/j|teams\.microsoft\.com\/l)\/[^\s"'<>]+/i
 
@@ -217,8 +226,12 @@ const MEET_LINK_RE =
  *  nested components inside it (VALARM) are skipped — their SUMMARY and
  *  DESCRIPTION describe the reminder, not the event. VTIMEZONE components are
  *  mined for per-TZID standard offsets, the fallback when a TZID resolves to
- *  no known zone. Returns null when no VEVENT exists. */
-export function parseIcs(raw: string): { invite: EmailInvite; uid: string | null } | null {
+ *  no known zone. `recurrenceId` (normalized to UTC ISO when it parses) is
+ *  non-null only for a message scoped to a single occurrence of a series —
+ *  see icsDedupeKey. Returns null when no VEVENT exists. */
+export function parseIcs(
+  raw: string
+): { invite: EmailInvite; uid: string | null; recurrenceId: string | null } | null {
   // Unfold RFC 5545 continuation lines (CRLF or LF followed by space/tab).
   const lines = raw.replace(/\r?\n[ \t]/g, '').split(/\r?\n/)
   let topMethod: string | null = null
@@ -302,6 +315,7 @@ export function parseIcs(raw: string): { invite: EmailInvite; uid: string | null
   const dtStart = get('DTSTART')
   const dtEnd = get('DTEND')
   const conference = get('X-GOOGLE-CONFERENCE')
+  const recurrenceProp = get('RECURRENCE-ID')
 
   const locationText = location ? unescapeText(location.value).trim() : null
   const descriptionText = description ? unescapeText(description.value) : null
@@ -327,5 +341,15 @@ export function parseIcs(raw: string): { invite: EmailInvite; uid: string | null
     organizer: organizerText,
     method
   }
-  return { invite, uid: uidProp ? uidProp.value.trim() || null : null }
+  // An unparseable RECURRENCE-ID still scopes the message to one occurrence —
+  // keep its raw value as the key rather than dropping to series scope.
+  const recurrenceId = recurrenceProp
+    ? (parseIcsDate(recurrenceProp.value, recurrenceProp.params, tzOffsets) ??
+      recurrenceProp.value.trim())
+    : null
+  return {
+    invite,
+    uid: uidProp ? uidProp.value.trim() || null : null,
+    recurrenceId: recurrenceId || null
+  }
 }

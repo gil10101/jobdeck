@@ -113,22 +113,76 @@ export function looksPromotional(from: string, subject: string, snippet: string)
   )
 }
 
+/** Hiring vocabulary anywhere in the sender, subject, or scanned text. The
+ *  scheduling phrases that drive an 'interview' classification ("schedule a
+ *  call", "your availability", "next steps") are exactly how ordinary personal
+ *  mail talks too, so the class alone cannot mean job mail — one of these words
+ *  must appear as well. Kept narrow: words that in isolation are also everyday
+ *  English ("team", "offer", "meeting") are deliberately absent. */
+const JOB_CONTEXT =
+  /\b(?:job|jobs|role|roles|position|positions|opening|openings|vacanc(?:y|ies)|opportunit(?:y|ies)|hiring|hire|recruit(?:er|ers|ing|ment)?|talent acquisition|sourcing|candidate|candidacy|applicant|application|applications|apply|applying|applied|r[ée]sum[ée]|cv|interview|interviews|interviewing|screening|phone screen|technical screen|onsite|offer letter|job offer|compensation|salary|career|careers|employment|internship|new grad)\b/i
+
+/** Some evidence — beyond scheduling words — that a message is about the job
+ *  search: the Gmail job sweep matched it, it came from an ATS/assessment
+ *  sender, a tracked company is named in it, or it simply uses hiring
+ *  vocabulary. The last one is what keeps direct recruiter mail from a company
+ *  domain working: the sweep only searches SUBJECTS, so "Hello from Acme" with
+ *  the role in the body never hits it. */
+function hasJobSignal(
+  from: string,
+  subject: string,
+  text: string,
+  jobHit: boolean,
+  trackerHit: boolean
+): boolean {
+  if (jobHit || trackerHit) return true
+  if (fromDomainMatch(from, [...ATS_DOMAINS, ...ASSESSMENT_DOMAINS])) return true
+  return JOB_CONTEXT.test(`${from}\n${subject}\n${text}`)
+}
+
 /** True if a message belongs in the Job tab. ATS/assessment senders are always
- *  job mail, and an interview/assessment classification IS the evidence —
- *  direct recruiter mail from a company domain must not need the Gmail job
- *  sweep to count. Otherwise it must have hit the job sweep — and mail the
- *  classifier could only call 'other' is dropped when it looks promotional, so
- *  a retail "offer"/"schedule" blast that snuck into the sweep does not
- *  pollute the tab. */
+ *  job mail. An interview/assessment classification counts as evidence only
+ *  alongside a job signal — direct recruiter mail from a company domain must
+ *  not need the Gmail job sweep to count, but "let's schedule a call" from a
+ *  friend must not land in the tab (or raise an "Interview email" toast).
+ *  Otherwise it must have hit the job sweep — and mail the classifier could
+ *  only call 'other' is dropped when it looks promotional, so a retail
+ *  "offer"/"schedule" blast that snuck into the sweep does not pollute the
+ *  tab. */
 export function deriveJobRelated(
   from: string,
   subject: string,
   snippet: string,
   jobHit: boolean,
-  classification: EmailClassification
+  classification: EmailClassification,
+  trackerHit: boolean
 ): boolean {
   if (fromDomainMatch(from, [...ATS_DOMAINS, ...ASSESSMENT_DOMAINS])) return true
-  if (classification === 'interview' || classification === 'assessment') return true
   if (classification === 'other' && looksPromotional(from, subject, snippet)) return false
+  if (
+    (classification === 'interview' || classification === 'assessment') &&
+    hasJobSignal(from, subject, snippet, jobHit, trackerHit)
+  ) {
+    return true
+  }
   return jobHit
+}
+
+/** Re-derivation for an ALREADY CACHED message. Bodies are never stored, so
+ *  this only ever sees the snippet — and a message the ingest pass judged job
+ *  mail from its full body (the role named past the ~200-char preview) must
+ *  not be demoted just because the evidence is out of scope now. Only a
+ *  promotional match, which reads the same at both points, can take it back. */
+export function reviseJobRelated(
+  from: string,
+  subject: string,
+  snippet: string,
+  jobHit: boolean,
+  classification: EmailClassification,
+  trackerHit: boolean,
+  wasJobRelated: boolean
+): boolean {
+  if (classification === 'other' && looksPromotional(from, subject, snippet)) return false
+  if (wasJobRelated) return true
+  return deriveJobRelated(from, subject, snippet, jobHit, classification, trackerHit)
 }

@@ -523,7 +523,12 @@ export default function SettingsView(): JSX.Element {
     try {
       const res = await call('workspace:export', undefined)
       // Canceled dialogs stay silent — nothing happened, nothing to report.
-      if (!res.canceled) toast(`Exported ${res.files} file${res.files === 1 ? '' : 's'}`, 'success')
+      if (res.canceled) return
+      // Held-back credential files are named in the count, never omitted quietly.
+      const held = res.skipped
+        ? ` — ${res.skipped} credential file${res.skipped === 1 ? '' : 's'} held back`
+        : ''
+      toast(`Exported ${res.files} file${res.files === 1 ? '' : 's'}${held}`, 'success')
     } catch (err) {
       toast(String(err), 'error')
     } finally {
@@ -1460,7 +1465,7 @@ export default function SettingsView(): JSX.Element {
           </div>
           <Row
             label="Export workspace"
-            hint="Packs your whole workspace — tracker, documents, runs, library — into a verifiable zip you can import on another machine from the setup screen. Credentials and sign-in tokens are never included."
+            hint="Packs your whole workspace — tracker, documents, runs, library — into a verifiable zip you can import on another machine from the setup screen. Credential files are held back, and the export tells you how many."
           >
             <button
               className="btn px-2 py-1 text-[10px]"

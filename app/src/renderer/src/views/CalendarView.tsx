@@ -101,15 +101,32 @@ function JoinButton({ url }: { url: string }): JSX.Element {
   )
 }
 
+/** The end that goes with a corrected start. The editor exposes the start
+ *  only, so an untouched end parsed from the same bad invite would be left
+ *  behind — and an event can then end before it starts. The duration is what
+ *  the user is not editing, so it rides along; an unusable timestamp clears the
+ *  end rather than keeping an incoherent one. */
+function shiftedEnd(event: CalendarEvent, startIso: string): string | null {
+  if (!event.end) return null
+  const oldStart = Date.parse(event.start)
+  const oldEnd = Date.parse(event.end)
+  const newStart = Date.parse(startIso)
+  if (!Number.isFinite(oldStart) || !Number.isFinite(oldEnd) || !Number.isFinite(newStart)) {
+    return null
+  }
+  return new Date(oldEnd + (newStart - oldStart)).toISOString()
+}
+
 /** Inline editor for a proposed event: title + start only — the fields a
- *  mis-parsed invite most often gets wrong. */
+ *  mis-parsed invite most often gets wrong. The end follows the start (see
+ *  shiftedEnd). */
 function EditForm({
   event,
   onSave,
   onCancel
 }: {
   event: CalendarEvent
-  onSave: (patch: { title: string; start: string }) => void
+  onSave: (patch: { title: string; start: string; end: string | null }) => void
   onCancel: () => void
 }): JSX.Element {
   const [title, setTitle] = useState(event.title)
@@ -132,7 +149,10 @@ function EditForm({
         <button
           className="btn btn-primary px-2 py-0.5 text-[10px]"
           disabled={!title.trim() || !start}
-          onClick={() => onSave({ title: title.trim(), start: new Date(start).toISOString() })}
+          onClick={() => {
+            const startIso = new Date(start).toISOString()
+            onSave({ title: title.trim(), start: startIso, end: shiftedEnd(event, startIso) })
+          }}
         >
           Save
         </button>
@@ -278,7 +298,10 @@ export default function CalendarView(): JSX.Element {
     }
   }
 
-  const saveEdit = async (id: string, patch: { title: string; start: string }): Promise<void> => {
+  const saveEdit = async (
+    id: string,
+    patch: { title: string; start: string; end: string | null }
+  ): Promise<void> => {
     await mutate(call('calendar:update', { id, patch }))
     setEditId(null)
   }

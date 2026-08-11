@@ -12,35 +12,64 @@ export interface ExportManifest {
   files: { path: string; bytes: number; sha256: string }[]
 }
 
+/** Paths the archive deliberately left out, workspace-relative. */
+export interface ArchiveResult {
+  manifest: ExportManifest
+  /** Credential files skipped by the denylist — never their contents. */
+  skipped: string[]
+}
+
 const SCHEMA = 'ohmo-export.v1'
 
 /** All files in the zip live under this prefix; manifest.json sits beside it at the root. */
 const ZIP_PREFIX = 'workspace/'
 
-// CREDENTIALS INVARIANT: board-creds.json and token/credential/session files
-// must never enter an export archive (bundled board CLIs write live auth
-// sessions like .agents/skills/*/.session.json inside the workspace). A hit
-// here is skipped and recorded nowhere in the zip.
-function isDenied(name: string): boolean {
-  const n = name.toLowerCase()
-  if (n === 'board-creds.json') return true
-  if (n.includes('token') && n.endsWith('.json')) return true
-  if (n.includes('session') && n.endsWith('.json')) return true
-  if (n.includes('credential')) return true
-  return false
+/** Basenames that are a credential store wherever they appear: the legacy
+ *  board login file, the plaintext creds an older build left in a skill
+ *  folder, and the live auth session bundled board CLIs write. */
+const CREDENTIAL_FILES = new Set([
+  'board-creds.json',
+  'provider-creds.json',
+  'credentials.json',
+  '.credentials.json',
+  '.session.json'
+])
+
+/** Skill folders the bundled board CLIs own. Every dot-file inside one is
+ *  machine state (caches, throttle stamps, sessions), never something the user
+ *  authored, so none of it belongs in a portable archive. */
+const SKILL_DIR = /^\.agents\/skills\/[^/]+\//
+
+// CREDENTIALS INVARIANT: a real credential store must never enter an export
+// archive. Matching is by whole basename (plus the "<name>-creds.json"
+// convention) rather than by substring, so ordinary user files that merely
+// contain "token", "session", or "credential" in their name are exported.
+// Every hit is reported through ArchiveResult.skipped and written nowhere in
+// the zip — the archive is silent about credentials, the caller is not.
+function isDenied(rel: string): boolean {
+  const name = path.basename(rel).toLowerCase()
+  if (CREDENTIAL_FILES.has(name)) return true
+  return /-(creds|credentials)\.json$/.test(name)
 }
 
-function isExcludedFile(name: string): boolean {
-  return name === '.DS_Store' || name.endsWith('.tmp')
+/** Machine state that is neither the user's work nor a credential: scratch
+ *  files, OS droppings, and board-CLI caches. Dropped without a word, because
+ *  reporting them as "held back" would misdescribe a cache as a secret. */
+function isExcludedFile(rel: string): boolean {
+  const name = path.basename(rel)
+  if (name === '.DS_Store' || name.endsWith('.tmp')) return true
+  return name.startsWith('.') && SKILL_DIR.test(rel.toLowerCase())
 }
 
 function sha256(buf: Buffer): string {
   return createHash('sha256').update(buf).digest('hex')
 }
 
-/** Workspace-relative paths (forward slashes) of every file the archive carries. */
-function walkIncluded(root: string): string[] {
-  const out: string[] = []
+/** Workspace-relative paths (forward slashes), split into what the archive
+ *  carries and what the credentials denylist held back. */
+function walkIncluded(root: string): { included: string[]; skipped: string[] } {
+  const included: string[] = []
+  const skipped: string[] = []
   const visit = (dir: string): void => {
     const entries = fs
       .readdirSync(dir, { withFileTypes: true })
@@ -53,28 +82,34 @@ function walkIncluded(root: string): string[] {
         if (rel === 'tmp') continue
         visit(abs)
       } else if (entry.isFile()) {
-        if (isExcludedFile(entry.name)) continue
-        if (isDenied(entry.name)) continue
-        out.push(rel)
+        // Denial is checked first: a credential inside a skill folder is a
+        // secret the caller must hear about, not machine state to drop quietly.
+        if (isDenied(rel)) {
+          skipped.push(rel)
+          continue
+        }
+        if (isExcludedFile(rel)) continue
+        included.push(rel)
       }
       // Anything else (symlinks, sockets) is not portable — skipped.
     }
   }
   visit(root)
-  return out
+  return { included, skipped }
 }
 
 export function buildArchive(
   workspaceDir: string,
   outZipPath: string,
   appVersion: string
-): ExportManifest {
+): ArchiveResult {
   if (!fs.existsSync(workspaceDir) || !fs.statSync(workspaceDir).isDirectory()) {
     throw new Error(`workspace folder not found: ${workspaceDir}`)
   }
   const zip = new AdmZip()
   const files: ExportManifest['files'] = []
-  for (const rel of walkIncluded(workspaceDir)) {
+  const { included, skipped } = walkIncluded(workspaceDir)
+  for (const rel of included) {
     const buf = fs.readFileSync(path.join(workspaceDir, ...rel.split('/')))
     files.push({ path: rel, bytes: buf.length, sha256: sha256(buf) })
     zip.addFile(ZIP_PREFIX + rel, buf)
@@ -90,7 +125,7 @@ export function buildArchive(
   const tmp = `${outZipPath}.tmp`
   zip.writeZip(tmp)
   fs.renameSync(tmp, outZipPath)
-  return manifest
+  return { manifest, skipped }
 }
 
 function validateManifest(value: unknown): ExportManifest {

@@ -1,4 +1,5 @@
 import { GMAIL_API_403_HINT, getAccessToken } from './gmailAuth'
+import { GmailHttpError } from './gmailErrors'
 
 // Thin Gmail REST client over global fetch — no googleapis dependency. All
 // calls are read-only (gmail.readonly scope) and hit gmail.googleapis.com
@@ -19,8 +20,12 @@ export interface GmailMessageMeta {
   snippet: string
 }
 
+/** Ids come from the API, the renderer, and agent tools, so they are validated
+ *  before entering a URL. Thrown as a permanent failure (the 400 Gmail itself
+ *  would answer): a malformed id can never become fetchable, so a sweep must
+ *  record it and move on rather than retry it forever. */
 function assertMessageId(id: string): void {
-  if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error(`invalid message id: ${id}`)
+  if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new GmailHttpError(400, `invalid message id: ${id}`)
 }
 
 async function gmailGet<T>(pathAndQuery: string): Promise<T> {
@@ -29,8 +34,13 @@ async function gmailGet<T>(pathAndQuery: string): Promise<T> {
     headers: { Authorization: `Bearer ${token}` }
   })
   if (!res.ok) {
-    if (res.status === 403) throw new Error(GMAIL_API_403_HINT)
-    throw new Error(`Gmail API request failed (HTTP ${res.status} ${res.statusText})`)
+    // GmailHttpError carries the status so callers can tell a message that is
+    // gone for good (404) from one worth retrying (rate limit, 5xx).
+    if (res.status === 403) throw new GmailHttpError(403, GMAIL_API_403_HINT)
+    throw new GmailHttpError(
+      res.status,
+      `Gmail API request failed (HTTP ${res.status} ${res.statusText})`
+    )
   }
   return (await res.json()) as T
 }
