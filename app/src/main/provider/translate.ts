@@ -2,6 +2,7 @@
 // incoming Anthropic Messages request (as the Claude Code CLI sends it —
 // cache_control markers, block arrays, tool schemas) into plain structures the
 // Gemini and Ollama backends can each map onto their own wire format.
+import type { ProviderId } from '@shared/types'
 
 export interface AnthropicTool {
   name: string
@@ -266,7 +267,7 @@ export type BackendEvent =
     }
 
 export interface ProviderConfig {
-  provider: 'claude' | 'gemini' | 'ollama'
+  provider: ProviderId
   /** Backend model name for the active provider (gemini-2.5-flash, qwen3:14b, …). */
   model: string
   /** Key is carried regardless of provider: web searches run through Gemini

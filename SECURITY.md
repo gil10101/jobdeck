@@ -75,3 +75,12 @@ sensitive material locally:
 Model-provider API keys (when not using a Claude subscription) are stored
 encrypted locally. No key, credential, or document is transmitted anywhere
 except to the provider you configured and the sites you asked the app to visit.
+Under the Ollama provider with a local server there is no model-provider key at
+all, and prompts do not leave the machine — but the agent transcripts described
+above are still written to `~/.claude/projects/`, because the local agent
+runtime is the same under every provider.
+
+Gemini and Ollama are reached through a loopback shim the app starts. Agent
+subprocesses get a per-launch bearer secret for it rather than your real Gemini
+key, so the key never reaches an agent process, and no other local process can
+proxy through it.

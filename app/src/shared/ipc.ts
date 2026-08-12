@@ -23,6 +23,7 @@ import type {
   IntakeFolder,
   IntakeItem,
   LibraryCategory,
+  ProviderId,
   RunEvent,
   RunMeta,
   ScanResult,
@@ -158,7 +159,7 @@ export interface IpcInvokeContract {
   'provider:status': {
     req: void
     res: {
-      provider: 'claude' | 'gemini' | 'ollama'
+      provider: ProviderId
       geminiKeySet: boolean
       geminiModels: string[]
       ollamaKeySet: boolean

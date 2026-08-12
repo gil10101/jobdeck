@@ -2,11 +2,14 @@ import { BrowserWindow, app, dialog, ipcMain } from 'electron'
 import fs from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
-import type { EnvCheck, EnvPreflight, PrereqTool, ToolName } from '@shared/types'
+import type { EnvCheck, EnvPreflight, PrereqId, PrereqTool, ToolName } from '@shared/types'
 import { configError, loadConfig, saveConfig } from './appConfig'
 import { claudeCredentialSignal } from './claudeAuth'
 import { installAllBoards } from './boards/boardsBridge'
 import { normalizeToolOverride, resolveBun, resolveLatex, toolStatus } from './paths'
+import { prereqSpecsFor, scopeNoteFor, sortPrereqs } from './provider/prereqSpec'
+import { geminiKeySet } from './provider/providerKeyStore'
+import { currentProviderConfigOrNull, ollamaReachability } from './provider/providerRuntime'
 import { readManifest, verifyAndExtract } from './workspace/archive'
 
 const requireFrom = createRequire(import.meta.url)
@@ -31,55 +34,100 @@ function claudeRuntimePath(): string | null {
   return null
 }
 
-/** Host prerequisites, worst-first, so the onboarding preflight can show what
- *  is missing before the user triggers an agent run. */
-async function checkPrereqs(): Promise<PrereqTool[]> {
-  const runtime = claudeRuntimePath()
-  const signal = await claudeCredentialSignal()
-  const engine = resolveLatex()
-  const bun = resolveBun()
-  const tools: PrereqTool[] = [
-    {
-      id: 'claude',
-      label: 'Claude Code agent runtime',
+/** What one prerequisite's live probe found. The static half (label, required,
+ *  remedy, url) comes from prereqSpec.ts — this is only the host verdict. */
+interface PrereqProbe {
+  ok: boolean
+  detail: string
+}
+
+/** Ollama's verdict: reachable server AND a usable model actually selected.
+ *  Uses the same reachability probe provider:status shows in Settings. */
+async function probeOllama(config: {
+  ollamaUrl: string
+  ollamaKey: string | null
+  model: string
+}): Promise<PrereqProbe> {
+  const reach = await ollamaReachability(config.ollamaUrl, config.ollamaKey)
+  if (!reach.reachable) return { ok: false, detail: `${config.ollamaUrl} — ${reach.message}` }
+  if (!config.model) {
+    return { ok: false, detail: `${config.ollamaUrl} — ${reach.message}, but no model is selected` }
+  }
+  // Tag match mirrors provider:test: a bare name selects its default tag.
+  const installed = reach.models.some((m) => m === config.model || m.startsWith(`${config.model}:`))
+  return installed
+    ? { ok: true, detail: `${config.ollamaUrl} — ${config.model} installed and ready` }
+    : {
+        ok: false,
+        detail: `${config.ollamaUrl} — "${config.model}" is not installed (installed: ${reach.models.join(', ') || 'none'})`
+      }
+}
+
+/**
+ * Live verdict for one prerequisite id. Only the ids the active provider needs
+ * are ever probed, so an Ollama-only user pays no Claude sign-in scan and a
+ * Claude user makes no request to an Ollama server they never configured.
+ */
+async function probePrereq(id: PrereqId): Promise<PrereqProbe> {
+  if (id === 'claude') {
+    const runtime = claudeRuntimePath()
+    return {
       ok: !!runtime,
-      required: true,
-      detail: runtime ?? `no build for ${process.platform}-${process.arch} in node_modules`,
-      remedy: 'Run npm install in the app folder to fetch the Claude Code runtime for this platform.',
-      url: 'https://docs.claude.com/en/docs/claude-code/overview'
-    },
-    {
-      id: 'claudeAuth',
-      label: 'Claude Code sign-in',
-      ok: !!signal,
-      required: true,
-      detail: signal ?? 'none found for this user (a keychain-stored login cannot be seen from here)',
-      remedy:
-        'Run claude in a terminal and finish the login, export ANTHROPIC_API_KEY, or switch the model provider to Gemini/Ollama in Settings.',
-      url: 'https://docs.claude.com/en/docs/claude-code/setup'
-    },
-    {
-      id: 'latex',
-      label: 'LaTeX engine',
-      ok: !!engine,
-      required: true,
-      detail: engine ? `${engine.path} (${engine.kind})` : 'no pdflatex/xelatex/lualatex/tectonic found',
-      remedy: 'Install tectonic (single binary) or a TeX distribution; a path override lives in Settings.',
-      url: 'https://tectonic-typesetting.github.io'
-    },
-    {
-      id: 'bun',
-      label: 'bun runtime',
-      // resolveBun() falls back to the bare command when nothing was found.
-      ok: bun !== 'bun',
-      required: false,
-      detail: bun !== 'bun' ? bun : 'not found on PATH or in the usual install locations',
-      remedy: 'Install bun (Settings has a one-click install); only job-board scout runs need it.',
-      url: 'https://bun.sh'
+      detail: runtime ?? `no build for ${process.platform}-${process.arch} in node_modules`
     }
-  ]
-  const rank = (t: PrereqTool): number => (t.ok ? 2 : t.required ? 0 : 1)
-  return [...tools].sort((a, b) => rank(a) - rank(b))
+  }
+  if (id === 'claudeAuth') {
+    const signal = await claudeCredentialSignal()
+    return {
+      ok: !!signal,
+      detail: signal ?? 'none found for this user (a keychain-stored login cannot be seen from here)'
+    }
+  }
+  if (id === 'geminiKey') {
+    // Presence only — the key itself never leaves the main process.
+    return geminiKeySet()
+      ? { ok: true, detail: 'a key is stored, encrypted, on this machine' }
+      : { ok: false, detail: 'no Gemini API key stored' }
+  }
+  if (id === 'ollamaServer') {
+    const config = currentProviderConfigOrNull()
+    // Unreachable in practice: the id is only in the list when a workspace (and
+    // therefore a provider) exists. Reported, never guessed.
+    if (!config) return { ok: false, detail: 'no workspace yet, so no Ollama server is configured' }
+    return probeOllama(config)
+  }
+  if (id === 'latex') {
+    const engine = resolveLatex()
+    return {
+      ok: !!engine,
+      detail: engine ? `${engine.path} (${engine.kind})` : 'no pdflatex/xelatex/lualatex/tectonic found'
+    }
+  }
+  const bun = resolveBun()
+  // resolveBun() falls back to the bare command when nothing was found.
+  return {
+    ok: bun !== 'bun',
+    detail: bun !== 'bun' ? bun : 'not found on PATH or in the usual install locations'
+  }
+}
+
+/**
+ * Host prerequisites for the ACTIVE provider, worst-first, so the onboarding
+ * preflight and Settings show what is missing before an agent run is possible.
+ *
+ * The requirement set is derived from the provider (prereqSpec.ts), never
+ * fixed: an Ollama user is not told to sign in to Claude, and a Claude user is
+ * not asked for an Ollama server. Before a workspace exists the provider is
+ * unknown — settings live in the workspace — so only the provider-independent
+ * rows are evaluated and scopeNote says the rest waits for a workspace.
+ */
+async function checkPrereqs(): Promise<Pick<EnvPreflight, 'provider' | 'scopeNote' | 'tools'>> {
+  const provider = currentProviderConfigOrNull()?.provider ?? null
+  const specs = prereqSpecsFor(provider)
+  const tools = await Promise.all(
+    specs.map(async (spec): Promise<PrereqTool> => ({ ...spec, ...(await probePrereq(spec.id)) }))
+  )
+  return { provider, scopeNote: scopeNoteFor(provider), tools: sortPrereqs(tools) }
 }
 
 /** True when `child` is `parent` or sits underneath it. Case-insensitive where
@@ -209,15 +257,16 @@ export function registerCoreIpc(deps: {
   })
 
   // Async on purpose: Settings, onboarding and every Re-check hit this, and
-  // the sign-in probe reads a file that can be huge. Nothing here may block
-  // the main process.
+  // the probes touch the filesystem and (under Ollama) the network. Nothing
+  // here may block the main process.
   // The explicit return type is the contract: EnvPreflight is what
   // IpcInvokeContract declares for this channel, so producer and consumer
   // cannot drift. The per-tool fields serve Settings; `tools` powers
-  // onboarding's preflight.
+  // onboarding's preflight; `provider`/`scopeNote` tell both which provider the
+  // answer is about, so the renderer re-checks after a provider switch.
   handle('env:check', async (): Promise<EnvPreflight> => ({
     ...envCheck(),
-    tools: await checkPrereqs()
+    ...(await checkPrereqs())
   }))
 
   // Manual overrides for the two external tools. Validation happens here, so a

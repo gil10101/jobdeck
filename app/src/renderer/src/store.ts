@@ -10,6 +10,8 @@ import type {
   ConversationMeta,
   IntakeFolder,
   IntakeItem,
+  PrereqTool,
+  ProviderId,
   RunEvent,
   RunMeta,
   TrackerRow
@@ -46,6 +48,25 @@ export interface Toast {
 /** Exactly what config:get returns — aliased off the contract so a field the
  *  handler stops sending is a compile error here, not a silent UI degradation. */
 export type AppConfigInfo = IpcInvokeContract['config:get']['res']
+
+/**
+ * The host prerequisites of the ACTIVE model provider, exactly as env:check
+ * last reported them — the one list every surface renders, so onboarding and
+ * Settings can never disagree about what the current provider needs. Which
+ * rows apply is decided in the main process; nothing here filters them.
+ */
+export interface PreflightSlice {
+  /** null = no successful check yet; a check that failed leaves this null and
+   *  fills `error`, so "nothing missing" and "could not look" stay distinct. */
+  tools: PrereqTool[] | null
+  /** The provider `tools` was judged against; null before a workspace exists. */
+  provider: ProviderId | null
+  /** Main's own one-line statement of what the list covers. */
+  scopeNote: string
+  /** Why the check itself could not run; null when it did. */
+  error: string | null
+  checking: boolean
+}
 
 export interface AssistantSlice {
   open: boolean
@@ -104,6 +125,7 @@ interface AppState {
   candidates: CandidateJob[]
   runs: RunMeta[]
   settings: AppSettings | null
+  preflight: PreflightSlice
   companies: Record<string, CompanyInfo>
   /** Count of calendar events awaiting review — drives the sidebar badge.
    *  Seeded from calendar:list on hydrate, then kept live by push:calendarChanged. */
@@ -121,6 +143,10 @@ interface AppState {
   refreshCandidates: () => Promise<void>
   refreshRuns: () => Promise<void>
   refreshSettings: () => Promise<void>
+  /** Write settings and keep the preflight honest — see the action. Rejects
+   *  with the main-process message so the caller can surface it. */
+  patchSettings: (patch: Partial<AppSettings>) => Promise<void>
+  refreshPreflight: () => Promise<void>
   refreshCompanies: () => Promise<void>
   refreshCalendarProposed: () => Promise<void>
   toggleTheme: () => Promise<void>
@@ -148,7 +174,17 @@ interface AppState {
   clearScoutHarvest: () => void
 }
 
+/** Settings that change what env:check evaluates — which rows apply (provider)
+ *  or what the provider probe talks to. Writing any of them re-runs the check. */
+const PREFLIGHT_SETTINGS: (keyof AppSettings)[] = ['provider', 'ollamaUrl', 'ollamaModel']
+
 let toastSeq = 1
+
+/** Sequence of the newest env:check in flight. Probe latency is provider-shaped
+ *  — Ollama does a network round-trip, Gemini a local read — so two checks
+ *  started in provider order can resolve out of order. Only the latest issued
+ *  check may write the slice; earlier ones are discarded. */
+let preflightSeq = 0
 
 export const useApp = create<AppState>((set, get) => ({
   route: { view: 'tracker' },
@@ -159,6 +195,7 @@ export const useApp = create<AppState>((set, get) => ({
   candidates: [],
   runs: [],
   settings: null,
+  preflight: { tools: null, provider: null, scopeNote: '', error: null, checking: false },
   companies: {},
   calendarProposed: 0,
   toasts: [],
@@ -250,6 +287,33 @@ export const useApp = create<AppState>((set, get) => ({
       console.error('[store] settings:get failed:', err)
     }
   },
+  patchSettings: async (patch) => {
+    const settings = await call('settings:set', patch)
+    document.documentElement.dataset.theme = settings.theme
+    set({ settings })
+    // Invariant: the preflight always describes the provider that is active
+    // now, and the backend it was pointed at. Re-checked here rather than at
+    // each call site, so no screen can write one of these and show a stale
+    // verdict.
+    if (PREFLIGHT_SETTINGS.some((k) => patch[k] !== undefined)) await get().refreshPreflight()
+  },
+  refreshPreflight: async () => {
+    // Claim the sequence BEFORE awaiting: a result may only land while it is
+    // still the newest request, which keeps the slice describing the provider
+    // that is active now rather than whichever probe happened to finish last.
+    const seq = ++preflightSeq
+    set((s) => ({ preflight: { ...s.preflight, checking: true } }))
+    try {
+      const { tools, provider, scopeNote } = await call('env:check', undefined)
+      if (seq !== preflightSeq) return
+      set({ preflight: { tools, provider, scopeNote, error: null, checking: false } })
+    } catch (err) {
+      if (seq !== preflightSeq) return
+      // A check that could not run must not read as a check that passed.
+      const error = err instanceof Error ? err.message : String(err)
+      set({ preflight: { tools: null, provider: null, scopeNote: '', error, checking: false } })
+    }
+  },
   refreshCompanies: async () => {
     try {
       set({ companies: await call('companies:get', undefined) })
@@ -285,6 +349,7 @@ export const useApp = create<AppState>((set, get) => ({
       get().refreshCandidates(),
       get().refreshRuns(),
       get().refreshSettings(),
+      get().refreshPreflight(),
       get().refreshCompanies(),
       get().refreshCalendarProposed()
     ])

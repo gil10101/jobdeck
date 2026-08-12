@@ -1,110 +1,32 @@
 import { useEffect, useState } from 'react'
-import {
-  AlertTriangle,
-  ArrowLeft,
-  ArrowRight,
-  Check,
-  ExternalLink,
-  FolderDown,
-  RefreshCw,
-  Upload
-} from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, FolderDown, Upload } from 'lucide-react'
 import type { ProfileFile } from '@shared/profile'
-import type { PrereqTool, RunMeta } from '@shared/types'
+import type { RunMeta } from '@shared/types'
 import { call, onPush } from '../../api'
 import { useApp } from '../../store'
+import PrereqPanel from '../../components/PrereqPanel'
+import ProviderStep from './ProviderStep'
 import ProfileEditor from '../../components/profile/ProfileEditor'
 import GapAnswers from '../../components/profile/GapAnswers'
 
-type Step = 'workspace' | 'sources' | 'extract' | 'review' | 'done'
+type Step = 'workspace' | 'model' | 'sources' | 'extract' | 'review' | 'done'
 
 /** IPC rejections arrive as Error — show the message, not "Error: message". */
 function errText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-/** What is missing on this host and how to fix it. Advisory only: setup never
- *  blocks on it, because a check can be wrong and the user may know better. */
-function PrereqPanel({
-  tools,
-  error,
-  checking,
-  onRecheck
-}: {
-  /** null until the first check answers — the panel stays hidden until then. */
-  tools: PrereqTool[] | null
-  /** Why the check itself could not run; null when it did. */
-  error: string | null
-  checking: boolean
-  onRecheck: () => void
-}): JSX.Element | null {
-  const recheck = (
-    <button className="btn ml-auto py-0.5 text-[10px]" disabled={checking} onClick={onRecheck}>
-      <RefreshCw size={10} /> {checking ? 'Checking…' : 'Re-check'}
-    </button>
-  )
-  // A check that failed must never look like a check that passed.
-  if (error) {
-    return (
-      <div className="mt-4 rounded-md border border-amber-700 bg-amber-950/30 p-3">
-        <div className="flex items-center gap-2 text-[11px] font-medium text-amber-300">
-          <AlertTriangle size={12} className="shrink-0" />
-          Could not check prerequisites
-          {recheck}
-        </div>
-        <p className="mt-1 text-[11px] leading-relaxed text-gray-400">{error}</p>
-      </div>
-    )
-  }
-  if (!tools || !tools.length) return null
-  const missing = tools.filter((t) => !t.ok)
-  if (!missing.length) {
-    return (
-      <p className="mt-4 text-[11px] text-green-300">
-        <Check size={11} className="mr-1 inline" />
-        Claude Code, a LaTeX engine and bun were all found on this machine.
-      </p>
-    )
-  }
-  return (
-    <div className="mt-4 rounded-md border border-amber-700 bg-amber-950/30 p-3">
-      <div className="flex items-center gap-2 text-[11px] font-medium text-amber-300">
-        <AlertTriangle size={12} className="shrink-0" />
-        {missing.length} prerequisite{missing.length === 1 ? '' : 's'} not found
-        {recheck}
-      </div>
-      <ul className="mt-2 flex flex-col gap-2">
-        {missing.map((t) => (
-          <li key={t.id} className="text-[11px] leading-relaxed">
-            <span className="text-amber-200">{t.label}</span>
-            {!t.required && <span className="ml-1 text-[10px] text-gray-500">(optional)</span>}
-            <span className="text-gray-500"> — {t.detail}</span>
-            <div className="text-gray-400">{t.remedy}</div>
-            <button
-              className="text-cyan-300 hover:underline"
-              onClick={() => void call('app:openExternal', { url: t.url })}
-            >
-              {t.url} <ExternalLink size={9} className="inline" />
-            </button>
-          </li>
-        ))}
-      </ul>
-      <p className="mt-2 text-[10px] leading-relaxed text-gray-500">
-        You can continue anyway. Extraction runs the Claude Code agent, so it will fail while a
-        required item above is unresolved.
-      </p>
-    </div>
-  )
-}
-
 /**
- * First-run setup: workspace → feed the agent everything → extracted profile
- * → review → go. The only path that creates a workspace and a profile.
+ * First-run setup: workspace → model backend → feed the agent everything →
+ * extracted profile → review → go. The only path that creates a workspace and
+ * a profile. The model step sits after the workspace (settings:* and provider:*
+ * exist only once it booted) and before extraction (the first agent run), so
+ * every later screen can describe the backend the user actually chose.
  */
 export default function OnboardingWizard(): JSX.Element {
   const config = useApp((s) => s.config)
   const toast = useApp((s) => s.toast)
-  const [step, setStep] = useState<Step>(config?.workspacePath ? 'sources' : 'workspace')
+  const [step, setStep] = useState<Step>(config?.workspacePath ? 'model' : 'workspace')
   const [busy, setBusy] = useState(false)
   const [uploadNames, setUploadNames] = useState<string[]>([])
   const [pasteText, setPasteText] = useState('')
@@ -114,32 +36,6 @@ export default function OnboardingWizard(): JSX.Element {
   const [gapAnswers, setGapAnswers] = useState<Record<string, string>>({})
   const [runPurpose, setRunPurpose] = useState<'extract' | 'refine'>('extract')
   const [importRestart, setImportRestart] = useState(false)
-  // null until the first check answers. A failed check keeps it null and sets
-  // prereqError instead, so "nothing missing" and "could not look" stay distinct.
-  const [prereqs, setPrereqs] = useState<PrereqTool[] | null>(null)
-  const [prereqError, setPrereqError] = useState<string | null>(null)
-  const [checking, setChecking] = useState(false)
-
-  // ---- host prerequisites ----
-  // Runs before the user can start an agent run, so a missing Claude Code
-  // runtime, LaTeX engine or bun shows as guidance instead of a raw SDK error.
-  const checkPrereqs = async (): Promise<void> => {
-    setChecking(true)
-    try {
-      const env = await call('env:check', undefined)
-      setPrereqs(env.tools)
-      setPrereqError(null)
-    } catch (err) {
-      setPrereqs(null)
-      setPrereqError(errText(err))
-    } finally {
-      setChecking(false)
-    }
-  }
-
-  useEffect(() => {
-    void checkPrereqs()
-  }, [])
 
   // ---- extract/refine run watcher ----
   useEffect(() => {
@@ -180,7 +76,12 @@ export default function OnboardingWizard(): JSX.Element {
       if (!path) return
       await call('workspace:create', { dir: path })
       await useApp.getState().refreshConfig()
-      setStep('sources')
+      // The workspace boot registered settings:* and provider:*; the provider
+      // now has a stored value, so both the settings slice and the preflight
+      // that depends on it are re-read before the model step renders.
+      await useApp.getState().refreshSettings()
+      void useApp.getState().refreshPreflight()
+      setStep('model')
     } catch (err) {
       toast(errText(err), 'error')
     } finally {
@@ -210,7 +111,9 @@ export default function OnboardingWizard(): JSX.Element {
         await finish()
         return
       }
-      setStep('sources')
+      await useApp.getState().refreshSettings()
+      void useApp.getState().refreshPreflight()
+      setStep('model')
     } catch (err) {
       toast(errText(err), 'error')
     } finally {
@@ -293,8 +196,15 @@ export default function OnboardingWizard(): JSX.Element {
     await useApp.getState().hydrate()
   }
 
-  const stepIndex: Record<Step, number> = { workspace: 0, sources: 1, extract: 2, review: 3, done: 4 }
-  const labels = ['Workspace', 'Your material', 'Extract', 'Review', 'Done']
+  const stepIndex: Record<Step, number> = {
+    workspace: 0,
+    model: 1,
+    sources: 2,
+    extract: 3,
+    review: 4,
+    done: 5
+  }
+  const labels = ['Workspace', 'Model', 'Your material', 'Extract', 'Review', 'Done']
 
   return (
     <div className="flex h-full items-center justify-center overflow-auto py-8">
@@ -375,6 +285,23 @@ export default function OnboardingWizard(): JSX.Element {
           </div>
         )}
 
+        {step === 'model' && (
+          <>
+            <ProviderStep />
+            <div className="mt-4 flex items-center gap-2">
+              <button className="btn btn-primary" onClick={() => setStep('sources')}>
+                Continue <ArrowRight size={13} />
+              </button>
+              <span className="text-[10px] text-gray-500">
+                Nothing chosen? Continue keeps the default and Settings can change it later.
+              </span>
+              <button className="btn ml-auto text-gray-500" onClick={finish}>
+                Skip setup for now
+              </button>
+            </div>
+          </>
+        )}
+
         {step === 'sources' && (
           <div className="mt-6">
             <p className="text-xs leading-relaxed text-gray-400">
@@ -402,12 +329,7 @@ export default function OnboardingWizard(): JSX.Element {
               value={pasteText}
               onChange={(e) => setPasteText(e.target.value)}
             />
-            <PrereqPanel
-              tools={prereqs}
-              error={prereqError}
-              checking={checking}
-              onRecheck={() => void checkPrereqs()}
-            />
+            <PrereqPanel />
             <div className="mt-4 flex items-center gap-2">
               <button
                 className="btn btn-primary"
@@ -415,6 +337,9 @@ export default function OnboardingWizard(): JSX.Element {
                 onClick={extract}
               >
                 Extract my profile <ArrowRight size={13} />
+              </button>
+              <button className="btn" onClick={() => setStep('model')}>
+                <ArrowLeft size={13} /> Model
               </button>
               <button className="btn ml-auto text-gray-500" onClick={finish}>
                 Skip setup for now

@@ -12,6 +12,12 @@ Requirements are listed in the [README](README.md#requirements). Node 22.18+ is
 the floor: the self-test scripts execute TypeScript directly, which Node runs
 without a flag from 22.18 and 23.6 onward.
 
+You do not need an Anthropic account to contribute. `npm install` fetches the
+Claude Code agent runtime (`@anthropic-ai/claude-agent-sdk-<platform>-<arch>`),
+which every provider needs, but the model behind it can be Gemini or a local
+Ollama model — pick it in first-run setup or in Settings → Model provider.
+Typecheck and the self-tests run no agents at all and need no credentials.
+
 The app is Electron + React + TypeScript:
 
 - `app/src/main` — main process: agent runner, IPC handlers, stores, email and

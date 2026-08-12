@@ -345,6 +345,11 @@ export interface ScanResult {
   conflicts: ScanConflict[]
 }
 
+/** Model backend an agent run goes through. Lives in AppSettings, which the
+ *  Store persists inside the workspace — so the provider is unknowable until a
+ *  workspace exists, and every consumer must handle that null case. */
+export type ProviderId = 'claude' | 'gemini' | 'ollama'
+
 export interface AppSettings {
   /** Parallel agent runs. Builds are independent (separate folders, separate
    *  LaTeX processes; store writes are serialized in the main process), so
@@ -376,7 +381,7 @@ export interface AppSettings {
   glassdoorSearches: string[]
   /** Which model backend powers agents. claude = the Agent SDK's own auth;
    *  gemini/ollama route the SDK through a local Anthropic-API shim. */
-  provider: 'claude' | 'gemini' | 'ollama'
+  provider: ProviderId
   geminiModel: string
   ollamaUrl: string
   ollamaModel: string
@@ -553,9 +558,21 @@ export interface ToolStatus {
   kind: LatexKind | null
 }
 
+/**
+ * Every prerequisite the app can check. Which of them actually apply depends on
+ * the active provider — prereqSpec.ts owns that mapping, and it is the only
+ * place allowed to decide it, so onboarding and Settings cannot drift.
+ * - claude: the Claude Code agent runtime (native SDK package). Required under
+ *   EVERY provider; it runs the agent loop locally, and gemini/ollama only
+ *   redirect the model calls.
+ * - claudeAuth / geminiKey / ollamaServer: the credential or backend of one
+ *   provider; each applies to that provider alone.
+ */
+export type PrereqId = 'claude' | 'claudeAuth' | 'geminiKey' | 'ollamaServer' | 'latex' | 'bun'
+
 /** One host prerequisite, as shown by the onboarding preflight. */
 export interface PrereqTool {
-  id: 'claude' | 'claudeAuth' | 'latex' | 'bun'
+  id: PrereqId
   label: string
   ok: boolean
   /** false = the app still runs; only the feature named in `remedy` is lost. */
@@ -579,5 +596,15 @@ export interface EnvCheck {
  *  worst-first, for the onboarding preflight. env:setToolPath returns the
  *  EnvCheck half alone — it re-detects the two tools, not the whole host. */
 export interface EnvPreflight extends EnvCheck {
+  /** The provider `tools` was derived from, or null when no workspace exists
+   *  yet and the provider is therefore unknown. Consumers re-run env:check
+   *  after a provider switch and label the panel with this. */
+  provider: ProviderId | null
+  /** One line naming what `tools` covers: which provider it was evaluated for,
+   *  or — when provider is null — that the provider-specific rows are checked
+   *  once a workspace is chosen. */
+  scopeNote: string
+  /** Only the prerequisites that apply to `provider`; provider-independent
+   *  ones alone when it is null. */
   tools: PrereqTool[]
 }

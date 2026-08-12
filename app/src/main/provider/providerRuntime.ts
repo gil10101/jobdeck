@@ -1,4 +1,4 @@
-import type { AppSettings } from '@shared/types'
+import type { AppSettings, ProviderId } from '@shared/types'
 import { claudeSignInSignal } from '../claudeAuth'
 import { listGeminiModels, testGemini } from './geminiBackend'
 import { geminiKey, geminiKeySet, ollamaKey, ollamaKeySet } from './providerKeyStore'
@@ -34,6 +34,17 @@ export function initProviderRuntime(settingsGetter: () => AppSettings): void {
 function settings(): AppSettings {
   if (!getSettings) throw new Error('provider runtime not initialized')
   return getSettings()
+}
+
+/**
+ * The active provider's config, or null before a workspace exists.
+ * initProviderRuntime() runs inside bootWorkspace(), and settings are persisted
+ * in the workspace — so during first-run setup, before a folder is chosen,
+ * there is no provider to report and currentProviderConfig() would throw.
+ * Pre-workspace callers (the env:check preflight) use this instead.
+ */
+export function currentProviderConfigOrNull(): ProviderConfig | null {
+  return getSettings ? currentProviderConfig() : null
 }
 
 export function currentProviderConfig(): ProviderConfig {
@@ -151,29 +162,45 @@ export function providerDisallowedTools(): string[] {
   return currentProviderConfig().provider === 'ollama' ? ['Task', 'Skill'] : []
 }
 
+export interface OllamaReachability {
+  reachable: boolean
+  models: string[]
+  message: string
+}
+
+/** The ONE Ollama reachability probe: provider:status and the env:check
+ *  preflight both go through here, so Settings and onboarding cannot report
+ *  different verdicts about the same server. Never throws. */
+export async function ollamaReachability(url: string, key: string | null): Promise<OllamaReachability> {
+  try {
+    const models = await ollamaModels(url, key)
+    return {
+      reachable: true,
+      models,
+      message: `${models.length} model${models.length === 1 ? '' : 's'} available`
+    }
+  } catch (err) {
+    return {
+      reachable: false,
+      models: [],
+      message: `not reachable: ${err instanceof Error ? err.message : String(err)}`
+    }
+  }
+}
+
 export interface ProviderStatus {
-  provider: 'claude' | 'gemini' | 'ollama'
+  provider: ProviderId
   geminiKeySet: boolean
   /** Chat models this key can use, from the live catalog ([] without a key). */
   geminiModels: string[]
   ollamaKeySet: boolean
-  ollama: { reachable: boolean; models: string[]; message: string }
+  ollama: OllamaReachability
 }
 
 export async function providerStatus(): Promise<ProviderStatus> {
   const s = settings()
   const [ollama, geminiModels] = await Promise.all([
-    ollamaModels(s.ollamaUrl, ollamaKey())
-      .then((models) => ({
-        reachable: true,
-        models,
-        message: `${models.length} model${models.length === 1 ? '' : 's'} available`
-      }))
-      .catch((err: unknown) => ({
-        reachable: false,
-        models: [] as string[],
-        message: `not reachable: ${err instanceof Error ? err.message : String(err)}`
-      })),
+    ollamaReachability(s.ollamaUrl, ollamaKey()),
     listGeminiModels(currentProviderConfig()).catch(() => [] as string[])
   ])
   return {

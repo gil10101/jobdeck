@@ -10,13 +10,18 @@ import type {
   ToolStatus
 } from '@shared/types'
 import type { CustomBoard } from '@shared/profile'
+import type { IpcInvokeContract } from '@shared/ipc'
 import { call } from '../api'
 import { modelOptionsWith } from '../lib/models'
+import { PROVIDER_LABEL, PROVIDER_RUN_NOTE } from '../lib/providers'
 import { useApp } from '../store'
+import PrereqPanel from '../components/PrereqPanel'
 import ProfilePanel from './settings/ProfilePanel'
 import glassdoorLogo from '../assets/boards/glassdoor.svg'
 import jobrightLogo from '../assets/boards/jobright.svg'
 import linkedinLogo from '../assets/boards/linkedin.svg'
+
+type ProviderStatus = IpcInvokeContract['provider:status']['res']
 
 /** Board logo URL for a settings row, when one is bundled. */
 const BOARD_LOGOS: Record<string, string> = {
@@ -132,13 +137,9 @@ export default function SettingsView(): JSX.Element {
   const [gdFeed, setGdFeed] = useState<{ count: number; fetchedAt: string; stale: boolean } | null>(null)
   const [gdSearchesDraft, setGdSearchesDraft] = useState('')
   const [gdSaved, setGdSaved] = useState(true)
-  const [provStatus, setProvStatus] = useState<{
-    provider: 'claude' | 'gemini' | 'ollama'
-    geminiKeySet: boolean
-    geminiModels: string[]
-    ollamaKeySet: boolean
-    ollama: { reachable: boolean; models: string[]; message: string }
-  } | null>(null)
+  // Derived from the channel it consumes: an inline copy of this shape would
+  // drift from provider:status without the compiler noticing.
+  const [provStatus, setProvStatus] = useState<ProviderStatus | null>(null)
   // Never echoes the stored keys back; these hold only fresh input until saved.
   const [geminiKeyDraft, setGeminiKeyDraft] = useState('')
   const [ollamaKeyDraft, setOllamaKeyDraft] = useState('')
@@ -246,9 +247,12 @@ export default function SettingsView(): JSX.Element {
 
   if (!settings) return <div className="p-6 text-sm text-gray-500">Loading…</div>
 
+  // Goes through the store so a provider switch re-evaluates the host
+  // preflight — the same path onboarding writes settings on.
   const patch = (p: Partial<AppSettings>): void => {
-    void call('settings:set', p)
-      .then(() => useApp.getState().refreshSettings())
+    void useApp
+      .getState()
+      .patchSettings(p)
       .catch((err) => toast(String(err), 'error'))
   }
 
@@ -260,11 +264,18 @@ export default function SettingsView(): JSX.Element {
     }
   }
 
+  /** After a credential change: a stored key is itself one of the prerequisites
+   *  the panel below lists, so the shared list is re-read with the status. */
+  const refreshProviderState = async (): Promise<void> => {
+    await refreshProviderStatus()
+    await useApp.getState().refreshPreflight()
+  }
+
   const saveGeminiKey = async (): Promise<void> => {
     try {
       await call('provider:setGeminiKey', { key: geminiKeyDraft })
       setGeminiKeyDraft('')
-      await refreshProviderStatus()
+      await refreshProviderState()
       toast('Gemini key saved (encrypted with the OS keychain)', 'success')
     } catch (err) {
       toast(String(err), 'error')
@@ -274,7 +285,7 @@ export default function SettingsView(): JSX.Element {
   const clearGeminiKeyNow = async (): Promise<void> => {
     try {
       await call('provider:clearGeminiKey', undefined)
-      await refreshProviderStatus()
+      await refreshProviderState()
       toast('Gemini key removed', 'success')
     } catch (err) {
       toast(String(err), 'error')
@@ -285,7 +296,7 @@ export default function SettingsView(): JSX.Element {
     try {
       await call('provider:setOllamaKey', { key: ollamaKeyDraft })
       setOllamaKeyDraft('')
-      await refreshProviderStatus()
+      await refreshProviderState()
       toast('Ollama key saved (encrypted with the OS keychain)', 'success')
     } catch (err) {
       toast(String(err), 'error')
@@ -295,7 +306,7 @@ export default function SettingsView(): JSX.Element {
   const clearOllamaKeyNow = async (): Promise<void> => {
     try {
       await call('provider:clearOllamaKey', undefined)
-      await refreshProviderStatus()
+      await refreshProviderState()
       toast('Ollama key removed', 'success')
     } catch (err) {
       toast(String(err), 'error')
@@ -398,6 +409,9 @@ export default function SettingsView(): JSX.Element {
     try {
       const res = await call('boards:installBun', undefined)
       setBoards(res.status)
+      // The bun prerequisite's own remedy points at this button, so the panel
+      // must reflect the install rather than still asking for it.
+      await useApp.getState().refreshPreflight()
       toast(res.message, res.ok ? 'success' : 'error')
     } catch (err) {
       toast(String(err), 'error')
@@ -541,6 +555,9 @@ export default function SettingsView(): JSX.Element {
     setToolBusy(tool)
     try {
       applyEnv(await call('env:setToolPath', { tool, path: value }))
+      // The override decides the LaTeX verdict, so the prerequisite panel is
+      // stale until it is re-read — a fixed engine must stop reading as missing.
+      await useApp.getState().refreshPreflight()
       toast(value ? 'Path saved' : 'Override cleared — back to auto-detection', 'success')
     } catch (err) {
       toast(String(err), 'error')
@@ -714,11 +731,17 @@ export default function SettingsView(): JSX.Element {
                     void refreshProviderStatus()
                   }}
                 >
-                  {p === 'claude' ? 'Claude' : p === 'gemini' ? 'Gemini' : 'Ollama'}
+                  {PROVIDER_LABEL[p]}
                 </button>
               ))}
             </div>
           </Row>
+          {/* Someone who picked a local model to stay off an Anthropic account
+              needs to see, here, that the runtime requirement is not a sign-in
+              requirement — this is where they come to check. */}
+          <div className="pb-3 text-[11px] leading-relaxed text-gray-500">
+            {PROVIDER_RUN_NOTE[settings.provider ?? 'claude']}
+          </div>
           {settings.provider === 'gemini' && (
             <>
               <Row
@@ -924,6 +947,8 @@ export default function SettingsView(): JSX.Element {
               </div>
             </Row>
           )}
+          {/* Same list onboarding shows, for the backend selected above. */}
+          <PrereqPanel className="mb-3 mt-1" />
         </div>
 
         <div className="panel mt-4 px-4 py-1">
