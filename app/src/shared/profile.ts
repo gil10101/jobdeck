@@ -4,8 +4,14 @@
 
 export const PROFILE_SCHEMA_ID = 'profile.v1'
 
+/** Content-shape version this build understands; module imports above it are
+ *  refused rather than silently read as if they were this shape. */
+export const PROFILE_SCHEMA_VERSION = 1
+
 export interface ProfileFile {
   schema: typeof PROFILE_SCHEMA_ID
+  /** Content-shape version carried into per-module exports; loads default to 1. */
+  schemaVersion: number
   revision: number
   updatedAt: string
   identity: Identity
@@ -202,9 +208,44 @@ export interface DocumentPrefs {
   answersTemplateNotes: string | null
 }
 
+/** The profile sections that export/import as standalone modules — every
+ *  top-level content key of ProfileFile (bookkeeping fields and onboarding
+ *  gaps stay out). `satisfies` pins each name to a real key. */
+export const PROFILE_MODULES = [
+  'identity',
+  'education',
+  'experience',
+  'projects',
+  'skills',
+  'certifications',
+  'publications',
+  'awards',
+  'behavioral',
+  'narrative',
+  'evaluation',
+  'tailoring',
+  'searchConfig',
+  'documents',
+  'customRules'
+] as const satisfies readonly (keyof ProfileFile)[]
+
+export type ProfileModuleName = (typeof PROFILE_MODULES)[number]
+
+export const PROFILE_MODULE_SCHEMA_ID = 'ohmo-profile-module.v1'
+
+/** One profile section serialized as a standalone, reviewable file. */
+export interface ProfileModuleEnvelope {
+  schema: typeof PROFILE_MODULE_SCHEMA_ID
+  module: ProfileModuleName
+  schemaVersion: number
+  exportedAt: string
+  data: unknown
+}
+
 export function emptyProfile(): ProfileFile {
   return {
     schema: PROFILE_SCHEMA_ID,
+    schemaVersion: PROFILE_SCHEMA_VERSION,
     revision: 0,
     updatedAt: new Date(0).toISOString(),
     identity: {

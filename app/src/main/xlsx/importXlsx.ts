@@ -33,10 +33,18 @@ function normPath(p: string): string {
   return p.split('\\').join('/').trim()
 }
 
+/** Application folder name inside a document path. The workspace layout is
+ *  `applications/<slug>/<file>`; the optional leading segment also accepts the
+ *  `documents/applications/...` paths older sheets carry. Anchored so an
+ *  `applications` folder deeper in some unrelated path cannot match. */
+const APPLICATION_PATH_RE = /(?:^|\/)(?:documents\/)?applications\/(?:\[DONE\]\s*)?([^/]+)\//
+
+/** The slug binding an imported row to its on-disk folder. Without it the
+ *  post-import rescan has nothing to match and creates a duplicate row. */
 function deriveSlug(resumePath: string | null, coverPath: string | null): string | null {
   for (const p of [resumePath, coverPath]) {
     if (!p) continue
-    const m = p.match(/documents\/applications\/(?:\[DONE\]\s*)?([^/]+)\//)
+    const m = p.match(APPLICATION_PATH_RE)
     if (m) return stripDonePrefix(m[1])
   }
   return null

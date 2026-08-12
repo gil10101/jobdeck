@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain, webContents } from 'electron'
+import { BrowserWindow, app, dialog, ipcMain, webContents } from 'electron'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -38,11 +38,15 @@ import {
   writeGlassdoorFeed
 } from './boards/glassdoorFeed'
 import { APP_DATA_DIR, REPO_ROOT } from './paths'
+import { loadConfig } from './appConfig'
+import { buildArchive } from './workspace/archive'
 import { clearGeminiKey, clearOllamaKey, setGeminiKey, setOllamaKey } from './provider/providerKeyStore'
 import { ollamaModelDetails, providerStatus, testProvider } from './provider/providerRuntime'
 import { validateProfile } from './profile/profileSchema'
+import { buildEnvelope, parseEnvelope, validateModuleData } from './profile/moduleEnvelope'
 import { loadProfile, saveProfile } from './profile/profileStore'
-import type { ProfileFile } from '@shared/profile'
+import type { ProfileFile, ProfileModuleName } from '@shared/profile'
+import { PROFILE_MODULES, PROFILE_SCHEMA_VERSION, emptyProfile } from '@shared/profile'
 import { allCompanies } from './companies/companiesStore'
 import { backfillCompanies, ensureRating, ensureRatingBg, seedFromText } from './companies/ratingService'
 import type { AgentRunner } from './agent/AgentRunner'
@@ -62,7 +66,8 @@ import {
   parseClientJson,
   setGmailClientId
 } from './email/gmailAuth'
-import { getMessageBody } from './email/gmailClient'
+import { getMessageFull } from './email/gmailClient'
+import { parseIcs } from './email/icsParse'
 import { draftEmailReply } from './email/emailReply'
 import {
   clearEmailCache,
@@ -75,7 +80,18 @@ import {
   setSuggestionState,
   updateMessage
 } from './email/emailStore'
-import { EmailSync } from './email/emailSync'
+import { EmailSync, matchTrackerRow } from './email/emailSync'
+import {
+  addManual,
+  approveEvent,
+  dismissEvent,
+  listEvents,
+  proposeEvent,
+  proposedCount,
+  removeEvent,
+  updateEvent
+} from './calendar/calendarStore'
+import { ReminderLoop } from './calendar/reminders'
 
 export interface Services {
   store: Store
@@ -540,13 +556,81 @@ export function registerIpc(services: Services): void {
 
   // ---- profile ----
   handle('profile:get', () => loadProfile())
-  handle('profile:save', ({ profile }) => {
+  // The ONLY write path for profile.json — module applies go through it too.
+  const saveValidatedProfile = (profile: ProfileFile): ProfileFile => {
     const result = validateProfile(profile)
     if (!result.ok) throw new Error(`profile invalid: ${result.problems.join('; ')}`)
     const saved = saveProfile(result.profile)
     // Views showing the profile (Who I am, Settings) refetch on this push.
     send('push:storeChanged', { domains: ['profile'] })
     return saved
+  }
+  handle('profile:save', ({ profile }) => saveValidatedProfile(profile))
+  // Renderer input is untrusted — a bad name would index arbitrary keys.
+  const knownModule = (module: string): ProfileModuleName => {
+    if (!(PROFILE_MODULES as readonly string[]).includes(module)) {
+      throw new Error(`unknown profile module: ${module}`)
+    }
+    return module as ProfileModuleName
+  }
+  handle('profile:exportModule', async ({ module }) => {
+    const name = knownModule(module)
+    const profile = loadProfile()
+    if (!profile) throw new Error('no profile saved yet — save the profile first')
+    // 'local': anything profile.json is allowed to hold must be exportable.
+    const checked = validateModuleData(name, profile[name], 'local')
+    if (!checked.ok) throw new Error(`${name} data invalid: ${checked.problems.join('; ')}`)
+    const win = services.getWindow()
+    const result = await dialog.showSaveDialog(win ?? new BrowserWindow({ show: false }), {
+      title: `Export profile module: ${name}`,
+      defaultPath: `${name}.module.json`,
+      filters: [{ name: 'Profile module JSON', extensions: ['json'] }]
+    })
+    if (result.canceled || !result.filePath) return { canceled: true, path: null }
+    const envelope = buildEnvelope(name, PROFILE_SCHEMA_VERSION, checked.data)
+    fs.writeFileSync(result.filePath, JSON.stringify(envelope, null, 2), 'utf-8')
+    return { canceled: false, path: result.filePath }
+  })
+  handle('profile:importModule', async () => {
+    const win = services.getWindow()
+    const result = await dialog.showOpenDialog(win ?? new BrowserWindow({ show: false }), {
+      title: 'Import a profile module',
+      properties: ['openFile'],
+      filters: [{ name: 'Profile module JSON', extensions: ['json'] }]
+    })
+    const file = result.filePaths[0]
+    const none = { module: null, current: null, incoming: null }
+    if (result.canceled || !file) return { canceled: true, error: null, ...none }
+    try {
+      const envelope = parseEnvelope(fs.readFileSync(file, 'utf-8'))
+      const checked = validateModuleData(envelope.module, envelope.data)
+      if (!checked.ok) {
+        return {
+          canceled: false,
+          error: `${envelope.module} data invalid: ${checked.problems.join('; ')}`,
+          ...none
+        }
+      }
+      // NO write here — both sides go back for side-by-side review.
+      const saved = loadProfile()
+      return {
+        canceled: false,
+        error: null,
+        module: envelope.module,
+        current: saved ? saved[envelope.module] : null,
+        incoming: checked.data
+      }
+    } catch (err) {
+      return { canceled: false, error: err instanceof Error ? err.message : String(err), ...none }
+    }
+  })
+  // Writes through saveValidatedProfile — the single profile.json write path.
+  handle('profile:applyModule', ({ module, data }) => {
+    const name = knownModule(module)
+    const checked = validateModuleData(name, data)
+    if (!checked.ok) throw new Error(`${name} data invalid: ${checked.problems.join('; ')}`)
+    const profile = loadProfile() ?? emptyProfile()
+    saveValidatedProfile({ ...profile, [name]: checked.data } as ProfileFile)
   })
   handle('profile:draft', ({ runId }) => {
     const meta = runner.get(runId).meta
@@ -746,6 +830,30 @@ export function registerIpc(services: Services): void {
   })
   handle('app:absPath', ({ relPath }) => ({ absPath: toAbs(relPath) }))
 
+  // ---- workspace export (portable zip with hashed manifest) ----
+  // workspace:import lives in coreIpc.ts — it must work before any workspace exists.
+  handle('workspace:export', async () => {
+    const workspacePath = loadConfig().workspacePath
+    if (!workspacePath) throw new Error('no workspace configured')
+    const win = services.getWindow()
+    const d = new Date()
+    const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
+    const result = await dialog.showSaveDialog(win ?? new BrowserWindow({ show: false }), {
+      title: 'Export workspace',
+      defaultPath: `workspace-export-${stamp}.zip`,
+      filters: [{ name: 'Zip archive', extensions: ['zip'] }]
+    })
+    if (result.canceled || !result.filePath) {
+      return { canceled: true, path: null, files: 0, skipped: 0 }
+    }
+    const { manifest, skipped } = buildArchive(workspacePath, result.filePath, app.getVersion())
+    return {
+      canceled: false,
+      path: result.filePath,
+      files: manifest.files.length,
+      skipped: skipped.length
+    }
+  })
   // ---- apply (experimental) ----
   handle('apply:insertText', async ({ text }) => {
     // webview guests are separate webContents; find the apply browser guest.
@@ -824,12 +932,15 @@ export function registerIpc(services: Services): void {
   })
   handle('email:list', ({ filter }) => listCachedMessages(filter))
   handle('email:getBody', async ({ id }) => {
-    const text = await getMessageBody(id)
+    const { text, ics } = await getMessageFull(id)
     // Opening a message is the chance to reclassify it from the full body,
     // healing a snippet-based miss (e.g. a rejection whose decisive line sat
-    // past the preview) and refreshing its tracker suggestion.
-    emailSync.reclassifyFromBody(id, text)
-    return { text }
+    // past the preview), refresh its tracker suggestion, and persist a newly
+    // parsed invite. An unparseable/absent ICS part must not clear a stored
+    // invite, hence undefined (leave alone) instead of null there.
+    const parsed = ics ? parseIcs(ics) : null
+    emailSync.reclassifyFromBody(id, text, parsed ?? undefined)
+    return { text, invite: getCachedMessage(id)?.invite ?? parsed?.invite ?? null }
   })
   handle('email:draftReply', ({ id, instructions }) =>
     draftEmailReply(id, instructions, store.state.settings.model)
@@ -862,6 +973,58 @@ export function registerIpc(services: Services): void {
   })
   handle('email:tags', () => ({ tags: listTags() }))
   handle('email:createTag', ({ name }) => createTag(name))
+
+  // ---- calendar: events extracted from mail, plus reminders ----
+  // Reminders run regardless of Gmail state — manual events exist without it.
+  const reminders = new ReminderLoop({ store, send })
+  reminders.start()
+  const pushCalendarChanged = (): void =>
+    send('push:calendarChanged', { proposed: proposedCount() })
+  handle('calendar:list', () => listEvents())
+  handle('calendar:approve', ({ id }) => {
+    approveEvent(id)
+    pushCalendarChanged()
+    return listEvents()
+  })
+  handle('calendar:dismiss', ({ id }) => {
+    dismissEvent(id)
+    pushCalendarChanged()
+    return listEvents()
+  })
+  handle('calendar:remove', ({ id }) => {
+    removeEvent(id)
+    pushCalendarChanged()
+    return listEvents()
+  })
+  handle('calendar:add', (input) => {
+    addManual(input)
+    pushCalendarChanged()
+    return listEvents()
+  })
+  handle('calendar:update', ({ id, patch }) => {
+    updateEvent(id, patch)
+    pushCalendarChanged()
+    return listEvents()
+  })
+  handle('calendar:propose', (input) => {
+    // Same tracker match the sync path uses, so a card-proposed event carries
+    // its company/row link. The renderer never sees the ICS UID, so dedupe
+    // rests on sourceMessageId + title/start-minute.
+    const msg = input.sourceMessageId ? getCachedMessage(input.sourceMessageId) : null
+    const match = msg ? matchTrackerRow(msg.from, msg.subject, msg.snippet, tracker.listRows()) : null
+    proposeEvent({
+      ...input,
+      icsUid: null,
+      company: match?.company ?? null,
+      rowId: match?.id ?? null,
+      source: 'ics',
+      // The card's Propose is an explicit user action — it may resurrect a
+      // mistakenly dismissed proposal (automatic re-proposals never do).
+      restoreDismissed: true
+    })
+    pushCalendarChanged()
+    return listEvents()
+  })
 
   // ---- assistant: in-app chat, IPC channels mirror AssistantManager 1:1 ----
   const sessionDeps = {

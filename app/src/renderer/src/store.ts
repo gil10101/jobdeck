@@ -14,6 +14,7 @@ import type {
   RunMeta,
   TrackerRow
 } from '@shared/types'
+import type { IpcInvokeContract } from '@shared/ipc'
 import { call, onPush } from './api'
 
 /** Normalize a company name into the key used by the main-process companies map. */
@@ -28,6 +29,7 @@ export type Route =
   | { view: 'history' }
   | { view: 'browser' }
   | { view: 'email' }
+  | { view: 'calendar' }
   | { view: 'runs'; runId?: string }
   | { view: 'library' }
   | { view: 'whoami' }
@@ -41,10 +43,9 @@ export interface Toast {
   text: string
 }
 
-export interface AppConfigInfo {
-  workspacePath: string | null
-  onboardedAt: string | null
-}
+/** Exactly what config:get returns — aliased off the contract so a field the
+ *  handler stops sending is a compile error here, not a silent UI degradation. */
+export type AppConfigInfo = IpcInvokeContract['config:get']['res']
 
 export interface AssistantSlice {
   open: boolean
@@ -104,6 +105,9 @@ interface AppState {
   runs: RunMeta[]
   settings: AppSettings | null
   companies: Record<string, CompanyInfo>
+  /** Count of calendar events awaiting review — drives the sidebar badge.
+   *  Seeded from calendar:list on hydrate, then kept live by push:calendarChanged. */
+  calendarProposed: number
   toasts: Toast[]
   assistant: AssistantSlice
   detailChat: DetailChatSlice
@@ -118,6 +122,7 @@ interface AppState {
   refreshRuns: () => Promise<void>
   refreshSettings: () => Promise<void>
   refreshCompanies: () => Promise<void>
+  refreshCalendarProposed: () => Promise<void>
   toggleTheme: () => Promise<void>
   hydrate: () => Promise<void>
   upsertRunMeta: (meta: RunMeta) => void
@@ -155,6 +160,7 @@ export const useApp = create<AppState>((set, get) => ({
   runs: [],
   settings: null,
   companies: {},
+  calendarProposed: 0,
   toasts: [],
   assistant: initialAssistantSlice(),
   detailChat: { rowId: null, conversationId: null, messages: [], streaming: null, status: 'idle' },
@@ -196,8 +202,9 @@ export const useApp = create<AppState>((set, get) => ({
   refreshConfig: async () => {
     try {
       set({ config: await call('config:get', undefined) })
-    } catch {
-      /* main not ready yet */
+    } catch (err) {
+      // main may not be ready yet; a persistent failure must still be traceable
+      console.error('[store] config:get failed:', err)
     }
   },
 
@@ -215,22 +222,23 @@ export const useApp = create<AppState>((set, get) => ({
         call('intake:listFolders', undefined)
       ])
       set({ intake, intakeFolders })
-    } catch {
-      /* ignore */
+    } catch (err) {
+      // A hydration failure leaves this slice empty; the log is the only trace.
+      console.error('[store] intake refresh failed:', err)
     }
   },
   refreshCandidates: async () => {
     try {
       set({ candidates: await call('candidates:list', undefined) })
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.error('[store] candidates:list failed:', err)
     }
   },
   refreshRuns: async () => {
     try {
       set({ runs: await call('runs:list', undefined) })
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.error('[store] runs:list failed:', err)
     }
   },
   refreshSettings: async () => {
@@ -238,15 +246,23 @@ export const useApp = create<AppState>((set, get) => ({
       const settings = await call('settings:get', undefined)
       document.documentElement.dataset.theme = settings.theme
       set({ settings })
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.error('[store] settings:get failed:', err)
     }
   },
   refreshCompanies: async () => {
     try {
       set({ companies: await call('companies:get', undefined) })
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.error('[store] companies:get failed:', err)
+    }
+  },
+  refreshCalendarProposed: async () => {
+    try {
+      const events = await call('calendar:list', undefined)
+      set({ calendarProposed: events.filter((e) => e.state === 'proposed').length })
+    } catch (err) {
+      console.error('[store] calendar:list failed:', err)
     }
   },
   toggleTheme: async () => {
@@ -269,7 +285,8 @@ export const useApp = create<AppState>((set, get) => ({
       get().refreshCandidates(),
       get().refreshRuns(),
       get().refreshSettings(),
-      get().refreshCompanies()
+      get().refreshCompanies(),
+      get().refreshCalendarProposed()
     ])
   },
 
@@ -466,8 +483,8 @@ export const useApp = create<AppState>((set, get) => ({
     try {
       const history = await call('assistant:listConversations', undefined)
       set((s) => ({ assistant: { ...s.assistant, history } }))
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.error('[store] assistant:listConversations failed:', err)
     }
   }
 }))
@@ -546,4 +563,18 @@ onPush('push:assistantEvent', ({ conversationId, event }) => {
 onPush('push:assistantState', ({ conversationId, status }) => {
   if (conversationId !== useApp.getState().detailChat.conversationId) return
   useApp.setState((s) => ({ detailChat: { ...s.detailChat, status } }))
+})
+
+// Calendar pushes are app-wide (sidebar badge, notification-click focus), so
+// they subscribe here rather than in the view, which may be unmounted.
+onPush('push:calendarChanged', ({ proposed }) => {
+  useApp.setState({ calendarProposed: proposed })
+})
+
+onPush('push:calendarFocus', () => {
+  useApp.setState({ route: { view: 'calendar' } })
+})
+
+onPush('push:emailFocus', () => {
+  useApp.setState({ route: { view: 'email' } })
 })

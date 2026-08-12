@@ -5,6 +5,7 @@ import ToastHost from './components/Toast'
 import ApplyView from './views/ApplyView'
 import AssistantFab from './views/assistant/AssistantFab'
 import BrowserView from './views/BrowserView'
+import CalendarView from './views/CalendarView'
 import EmailView from './views/EmailView'
 import HistoryView from './views/HistoryView'
 import DetailView from './views/DetailView'
@@ -50,6 +51,7 @@ export default function App(): JSX.Element {
           </div>
         )}
         {route.view === 'email' && <EmailView />}
+        {route.view === 'calendar' && <CalendarView />}
         {route.view === 'runs' && <RunsView runId={route.runId} />}
         {route.view === 'library' && <LibraryView />}
         {route.view === 'whoami' && <WhoAmIView />}

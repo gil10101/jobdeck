@@ -9,13 +9,17 @@ import type {
   AssistantUsage,
   BoardId,
   BoardsStatus,
+  CalendarEvent,
   CandidateJob,
   CompanyInfo,
   ConversationMeta,
   CustomBoardTest,
   EmailFilter,
+  EmailInvite,
   EmailMessage,
   EmailStatus,
+  EnvCheck,
+  EnvPreflight,
   IntakeFolder,
   IntakeItem,
   LibraryCategory,
@@ -23,9 +27,10 @@ import type {
   RunMeta,
   ScanResult,
   ScoutHistoryEntry,
+  ToolName,
   TrackerRow
 } from './types'
-import type { CustomBoard, ProfileFile } from './profile'
+import type { CustomBoard, ProfileFile, ProfileModuleName } from './profile'
 
 /** invoke/handle channels: request → response (response is wrapped in IpcResult by the registry). */
 export interface IpcInvokeContract {
@@ -168,13 +173,47 @@ export interface IpcInvokeContract {
   /** Live round-trip against the active provider's backend. */
   'provider:test': { req: void; res: { ok: boolean; message: string } }
   'app:info': { req: void; res: { repoRoot: string; appDataDir: string } }
-  'config:get': { req: void; res: { workspacePath: string | null; onboardedAt: string | null } }
-  'env:check': {
+  /** workspacePath is reported null when the configured workspace failed to
+   *  boot — no workspace IPC exists in that session, so the renderer must show
+   *  first-run recovery rather than an app wired to dead channels.
+   *  configError is set when config.json exists but could not be read: a null
+   *  workspacePath then means "unknown", not "first run". */
+  'config:get': {
     req: void
-    res: { pdflatex: { ok: boolean; path: string }; platform: string; appVersion: string }
+    res: {
+      workspacePath: string | null
+      onboardedAt: string | null
+      bootError: string | null
+      configError: string | null
+    }
   }
+  /** External-tool detection (LaTeX engine + pdftotext) for the Settings rows,
+   *  plus the full host-prerequisite list the onboarding preflight renders. */
+  'env:check': { req: void; res: EnvPreflight }
+  /** Persist a manual tool path. Empty/null clears the override and falls back
+   *  to detection; a path the app cannot execute is rejected with an error. */
+  'env:setToolPath': { req: { tool: ToolName; path: string | null }; res: EnvCheck }
   'workspace:choose': { req: { title?: string }; res: { path: string | null } }
   'workspace:create': { req: { dir: string }; res: { workspacePath: string } }
+  /** Zip the whole workspace (denylist-scanned, hashed manifest) to a user-chosen
+   *  file. `skipped` counts credential files held back, so the export never
+   *  drops anything without saying so. */
+  'workspace:export': {
+    req: void
+    res: { canceled: boolean; path: string | null; files: number; skipped: number }
+  }
+  /** Restore an export into an empty folder and point config at it; live services
+   *  cannot re-root at runtime, so a successful import asks for a relaunch. */
+  'workspace:import': {
+    req: void
+    res: {
+      imported: boolean
+      error: string | null
+      restartRequired: boolean
+      /** The archive carried a profile, so setup has nothing left to ask for. */
+      hasProfile: boolean
+    }
+  }
   'app:pickFile': {
     req: { filters?: { name: string; extensions: string[] }[] }
     res: { path: string | null }
@@ -184,6 +223,28 @@ export interface IpcInvokeContract {
   'profile:draft': {
     req: { runId: string }
     res: { draft: ProfileFile | null; error: string | null }
+  }
+  /** One saved profile section as a standalone <module>.module.json envelope. */
+  'profile:exportModule': {
+    req: { module: ProfileModuleName }
+    res: { canceled: boolean; path: string | null }
+  }
+  /** Parse + validate a module file; NO write — both sides return for review. */
+  'profile:importModule': {
+    req: void
+    res: {
+      canceled: boolean
+      error: string | null
+      module: ProfileModuleName | null
+      current: unknown
+      incoming: unknown
+    }
+  }
+  /** Re-validate the reviewed section and write it through the one profile
+   *  write path (profile:save's logic), so profile.json is never written twice. */
+  'profile:applyModule': {
+    req: { module: ProfileModuleName; data: unknown }
+    res: void
   }
   'onboard:start': {
     req: {
@@ -222,8 +283,10 @@ export interface IpcInvokeContract {
   'email:signIn': { req: void; res: EmailStatus }
   'email:signOut': { req: void; res: EmailStatus }
   'email:list': { req: { filter: EmailFilter }; res: EmailMessage[] }
-  /** Body text fetched live from Gmail (never cached on disk). */
-  'email:getBody': { req: { id: string }; res: { text: string } }
+  /** Body text fetched live from Gmail (never cached on disk). invite is the
+   *  parsed text/calendar metadata, null when the message carries none —
+   *  required so the handler cannot silently drop the invite-healing path. */
+  'email:getBody': { req: { id: string }; res: { text: string; invite: EmailInvite | null } }
   /** AI-draft a reply to one message as the candidate. Read-only Gmail scope
    *  means nothing is sent — the draft is returned for the user to copy or
    *  open in a Gmail compose window. */
@@ -242,6 +305,38 @@ export interface IpcInvokeContract {
   /** Assignable tag names: presets plus every user-created tag. */
   'email:tags': { req: void; res: { tags: string[] } }
   'email:createTag': { req: { name: string }; res: { tags: string[]; created: string } }
+  // ---- calendar (events extracted from mail, plus manual entries) ----
+  'calendar:list': { req: void; res: CalendarEvent[] }
+  'calendar:approve': { req: { id: string }; res: CalendarEvent[] }
+  'calendar:dismiss': { req: { id: string }; res: CalendarEvent[] }
+  'calendar:remove': { req: { id: string }; res: CalendarEvent[] }
+  /** Manual entry — created directly in state 'approved'. */
+  'calendar:add': {
+    req: { title: string; start: string; end: string | null; location: string | null; notes: string | null }
+    res: CalendarEvent[]
+  }
+  'calendar:update': {
+    req: {
+      id: string
+      patch: { title?: string; start?: string; end?: string | null; location?: string | null; notes?: string | null }
+    }
+    res: CalendarEvent[]
+  }
+  /** Invite-card proposal — goes through the proposeEvent dedupe path so the
+   *  meet link and source message survive (a re-synced copy of the same mail
+   *  dedupes against them) and the event lands in state 'proposed' for review. */
+  'calendar:propose': {
+    req: {
+      sourceMessageId: string | null
+      title: string
+      start: string
+      end: string | null
+      location: string | null
+      meetLink: string | null
+      notes: string | null
+    }
+    res: CalendarEvent[]
+  }
   'assistant:send': {
     req: { conversationId: string | null; text: string; model: string | null }
     res: { conversationId: string }
@@ -277,6 +372,12 @@ export interface IpcPushContract {
   'push:assistantMessage': { conversationId: string; message: AssistantMessage }
   /** After every email sync / suggestion action: open-suggestion count. */
   'push:emailChanged': { suggestions: number }
+  /** After any calendar mutation or sync proposal: proposed-event count. */
+  'push:calendarChanged': { proposed: number }
+  /** Reminder notification clicked — bring the calendar view forward. */
+  'push:calendarFocus': Record<string, never>
+  /** New-mail notification clicked — bring the email view forward. */
+  'push:emailFocus': Record<string, never>
 }
 
 export type IpcPushChannel = keyof IpcPushContract
@@ -349,12 +450,18 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'app:info',
   'config:get',
   'env:check',
+  'env:setToolPath',
   'workspace:choose',
   'workspace:create',
+  'workspace:export',
+  'workspace:import',
   'app:pickFile',
   'profile:get',
   'profile:save',
   'profile:draft',
+  'profile:exportModule',
+  'profile:importModule',
+  'profile:applyModule',
   'onboard:start',
   'library:upload',
   'onboarding:complete',
@@ -383,6 +490,13 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'email:update',
   'email:tags',
   'email:createTag',
+  'calendar:list',
+  'calendar:approve',
+  'calendar:dismiss',
+  'calendar:remove',
+  'calendar:add',
+  'calendar:update',
+  'calendar:propose',
   'assistant:send',
   'assistant:stop',
   'assistant:approve',
@@ -404,7 +518,10 @@ export const PUSH_CHANNELS: IpcPushChannel[] = [
   'push:assistantUsage',
   'push:assistantState',
   'push:assistantMessage',
-  'push:emailChanged'
+  'push:emailChanged',
+  'push:calendarChanged',
+  'push:calendarFocus',
+  'push:emailFocus'
 ]
 
 /** Build a local-file:// URL for a repo-relative path (PDF preview etc.). */

@@ -46,9 +46,12 @@ Plus an **in-app AI assistant**: it answers questions about your runs, applicati
 - **Apply view** — the posting's site embedded next to your pre-filled answers, with an experimental type-into-forms helper. Submission stays a human step by design.
 - **Interview runs** — stage-specific prep from the exact documents the interviewer read, mapped to your profile's stories.
 - **Email** — connect Gmail read-only with your own OAuth client (paste the ID or upload the client JSON). The app polls for job-search mail, classifies it (assessment, interview, offer, rejection, confirmation, recruiter — including by ATS/assessment sender domains), and suggests tracker status updates you apply or dismiss (optional auto-apply for status flips). Job, Primary, and All inbox filters plus your own layer: star, hide (hidden means hidden everywhere, including from the assistant), and tags with inline creation. Links in bodies are clickable.
+- **Calendar** — a top-level view for the time-bound half of a search. Interview invites are lifted out of synced mail: `.ics` attachments are parsed (a `METHOD:CANCEL` reply dismisses the event; a re-send with the same UID replaces it), and invites written as plain text in the body are detected as well. Every extracted event arrives as a **proposal** you approve or dismiss — the sidebar badges how many are waiting — so nothing lands in your calendar unasked. Approved events show in a month grid plus upcoming/past lists with a countdown, the company, and a Join button for the meeting link; you can also add and edit entries by hand. Desktop reminders fire the day before and a configurable 5–240 minutes before the start, and clicking one raises the app on the Calendar tab.
 - **Browser** — an embedded browser with tabs, split view (two independent panes, each with its own toolbar and history sidebar), bookmarks, and browsing history. Logins are shared with the Apply view. The **Build button** turns the listing you are looking at into a queued build — the page you see is parsed for its posting, filed into Intake, and sent through the normal build pipeline without copy-paste.
 - **Assistant panel** — streaming chat with conversation history, session resume across restarts, per-reply model picker, a context-usage donut, long-term memory notes, and a draggable expanded window. It can search your synced email (read-only), diagnose scout/board failures, start scouts, rebuild dead builds, and edit your profile through natural language — every state-changing action behind an Approve/Deny card.
 - **Who I am** — one tab showing everything the agents know about you: the full profile, master-résumé context, and knowledge base, with an in-tab section editor. The knowledge base holds background-only material (transcripts, notes, files) agents may use for judgment and answers but never place on a résumé or cover letter.
+- **Profile module export/import** — every section header in the profile editor (Identity, Experience, Skills, Job search, Tailoring, Documents, …) carries its own download/upload pair, in Settings → Candidate profile and in Who I am's edit mode. Export writes that one saved section as a small versioned JSON envelope (`identity.module.json` and friends: schema id, module name, schema version, data). Import validates the file through the same schema path a whole profile takes — a payload that isn't recognizably that module is refused, not merged — then shows Current vs Incoming side by side; nothing touches `profile.json` until you hit Apply.
+- **Workspace export/import** — **Settings → Workspace data → Export workspace…** packs the entire workspace (profile, tracker, applications, generated documents, runs, library) into a zip carrying a `manifest.json` that lists every file with its size and SHA-256. **Import an export…** on the setup screen re-hashes every entry against that manifest before writing and aborts the whole import on any mismatch, so a truncated or tampered archive can't half-restore. Two things to know: the export deliberately leaves credentials out (see [SECURITY.md](SECURITY.md) for exactly what the filter catches — your board passwords, Gmail tokens and API keys live in the OS keychain outside the workspace and never travel), and import requires an **empty destination folder**, into which it writes a `workspace/` directory. Importing over a workspace the app already has open takes effect on the next launch.
 - **Runs view** — a live timeline for every agent run: each tool call, streamed text, errors, and end-of-run context usage. The exact prompt each run received is saved to disk for audit.
 - **Library** — browse and preview everything the app has generated in your workspace.
 
@@ -59,8 +62,8 @@ Plus an **in-app AI assistant**: it answers questions about your runs, applicati
 │                                                              │
 │  renderer (React + zustand + Tailwind)                       │
 │    views: Tracker · Scout · History · Intake · Runs ·        │
-│           Email · Browser · Library · Who I am · Settings ·  │
-│           Apply · Onboarding · Assistant + detail chats      │
+│           Email · Calendar · Browser · Library · Who I am ·  │
+│           Settings · Apply · Onboarding · Assistant + chats  │
 │                        │ typed IPC (invoke + push)           │
 │  preload: thin typed bridge, contextIsolation on             │
 │                        │                                     │
@@ -75,7 +78,9 @@ Plus an **in-app AI assistant**: it answers questions about your runs, applicati
 │    boards ── job-board CLI health, install, credentials,     │
 │    │         app-side jobright feed + custom-board prefetch  │
 │    email ── Gmail OAuth (PKCE loopback), poll sync,          │
-│             classification, tracker suggestions              │
+│    │        classification, tracker suggestions              │
+│    calendar ── ICS/plain-text invite extraction, approval    │
+│                state, desktop reminder loop                  │
 └──────────────┬───────────────────────────┬───────────────────┘
                │                           │
         workspace folder             Claude Agent SDK
@@ -96,7 +101,7 @@ Key design decisions:
 ## Requirements
 
 - **[Claude Code](https://claude.com/claude-code)** installed and logged in — agent runs execute under your Claude subscription via the Agent SDK; the app shows token/context usage, and nothing is billed per-run beyond your plan. The CLI is still required when the model provider is Gemini or Ollama — it runs the agent loop either way; only the model calls are redirected.
-- **Node.js 20+ and npm** (to run the app in development).
+- **Node.js 22.18+ (or 24+) and npm.** There is no packaged installer yet — you run the app from source (`npm run dev`), so Node is required to use it, not only to develop it. The self-tests execute TypeScript directly, which Node runs without a flag from 22.18 and 23.6 onward; that is the floor.
 - **[bun](https://bun.sh)** — runs the job-board search CLIs. Auto-detected (including version-manager installs); Settings offers a one-click install if missing.
 - **A LaTeX engine** — [tectonic](https://tectonic-typesetting.github.io) (single binary, recommended) or any TeX distribution providing pdflatex/xelatex/lualatex. Auto-detected, with a manual path override in Settings.
 - Optional: `pdftotext` from [poppler](https://poppler.freedesktop.org/) for the ATS text-layer check (the check degrades gracefully without it).
@@ -104,8 +109,8 @@ Key design decisions:
 ## Getting started
 
 ```bash
-git clone https://github.com/gil10101/jobdeck
-cd jobdeck/app
+git clone https://github.com/gil10101/ohmo
+cd ohmo/app
 npm install
 npm run dev
 ```
@@ -118,7 +123,7 @@ First launch opens the onboarding wizard:
 
 Then configure **Settings → Job boards** (jobright credentials if you use it; LinkedIn and freehire need none) and run your first scout from the Scout view. Optionally connect Gmail under **Settings → Email** with your own Google OAuth client to get inbox classification and tracker status suggestions.
 
-A starter master-résumé template lives at `cv/main_example.tex` — a plain-`article`, single-column, ATS-safe one-pager. Drop your filled-in version into your workspace's `master/` folder and build runs will tailor from it; without one, the build agent constructs the layout from the same spec.
+A starter master-résumé template lives at `cv/main_example.tex` — a plain-`article`, single-column, ATS-safe one-pager. Drop your filled-in version into your workspace's `master/` folder and build runs will tailor from it. The build agent looks for exactly two filenames there, in order: `<FileBasename>_Resume.tex` (the sanitized output stem from your profile — `Jane_Doe_Resume.tex`) and `main_example.tex`. With neither present it constructs the layout from the same spec instead.
 
 ## Configuration
 
@@ -127,23 +132,29 @@ Everything lives in **Settings**:
 - **Model provider** — which backend powers every agent: **Claude** (default, your Claude Code auth), **Gemini** (bring your own API key, keychain-encrypted), or **Ollama** (local server URL + model + context window; an optional ollama.com API key unlocks cloud models, marked "cloud" in the picker, and the model hint shows each model's context ceiling and tool support). Gemini and Ollama run through a local loopback shim that speaks the Anthropic Messages API to the Agent SDK and translates streaming + tool calls to the backend's wire format — conversations keep their full context when you switch, because SDK session transcripts live on disk and replay through whichever backend is active. A Test button validates key/model/URL with one tiny request. Web search keeps working off-Anthropic: search requests execute through Gemini's Google Search grounding whenever a Gemini key is saved — under the Ollama provider too, so a local model plus a Gemini key still searches the web (rating lookups included). Without a key, agents get an explicit "search unavailable" result instead of silent failure. Notes: tool-calling quality varies by model (Claude models are tuned for this harness), and Ollama models must be tool-capable.
 - **Agent runs** — model override (aliases or pinned versions; Claude provider only), max turns per run, concurrent runs, live text streaming.
 - **Job boards** — per-board enable toggles, install status with one-click repair, jobright credentials (keychain-encrypted) and connection test, custom Greenhouse/Lever/Ashby company boards, bun runtime detection/install, Glassdoor rating backfill.
-- **Email (Gmail)** — bring your own Google OAuth client (paste the client ID/secret or upload the downloaded JSON), sign in read-only, set the poll interval, and choose whether status suggestions auto-apply.
+- **Email (Gmail)** — bring your own Google OAuth client (paste the client ID/secret or upload the downloaded JSON), sign in read-only, set the poll interval, and choose whether status suggestions auto-apply. Desktop notifications (new interview/assessment/offer mail plus calendar reminders) and the reminder lead time in minutes live here too.
 - **Candidate profile** — the structured profile editor, profile refinement runs, master-résumé context, and the knowledge base.
 - **Workflow** — folder renaming on submit, the experimental apply-form typing helper.
 - **Appearance** — dark/light theme, sidebar tab toggles, draggable panel dividers.
 
 ## Data & privacy
 
-- **Local-first**: your profile, applications, generated documents, run transcripts, and assistant conversations are plain files in your chosen workspace folder. The app phones nothing home.
-- **What leaves your machine**: agent runs send their prompts (which include relevant profile data) to Anthropic through your own Claude login, exactly like using Claude Code directly; scout runs and the rating lookup query the job boards / search from your IP; the email feature talks directly to Google's Gmail API with your own OAuth client.
-- **Email stays yours**: Gmail access is read-only scope through an OAuth client you create; the refresh token and client secret are encrypted with the OS keychain, message headers are cached locally with owner-only file permissions, and signing out wipes the cache. Email content is treated as untrusted third-party data everywhere agents can see it.
+- **Local-first**: your profile, applications, generated documents, run transcripts, and assistant conversations are plain files in your chosen workspace folder. There is no telemetry, no analytics, and no update check — this project operates no server and receives nothing about you.
+- **What leaves your machine**, in full:
+  - agent runs send their prompts (which include relevant profile data) to Anthropic through your own Claude login, exactly like using Claude Code directly — or to Gemini / your Ollama server instead, if you configured one;
+  - scout runs and the Glassdoor rating lookup query the job boards and search engines from your IP;
+  - the email feature talks directly to Google's Gmail API with your own OAuth client;
+  - the **Browser view fetches favicons from a third party**: every open tab, bookmark row and history row requests `https://icons.duckduckgo.com/ip3/<hostname>.ico`. That sends the *hostname* of each of those pages to DuckDuckGo (nothing else — no path, no query, no page content), and it is the only remote host the renderer's content-security policy allows to serve images. The Apply and Browser `<webview>`s themselves load real sites, so those sites see you as an ordinary visitor.
+- **Agent transcripts are files too**: the Claude Agent SDK stores each run's conversation as plain `.jsonl` under `~/.claude/projects/`, outside your workspace. Anything an agent read — posting text, and Gmail message bodies when you ask the assistant to open one or draft a reply — is in there. See [SECURITY.md](SECURITY.md).
+- **Email stays yours**: Gmail access is read-only scope through an OAuth client you create; the refresh token and client secret are encrypted with the OS keychain, message headers and snippets (never bodies) are cached locally with owner-only file permissions, and signing out wipes the cache. Email content is treated as untrusted third-party data everywhere agents can see it. Calendar entries are derived facts (title, time, location, meeting link) held under the same owner-only permissions — message bodies are never copied into them, and no calendar service is contacted.
 - **Job-board access is personal-use**: the CLIs use your own accounts and public endpoints, deliberately rate-limited to human-scale traffic. Keep volume low; respect each site's terms.
 
 ## Repository layout
 
 ```
 app/                  the Electron app
-  src/main/           main process: agent runner, assistant, stores, boards, IPC
+  src/main/           main process: agent runner, assistant, stores, boards,
+                      email, calendar, IPC
   src/preload/        typed IPC bridge
   src/renderer/       React UI
   src/shared/         IPC contract + types shared across processes
@@ -151,9 +162,18 @@ app/                  the Electron app
   resources/skills/   bundled job-board CLIs (scaffolded into workspaces)
 .agents/skills/       source of truth for the job-board CLIs
 cv/                   starter master-résumé template (main_example.tex)
-cover_letters/        LaTeX cover-letter class + fonts (manual-use heritage)
-assets/mascot/        Pip
+cover_letters/        standalone LaTeX reference: cover.cls (fontspec-based, so
+                      xelatex/lualatex only), an example letter using it, and
+                      the Lato/Raleway fonts it loads by relative path. No code
+                      path reads any of it — build runs write a self-contained
+                      `article` cover letter matching the résumé's font
+assets/mascot/        mascot GIFs
 ```
+
+`assets/mascot/cat_note_collar.gif` was added here as this app's mascot and is
+the header image at the top of this file. `pip_flight_loop.gif` is Pip, the
+courier bird, carried over from the upstream `ai-job-search` project (see
+[Acknowledgements](#acknowledgements)); nothing in this repo references it.
 
 ## Roadmap
 
@@ -162,9 +182,13 @@ assets/mascot/        Pip
 ## Acknowledgements
 
 - This project grew out of [Mads Lorentzen's ai-job-search](https://github.com/MadsLorentzen/ai-job-search) — a CLAUDE.md-driven job-application framework for Claude Code. The desktop app reimplements that workflow as a standalone application.
-- [Mikkel Krogholm](https://github.com/mikkelkrogsholm) ([skills repo](https://github.com/mikkelkrogsholm/skills)) for the original job-search CLI skill pattern.
+- [Mikkel Krogsholm](https://github.com/mikkelkrogsholm) ([skills repo](https://github.com/mikkelkrogsholm/skills)) for the original job-search CLI skill pattern.
 
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
+
+Bundled third-party assets keep their own licenses: the Lato fonts under
+`cover_letters/OpenFonts/fonts/` are distributed under the
+[SIL Open Font License 1.1](https://openfontlicense.org/).

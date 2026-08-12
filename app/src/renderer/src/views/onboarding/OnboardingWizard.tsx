@@ -1,7 +1,16 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeft, ArrowRight, Check, Upload } from 'lucide-react'
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  ExternalLink,
+  FolderDown,
+  RefreshCw,
+  Upload
+} from 'lucide-react'
 import type { ProfileFile } from '@shared/profile'
-import type { RunMeta } from '@shared/types'
+import type { PrereqTool, RunMeta } from '@shared/types'
 import { call, onPush } from '../../api'
 import { useApp } from '../../store'
 import ProfileEditor from '../../components/profile/ProfileEditor'
@@ -9,9 +18,88 @@ import GapAnswers from '../../components/profile/GapAnswers'
 
 type Step = 'workspace' | 'sources' | 'extract' | 'review' | 'done'
 
+/** IPC rejections arrive as Error — show the message, not "Error: message". */
+function errText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+/** What is missing on this host and how to fix it. Advisory only: setup never
+ *  blocks on it, because a check can be wrong and the user may know better. */
+function PrereqPanel({
+  tools,
+  error,
+  checking,
+  onRecheck
+}: {
+  /** null until the first check answers — the panel stays hidden until then. */
+  tools: PrereqTool[] | null
+  /** Why the check itself could not run; null when it did. */
+  error: string | null
+  checking: boolean
+  onRecheck: () => void
+}): JSX.Element | null {
+  const recheck = (
+    <button className="btn ml-auto py-0.5 text-[10px]" disabled={checking} onClick={onRecheck}>
+      <RefreshCw size={10} /> {checking ? 'Checking…' : 'Re-check'}
+    </button>
+  )
+  // A check that failed must never look like a check that passed.
+  if (error) {
+    return (
+      <div className="mt-4 rounded-md border border-amber-700 bg-amber-950/30 p-3">
+        <div className="flex items-center gap-2 text-[11px] font-medium text-amber-300">
+          <AlertTriangle size={12} className="shrink-0" />
+          Could not check prerequisites
+          {recheck}
+        </div>
+        <p className="mt-1 text-[11px] leading-relaxed text-gray-400">{error}</p>
+      </div>
+    )
+  }
+  if (!tools || !tools.length) return null
+  const missing = tools.filter((t) => !t.ok)
+  if (!missing.length) {
+    return (
+      <p className="mt-4 text-[11px] text-green-300">
+        <Check size={11} className="mr-1 inline" />
+        Claude Code, a LaTeX engine and bun were all found on this machine.
+      </p>
+    )
+  }
+  return (
+    <div className="mt-4 rounded-md border border-amber-700 bg-amber-950/30 p-3">
+      <div className="flex items-center gap-2 text-[11px] font-medium text-amber-300">
+        <AlertTriangle size={12} className="shrink-0" />
+        {missing.length} prerequisite{missing.length === 1 ? '' : 's'} not found
+        {recheck}
+      </div>
+      <ul className="mt-2 flex flex-col gap-2">
+        {missing.map((t) => (
+          <li key={t.id} className="text-[11px] leading-relaxed">
+            <span className="text-amber-200">{t.label}</span>
+            {!t.required && <span className="ml-1 text-[10px] text-gray-500">(optional)</span>}
+            <span className="text-gray-500"> — {t.detail}</span>
+            <div className="text-gray-400">{t.remedy}</div>
+            <button
+              className="text-cyan-300 hover:underline"
+              onClick={() => void call('app:openExternal', { url: t.url })}
+            >
+              {t.url} <ExternalLink size={9} className="inline" />
+            </button>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 text-[10px] leading-relaxed text-gray-500">
+        You can continue anyway. Extraction runs the Claude Code agent, so it will fail while a
+        required item above is unresolved.
+      </p>
+    </div>
+  )
+}
+
 /**
  * First-run setup: workspace → feed the agent everything → extracted profile
- * → review → go. Mirrors the repo's /setup flow, in-app.
+ * → review → go. The only path that creates a workspace and a profile.
  */
 export default function OnboardingWizard(): JSX.Element {
   const config = useApp((s) => s.config)
@@ -25,6 +113,33 @@ export default function OnboardingWizard(): JSX.Element {
   const [draft, setDraft] = useState<ProfileFile | null>(null)
   const [gapAnswers, setGapAnswers] = useState<Record<string, string>>({})
   const [runPurpose, setRunPurpose] = useState<'extract' | 'refine'>('extract')
+  const [importRestart, setImportRestart] = useState(false)
+  // null until the first check answers. A failed check keeps it null and sets
+  // prereqError instead, so "nothing missing" and "could not look" stay distinct.
+  const [prereqs, setPrereqs] = useState<PrereqTool[] | null>(null)
+  const [prereqError, setPrereqError] = useState<string | null>(null)
+  const [checking, setChecking] = useState(false)
+
+  // ---- host prerequisites ----
+  // Runs before the user can start an agent run, so a missing Claude Code
+  // runtime, LaTeX engine or bun shows as guidance instead of a raw SDK error.
+  const checkPrereqs = async (): Promise<void> => {
+    setChecking(true)
+    try {
+      const env = await call('env:check', undefined)
+      setPrereqs(env.tools)
+      setPrereqError(null)
+    } catch (err) {
+      setPrereqs(null)
+      setPrereqError(errText(err))
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  useEffect(() => {
+    void checkPrereqs()
+  }, [])
 
   // ---- extract/refine run watcher ----
   useEffect(() => {
@@ -67,7 +182,37 @@ export default function OnboardingWizard(): JSX.Element {
       await useApp.getState().refreshConfig()
       setStep('sources')
     } catch (err) {
-      toast(String(err), 'error')
+      toast(errText(err), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const importExport = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      const res = await call('workspace:import', undefined)
+      if (res.error) {
+        toast(res.error, 'error')
+        return
+      }
+      if (!res.imported) return
+      if (res.restartRequired) {
+        // Live services cannot re-root — the import goes live on next launch.
+        setImportRestart(true)
+        return
+      }
+      await useApp.getState().refreshConfig()
+      toast('Workspace imported', 'success')
+      // An archive carrying a profile has nothing left for setup to gather —
+      // asking for CVs would be asking for what was just restored.
+      if (res.hasProfile) {
+        await finish()
+        return
+      }
+      setStep('sources')
+    } catch (err) {
+      toast(errText(err), 'error')
     } finally {
       setBusy(false)
     }
@@ -82,7 +227,7 @@ export default function OnboardingWizard(): JSX.Element {
         toast(`${added} file${added === 1 ? '' : 's'} added to your library`, 'success')
       }
     } catch (err) {
-      toast(String(err), 'error')
+      toast(errText(err), 'error')
     }
   }
 
@@ -99,7 +244,7 @@ export default function OnboardingWizard(): JSX.Element {
       setStep('extract')
       void useApp.getState().refreshRuns()
     } catch (err) {
-      toast(String(err), 'error')
+      toast(errText(err), 'error')
     } finally {
       setBusy(false)
     }
@@ -121,7 +266,7 @@ export default function OnboardingWizard(): JSX.Element {
       setStep('extract')
       void useApp.getState().refreshRuns()
     } catch (err) {
-      toast(String(err), 'error')
+      toast(errText(err), 'error')
     } finally {
       setBusy(false)
     }
@@ -135,7 +280,7 @@ export default function OnboardingWizard(): JSX.Element {
       toast(`Profile saved: ${saved.identity.fullName}`, 'success')
       setStep('done')
     } catch (err) {
-      toast(String(err), 'error')
+      toast(errText(err), 'error')
     } finally {
       setBusy(false)
     }
@@ -177,15 +322,56 @@ export default function OnboardingWizard(): JSX.Element {
 
         {step === 'workspace' && (
           <div className="mt-6">
+            {config?.bootError && (
+              <div className="mb-4 rounded-md border border-red-900 bg-panel2 p-3 text-[11px] leading-relaxed text-red-400">
+                <AlertTriangle size={12} className="mr-1 inline" />
+                Your saved workspace could not be opened, so this session started without one:{' '}
+                {config.bootError}
+                <div className="mt-1 text-gray-400">
+                  Make that folder reachable and writable, then quit and reopen the app to load it —
+                  or pick a different folder below.
+                </div>
+              </div>
+            )}
+            {config?.configError && (
+              <div className="mb-4 rounded-md border border-red-900 bg-panel2 p-3 text-[11px] leading-relaxed text-red-400">
+                <AlertTriangle size={12} className="mr-1 inline" />
+                Your saved settings could not be read, so this may not be a first run: {config.configError}
+                <div className="mt-1 text-gray-400">
+                  If you already have a workspace, quit and repair that file first — setting up a new
+                  one moves the unreadable copy aside and points the app at the new folder.
+                </div>
+              </div>
+            )}
             <p className="text-xs leading-relaxed text-gray-400">
               Everything — tracker, tailored documents, agent runs, your library — lives inside one
-              workspace folder you choose.
+              workspace folder you choose. Pick a folder outside this app&apos;s source checkout: it
+              will hold your profile and run transcripts.
             </p>
             <div className="mt-5 flex flex-col gap-2">
-              <button className="btn btn-primary justify-center py-2.5" disabled={busy} onClick={createWorkspace}>
+              <button
+                className="btn btn-primary justify-center py-2.5"
+                disabled={busy || importRestart}
+                onClick={createWorkspace}
+              >
                 Create a new workspace…
               </button>
+              <button
+                className="btn justify-center py-2.5"
+                disabled={busy || importRestart}
+                onClick={importExport}
+              >
+                <FolderDown size={13} /> Import an export…
+              </button>
+              <p className="text-[11px] leading-relaxed text-gray-500">
+                Moving from another machine? Import the zip made with Settings → Export workspace.
+              </p>
             </div>
+            {importRestart && (
+              <p className="mt-3 text-[11px] leading-relaxed text-amber-300">
+                Import complete — quit and reopen the app to load the imported workspace.
+              </p>
+            )}
           </div>
         )}
 
@@ -215,6 +401,12 @@ export default function OnboardingWizard(): JSX.Element {
               placeholder="Optional: paste anything extra — profile links (LinkedIn/GitHub/portfolio), skills lists, salary expectations, locations, deal-breakers…"
               value={pasteText}
               onChange={(e) => setPasteText(e.target.value)}
+            />
+            <PrereqPanel
+              tools={prereqs}
+              error={prereqError}
+              checking={checking}
+              onRecheck={() => void checkPrereqs()}
             />
             <div className="mt-4 flex items-center gap-2">
               <button

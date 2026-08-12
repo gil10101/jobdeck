@@ -1,10 +1,20 @@
+import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { ProfileFile } from '@shared/profile'
 import { emptyProfile } from '@shared/profile'
-import { APP_DIR, MASTER_DIR, REPO_ROOT, resolveBun, resolveLatex, toAbs, todayISO, todayMMDD } from '../paths'
+import {
+  APP_DIR,
+  MASTER_DIR,
+  REPO_ROOT,
+  resolveBun,
+  resolveLatex,
+  resolvePdftotext,
+  toAbs,
+  todayISO,
+  todayMMDD
+} from '../paths'
 import { boardsAvailabilityNote } from '../boards/boardsBridge'
-import { loadConfig } from '../appConfig'
 import { pickExampleFolder } from '../fsops/FolderScanner'
 import {
   renderAnswersInfoMd,
@@ -22,6 +32,22 @@ const SCOUT_TEMPLATE_PATH = path.join(APP_DIR, 'resources', 'prompts', 'scout_jo
 const INTERVIEW_TEMPLATE_PATH = path.join(APP_DIR, 'resources', 'prompts', 'interview_prep.md')
 const ONBOARD_TEMPLATE_PATH = path.join(APP_DIR, 'resources', 'prompts', 'onboard_profile.md')
 const REFINE_TEMPLATE_PATH = path.join(APP_DIR, 'resources', 'prompts', 'refine_profile.md')
+
+/**
+ * Fence a block of untrusted third-party text so the text cannot break out of
+ * it. A fixed tag is forgeable: a posting containing the literal closing tag
+ * would end the data region and have everything after it read as prompt. The
+ * tag therefore carries a per-call random id the author cannot predict, and
+ * any lookalike closing tag in the content is defanged as well, so neither
+ * guessing nor echoing an earlier run's id can escape.
+ */
+export function fenceUntrusted(kind: string, text: string): string {
+  const id = randomBytes(6).toString('hex')
+  const body = text.replace(new RegExp(`</?${kind}(-[0-9a-f]{12})?>`, 'gi'), (m) =>
+    m.replace('<', '‹').replace('>', '›')
+  )
+  return `<${kind}-${id}>\n${body}\n</${kind}-${id}>`
+}
 
 function fill(template: string, replacements: Record<string, string>): string {
   let out = template
@@ -105,15 +131,22 @@ function imagesSection(imagePaths: string[]): string {
   ].join('\n')
 }
 
+/** The ONLY filenames read as a master résumé from the workspace master/
+ *  folder: the profile's own output stem, then the shipped starter template's
+ *  name. A file under any other name there is ignored. */
+function masterResumeNames(fileBasename: string): [string, string] {
+  return [`${fileBasename}_Resume.tex`, 'main_example.tex']
+}
+
 function masterResumePath(p: ProfileFile): string {
-  const candidates = [
-    path.join(MASTER_DIR, `${p.documents.fileBasename}_Resume.tex`),
-    path.join(MASTER_DIR, 'main_example.tex') // fallback name for a user-provided master résumé
-  ]
-  for (const c of candidates) {
-    if (fs.existsSync(c)) return `master/${path.basename(c)}`
+  const names = masterResumeNames(p.documents.fileBasename)
+  for (const name of names) {
+    if (fs.existsSync(path.join(MASTER_DIR, name))) return `master/${name}`
   }
-  return '(no master résumé yet — construct the preamble yourself: article class, ATS-safe single column, lmodern, glyphtounicode)'
+  // The accepted names are spelled out so a master résumé saved under some
+  // other name reads as a fixable mistake instead of a missing file.
+  const accepted = names.map((n) => `\`master/${n}\``).join(' or ')
+  return `(no master résumé — the only names read are ${accepted}, and a file under any other name in master/ is ignored. Construct the preamble yourself: article class, ATS-safe single column, lmodern, glyphtounicode)`
 }
 
 function exampleFolderLine(): string {
@@ -124,8 +157,8 @@ function exampleFolderLine(): string {
 }
 
 function pdftotextLine(): string {
-  const configured = loadConfig().pdftotextPath
-  if (configured && fs.existsSync(configured)) {
+  const configured = resolvePdftotext()
+  if (configured) {
     return `Run \`"${configured}" -layout <resume pdf> -\` and verify: name/email/phone extract as literal text, no ligature garbage (e.g. "eciency"), top posting keywords present in the text layer. Record the outcome in report.json atsCheck.`
   }
   return 'pdftotext is not available on this machine — set `"atsCheck": "skipped"` in report.json (do not fail the build over this).'
@@ -144,11 +177,11 @@ function latexLine(): string {
       '`\\input glyphtounicode` / `\\pdfgentounicode=1` MUST be wrapped in',
       '`\\ifdefined\\pdfgentounicode ... \\fi` so it is skipped under tectonic (XeTeX already',
       'embeds a real Unicode text layer).',
-      'PAGE COUNT: read it from the engine log, nowhere else —',
-      '`grep "Output written" <file>.log` prints `(N pages`/`(1 page` after every compile.',
-      'Do NOT use `mdls` (Spotlight indexes new files asynchronously, so it returns null or',
-      'stale counts) and do NOT grep the PDF bytes for `/Type /Page` or `/Count` (tectonic',
-      'writes compressed object streams, so both find nothing).'
+      'PAGE COUNT: take it from the engine log `<file>.log`, nowhere else — Read that file and',
+      'find its `Output written on <file>.pdf (N pages, ...)` line, written after every compile.',
+      'Do NOT ask the operating system for PDF metadata (file-indexing services answer with stale',
+      'or empty values for a file written seconds ago) and do NOT search the PDF bytes for',
+      '`/Type /Page` or `/Count` (tectonic writes compressed object streams, so both find nothing).'
     ].join(' ')
   }
   return `Compile with ${eng.kind}: \`"${eng.path}" -interaction=nonstopmode <file.tex>\` run TWICE per document (hyperref). Confirm the log says \`(1 page\`.`
@@ -173,9 +206,11 @@ export function buildPrompt(slots: PromptSlots, profile: ProfileFile): string {
     EXAMPLE_FOLDER_LINE: exampleFolderLine(),
     PDFTOTEXT_LINE: pdftotextLine(),
     SLUG: slots.slug,
-    POSTING_TEXT:
+    POSTING_BLOCK: fenceUntrusted(
+      'posting',
       slots.postingText.trim() ||
-      '(no text provided — use the screenshots below and/or WebFetch the apply URL to obtain the posting)',
+        '(no text provided — use the screenshots below and/or WebFetch the apply URL to obtain the posting)'
+    ),
     IMAGES_SECTION: imagesSection(slots.imagePaths),
     APPLY_URL: slots.applyUrl ?? 'not provided (note "apply on company site" in the answers file)',
     COMPANY_HINT: slots.companyHint || 'derive from the posting',

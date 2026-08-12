@@ -16,6 +16,10 @@ import {
   GripVertical,
   Heart,
   Info,
+  MoreHorizontal,
+  PanelRightClose,
+  PanelRightOpen,
+  Pencil,
   Play,
   Plus,
   RefreshCw,
@@ -108,6 +112,8 @@ function IntakeCard({
   const [dragged, setDragged] = useState(false)
   const [notes, setNotes] = useState(item.notes ?? '')
   const [notesOpen, setNotesOpen] = useState(!!item.notes)
+  const [editing, setEditing] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
 
   const saveNotes = (): void => {
     if ((item.notes ?? '') === notes.trim()) return
@@ -178,13 +184,73 @@ function IntakeCard({
             )}
           </div>
         </div>
-        <button
-          className="shrink-0 p-1 text-gray-500 hover:text-cyan-300"
-          onClick={() => onInfo(item)}
-          title="Posting & company details"
-        >
-          <Info size={15} />
-        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          {item.state === 'new' || item.state === 'failed' ? (
+            <button className="btn btn-primary px-2 py-0.5 text-[11px]" onClick={build}>
+              <Play size={11} className="mr-0.5 inline" /> Build
+            </button>
+          ) : item.runId ? (
+            <button
+              className="btn px-2 py-0.5 text-[11px]"
+              onClick={() => useApp.getState().navigate({ view: 'runs', runId: item.runId! })}
+            >
+              View
+            </button>
+          ) : null}
+          <button
+            className={`p-1 ${notes.trim() ? 'text-amber-300' : 'text-gray-500 hover:text-gray-300'}`}
+            onClick={() => setNotesOpen((v) => !v)}
+            title="Notes for the agent (extra skills, framing, context)"
+          >
+            <StickyNote size={14} />
+          </button>
+          <div
+            className="relative"
+            onBlur={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setMenuOpen(false)
+            }}
+          >
+            <button
+              className={`p-1 ${menuOpen ? 'text-cyan-300' : 'text-gray-500 hover:text-gray-300'}`}
+              onClick={() => setMenuOpen((v) => !v)}
+              title="More actions"
+              aria-label="More actions"
+            >
+              <MoreHorizontal size={15} />
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 top-full z-30 mt-1 w-32 rounded-md border border-edge bg-panel2 py-1 shadow-xl">
+                <button
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-200 hover:bg-panel"
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    setEditing((v) => !v)
+                    setMenuOpen(false)
+                  }}
+                >
+                  <Pencil size={12} aria-hidden="true" /> Edit
+                </button>
+                <button
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-400 hover:bg-panel"
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    setMenuOpen(false)
+                    void dismiss()
+                  }}
+                >
+                  <X size={12} aria-hidden="true" /> Dismiss
+                </button>
+              </div>
+            )}
+          </div>
+          <button
+            className="p-1 text-gray-500 hover:text-cyan-300"
+            onClick={() => onInfo(item)}
+            title="Posting & company details"
+          >
+            <Info size={15} />
+          </button>
+        </div>
       </div>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -207,42 +273,22 @@ function IntakeCard({
           )}
         </div>
       </div>
-      <div className="mt-3 flex items-center gap-2">
-        <input
-          className="input flex-1"
-          placeholder="Company"
-          value={company}
-          onChange={(e) => setCompany(e.target.value)}
-        />
-        <input
-          className="input flex-1"
-          placeholder="Role title"
-          value={role}
-          onChange={(e) => setRole(e.target.value)}
-        />
-        <button
-          className={`btn shrink-0 px-2 ${notes.trim() ? 'text-amber-300' : 'text-gray-500'}`}
-          onClick={() => setNotesOpen((v) => !v)}
-          title="Notes for the agent (extra skills, framing, context)"
-        >
-          <StickyNote size={13} />
-        </button>
-        {item.state === 'new' || item.state === 'failed' ? (
-          <button className="btn btn-primary shrink-0" onClick={build}>
-            <Play size={12} /> Build
-          </button>
-        ) : item.runId ? (
-          <button
-            className="btn shrink-0"
-            onClick={() => useApp.getState().navigate({ view: 'runs', runId: item.runId! })}
-          >
-            View run
-          </button>
-        ) : null}
-        <button className="btn shrink-0 text-gray-500" onClick={dismiss}>
-          Dismiss
-        </button>
-      </div>
+      {editing && (
+        <div className="mt-3 flex items-center gap-2">
+          <input
+            className="input flex-1"
+            placeholder="Company"
+            value={company}
+            onChange={(e) => setCompany(e.target.value)}
+          />
+          <input
+            className="input flex-1"
+            placeholder="Role title"
+            value={role}
+            onChange={(e) => setRole(e.target.value)}
+          />
+        </div>
+      )}
       {notesOpen && (
         <textarea
           className="input mt-2 min-h-[3.5rem] w-full resize-y text-[11px]"
@@ -487,6 +533,7 @@ export default function IntakeView(): JSX.Element {
   const [company, setCompany] = useState('')
   const [role, setRole] = useState('')
   const [images, setImages] = useState<PastedImage[]>([])
+  const [composerOpen, setComposerOpen] = useState(true)
 
   const visible = intake.filter((i) => i.state !== 'dismissed')
   const DAY_MS = 24 * 60 * 60 * 1000
@@ -650,10 +697,21 @@ export default function IntakeView(): JSX.Element {
         <button className="btn" onClick={rescan} title="Rescan the TODO folder">
           <RefreshCw size={12} />
         </button>
+        <button
+          className={`btn ${composerOpen ? 'text-cyan-300' : ''}`}
+          onClick={() => setComposerOpen((v) => !v)}
+          title={composerOpen ? 'Hide the add panel' : 'Show the add panel'}
+          aria-label={composerOpen ? 'Hide the add panel' : 'Show the add panel'}
+        >
+          {composerOpen ? <PanelRightClose size={12} /> : <PanelRightOpen size={12} />}
+        </button>
       </div>
 
-      <div className="grid flex-1 grid-cols-2 gap-4 overflow-auto p-4">
-        <div className="flex flex-col gap-2">
+      <div className="flex flex-1 gap-4 overflow-auto p-4">
+        {/* Cards keep a readable measure regardless of composer state — the
+            list column centers at the same cap the scout results use. */}
+        <div className="min-w-0 flex-1">
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-2">
           {creatingFolder && (
             <div className="panel flex flex-col gap-2 p-3">
               <div className="flex gap-2">
@@ -733,42 +791,51 @@ export default function IntakeView(): JSX.Element {
               applications/TODO/ in your workspace.
             </div>
           )}
+          </div>
         </div>
 
-        <div className="flex flex-col gap-2">
-          <div className="text-xs font-semibold uppercase tracking-wide text-muted">
-            Add by URL
-          </div>
-          <div className="panel flex flex-col gap-1.5 p-3">
-            <div className="flex gap-2">
-              <input
-                className="input flex-1"
-                placeholder="https://… job posting link"
-                value={fetchUrl}
-                onChange={(e) => setFetchUrl(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !fetching) void addFromUrl()
-                }}
-              />
-              <button
-                className="btn btn-primary shrink-0"
-                disabled={fetching || !fetchUrl.trim()}
-                onClick={() => void addFromUrl()}
-              >
-                {fetching ? 'Fetching…' : 'Fetch'}
-              </button>
+        {/* The composer slides as one fixed-width unit; the outer div animates
+            width so the clip happens during the slide instead of a reflow. */}
+        <div
+          className={`shrink-0 overflow-hidden transition-all duration-200 motion-reduce:transition-none ${
+            composerOpen ? 'w-[440px] opacity-100' : 'pointer-events-none -ml-4 w-0 opacity-0'
+          }`}
+        >
+          <div className="panel flex w-[440px] flex-col gap-3 p-4">
+            <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted">
+              <Globe size={12} strokeWidth={1.75} /> Add by URL
             </div>
-            <div className="text-[10px] leading-relaxed text-gray-600">
-              Reads the structured JobPosting data most job pages embed (jobright, LinkedIn,
-              Greenhouse, Lever, company sites) — no copy-paste needed. If a page has none,
-              paste the text below instead.
+            <div className="flex flex-col gap-1.5">
+              <div className="flex gap-2">
+                <input
+                  className="input flex-1"
+                  placeholder="https://… job posting link"
+                  value={fetchUrl}
+                  onChange={(e) => setFetchUrl(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !fetching) void addFromUrl()
+                  }}
+                />
+                <button
+                  className="btn btn-primary shrink-0"
+                  disabled={fetching || !fetchUrl.trim()}
+                  onClick={() => void addFromUrl()}
+                >
+                  {fetching ? 'Fetching…' : 'Fetch'}
+                </button>
+              </div>
+              <div className="text-[10px] leading-relaxed text-gray-600">
+                Reads the structured JobPosting data most job pages embed (jobright, LinkedIn,
+                Greenhouse, Lever, company sites) — no copy-paste needed. If a page has none,
+                paste the text below instead.
+              </div>
             </div>
-          </div>
 
-          <div className="mt-1 text-xs font-semibold uppercase tracking-wide text-muted">
-            Paste a posting
-          </div>
-          <div className="panel flex flex-col gap-2 p-3">
+            <div className="border-t border-edge/60" />
+
+            <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted">
+              <Copy size={12} strokeWidth={1.75} /> Paste a posting
+            </div>
             <textarea
               className="input min-h-[280px] w-full resize-y font-mono text-[11px] leading-relaxed"
               placeholder="Paste the full job posting text here — or paste screenshot(s) of the posting (Ctrl+V works for both)…"
@@ -819,11 +886,12 @@ export default function IntakeView(): JSX.Element {
             <button className="btn btn-primary self-start" onClick={addPasted}>
               + Add to intake
             </button>
-          </div>
-          <div className="text-[11px] leading-relaxed text-gray-600">
-            Building an application spawns a Claude agent that tailors the résumé and cover letter,
-            compiles both to exactly one page, writes the answers file, and adds a tracker row.
-            Everything lands in applications/&lt;slug&gt;/ inside your workspace.
+            <div className="border-t border-edge/60" />
+            <div className="text-[11px] leading-relaxed text-gray-600">
+              Building an application spawns a Claude agent that tailors the résumé and cover
+              letter, compiles both to exactly one page, writes the answers file, and adds a
+              tracker row. Everything lands in applications/&lt;slug&gt;/ inside your workspace.
+            </div>
           </div>
         </div>
       </div>

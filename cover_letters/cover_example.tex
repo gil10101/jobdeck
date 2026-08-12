@@ -1,12 +1,18 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Cover Letter - [Company], [Role]
 %
-% Example cover letter with placeholder content. This is the structural
-% reference for /apply (see 06-cover-letter-templates.md) and the CI smoke
-% test for cover.cls: it must always compile with xelatex to exactly 1 page.
-% It demonstrates the correct itemize pattern: the list sits OUTSIDE
-% \lettercontent{} (whose trailing \\ errors on \end{itemize}) and is
-% wrapped in Raleway-Medium so the bullet font matches the body.
+% Example cover letter with placeholder content, and the structural reference
+% the build agent writes new letters against. Replace every [BRACKETED]
+% placeholder with your own text.
+%
+% Compile from this directory (cover.cls loads its fonts by relative path):
+%   cd cover_letters && xelatex cover_example.tex
+% cover.cls needs fontspec, so xelatex or lualatex - pdflatex will not work.
+% A finished letter must fit on exactly 1 page.
+%
+% It also demonstrates the correct itemize pattern: the list sits OUTSIDE
+% \lettercontent{}, whose trailing \\ errors on \end{itemize}, and is wrapped
+% in Raleway-Medium so the bullet font matches the body.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 \documentclass[]{cover}

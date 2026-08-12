@@ -1,4 +1,5 @@
 import type { AppSettings } from '@shared/types'
+import { claudeSignInSignal } from '../claudeAuth'
 import { listGeminiModels, testGemini } from './geminiBackend'
 import { geminiKey, geminiKeySet, ollamaKey, ollamaKeySet } from './providerKeyStore'
 import { ollamaModelInfo, ollamaModels, prewarmOllama, type OllamaModelInfo } from './ollamaBackend'
@@ -78,14 +79,30 @@ export function stopShim(): void {
 }
 
 /**
- * Env for spawning an agent subprocess under the active provider. Claude:
- * plain inherited env. Gemini/Ollama: the CLI is pointed at the shim with its
- * per-launch secret — the real Gemini key never reaches the subprocess.
+ * Env for spawning an agent subprocess under the active provider.
+ *
+ * CLAUDE CREDENTIAL INVARIANT: an agent run is never left without a
+ * credential, and never bills a subscription user's tokens to a stray key.
+ * The Claude Code CLI authenticates with ANTHROPIC_API_KEY in preference to a
+ * stored subscription login (its own remedy text is "unset ANTHROPIC_API_KEY
+ * to use your claude.ai account instead"), so the key is dropped in exactly
+ * one case: a subscription sign-in is detected AND no gateway is configured.
+ * With no sign-in the key is the user's only credential and is passed through;
+ * with ANTHROPIC_BASE_URL or ANTHROPIC_AUTH_TOKEN set the whole trio is passed
+ * through untouched, because that combination is a gateway the user pointed
+ * the CLI at and gateways commonly authenticate with the key.
+ *
+ * Gemini/Ollama: the CLI is pointed at the shim with its per-launch secret —
+ * the real Gemini key never reaches the subprocess.
  */
 export async function providerEnv(): Promise<Record<string, string>> {
   const base = { ...process.env } as Record<string, string>
   const config = currentProviderConfig()
-  if (config.provider === 'claude') return base
+  if (config.provider === 'claude') {
+    const gateway = !!base.ANTHROPIC_BASE_URL || !!base.ANTHROPIC_AUTH_TOKEN
+    if (!gateway && (await claudeSignInSignal())) delete base.ANTHROPIC_API_KEY
+    return base
+  }
   if (config.provider === 'ollama') prewarmOllama(config)
   const handle = await ensureShim()
   return {

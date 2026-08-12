@@ -11,7 +11,7 @@ import { findSetting } from './settingsMap'
 import { gmailConfigured } from '../email/gmailAuth'
 import { getMessageBody, getMessageMeta, listMessages } from '../email/gmailClient'
 import { allCachedMessages, getCachedMessage } from '../email/emailStore'
-import { classifyEmail } from '../email/emailSync'
+import { classifyEmail } from '../email/emailClassify'
 import type { ExperienceEntry, ProjectEntry, SkillCategory } from '@shared/profile'
 import { emptyProfile } from '@shared/profile'
 

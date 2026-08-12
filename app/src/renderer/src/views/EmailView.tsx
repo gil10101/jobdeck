@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  CalendarDays,
   Check,
   ChevronDown,
   Copy,
+  CornerDownRight,
   ExternalLink,
   Eye,
   EyeOff,
@@ -17,7 +19,14 @@ import {
   Tag,
   X
 } from 'lucide-react'
-import type { EmailClassification, EmailFilter, EmailMessage, EmailStatus } from '@shared/types'
+import type {
+  CalendarEvent,
+  EmailClassification,
+  EmailFilter,
+  EmailInvite,
+  EmailMessage,
+  EmailStatus
+} from '@shared/types'
 import { call, onPush } from '../api'
 import { useApp } from '../store'
 
@@ -46,6 +55,56 @@ function relTime(iso: string): string {
 function fromName(from: string): string {
   const m = from.match(/^\s*"?([^"<]+?)"?\s*</)
   return (m ? m[1] : from.replace(/[<>]/g, '')).trim() || from
+}
+
+/** Split a plain-text body at the first reply-history marker: an "On … wrote:"
+ *  attribution line, or a run of ≥2 consecutive '>'-quoted lines. The tail
+ *  renders behind a toggle. A marker before any real content keeps the body
+ *  whole — collapsing everything would leave an empty message. */
+function splitQuoted(text: string): { main: string; quoted: string | null } {
+  const lines = text.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const attribution = /^On .{0,140}wrote:\s*$/.test(lines[i])
+    const quoteRun = lines[i].startsWith('>') && (lines[i + 1] ?? '').startsWith('>')
+    if (attribution || quoteRun) {
+      const main = lines.slice(0, i).join('\n').trimEnd()
+      if (main === '') return { main: text, quoted: null }
+      return { main, quoted: lines.slice(i).join('\n') }
+    }
+  }
+  return { main: text, quoted: null }
+}
+
+/** Local-time range like 'Tue, Aug 11, 4:00 PM – 4:30 PM'; the end collapses
+ *  to time-only when it falls on the start's day. */
+function fmtWhen(start: string, end: string | null): string {
+  const opts: Intl.DateTimeFormatOptions = {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  }
+  const s = new Date(start)
+  const sTxt = s.toLocaleString(undefined, opts)
+  if (!end) return sTxt
+  const e = new Date(end)
+  const eTxt =
+    s.toDateString() === e.toDateString()
+      ? e.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+      : e.toLocaleString(undefined, opts)
+  return `${sTxt} – ${eTxt}`
+}
+
+/** Case/whitespace-insensitive title key for invite↔event dedupe checks. */
+function normTitle(t: string): string {
+  return t.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+/** ISO timestamps compare as the same event start when they land on the same
+ *  absolute minute. */
+function minuteOf(iso: string): number {
+  return Math.floor(new Date(iso).getTime() / 60000)
 }
 
 // The sync loop pushes after every pass; refetch only while the view is
@@ -298,6 +357,11 @@ export default function EmailView(): JSX.Element {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [body, setBody] = useState<string | null>(null)
   const [bodyErr, setBodyErr] = useState<string | null>(null)
+  const [invite, setInvite] = useState<EmailInvite | null>(null)
+  const [calEvents, setCalEvents] = useState<CalendarEvent[]>([])
+  const [proposing, setProposing] = useState(false)
+  const [showQuoted, setShowQuoted] = useState(false)
+  const [expandedThreads, setExpandedThreads] = useState<Set<string>>(new Set())
   const [refreshing, setRefreshing] = useState(false)
   // AI reply composer for the selected message. Nothing is ever sent — the
   // draft is copied or opened in a Gmail compose window (read-only scope).
@@ -339,19 +403,29 @@ export default function EmailView(): JSX.Element {
   }, [filter])
 
   // Bodies load live from Gmail per selection and are never cached on disk.
+  // The invite seeds from the cached message so the card paints immediately;
+  // the getBody response is authoritative (main heals the invite on fetch).
   useEffect(() => {
     setBody(null)
     setBodyErr(null)
+    setShowQuoted(false)
     // A new message clears any open reply composer from the previous one.
     setReplyOpen(false)
     setReplyDraft('')
     setReplyMeta(null)
     setReplyInstructions('')
-    if (!selectedId) return
+    if (!selectedId) {
+      setInvite(null)
+      return
+    }
+    setInvite(messages.find((m) => m.id === selectedId)?.invite ?? null)
     let alive = true
     void call('email:getBody', { id: selectedId })
-      .then(({ text }) => {
-        if (alive) setBody(text)
+      .then(({ text, invite: inv }) => {
+        if (alive) {
+          setBody(text)
+          setInvite(inv)
+        }
       })
       .catch((err) => {
         if (alive) setBodyErr(String(err))
@@ -360,6 +434,20 @@ export default function EmailView(): JSX.Element {
       alive = false
     }
   }, [selectedId])
+
+  // Calendar events back the invite card's "already on your calendar" check.
+  useEffect(() => {
+    if (!invite) return
+    let alive = true
+    void call('calendar:list', undefined)
+      .then((evs) => {
+        if (alive) setCalEvents(evs)
+      })
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [invite])
 
   const refresh = async (): Promise<void> => {
     setRefreshing(true)
@@ -393,6 +481,43 @@ export default function EmailView(): JSX.Element {
     } catch (err) {
       toast(String(err), 'error')
     }
+  }
+
+  /** The title an invite proposal is filed under — also the dedupe key, so the
+   *  Propose button disappears once the event lands. */
+  const inviteTitle = (inv: EmailInvite, m: EmailMessage): string =>
+    inv.title?.trim() || m.subject.trim() || 'Interview'
+
+  const proposeInvite = async (inv: EmailInvite, m: EmailMessage): Promise<void> => {
+    if (!inv.start) return
+    setProposing(true)
+    try {
+      setCalEvents(
+        await call('calendar:propose', {
+          sourceMessageId: m.id,
+          title: inviteTitle(inv, m),
+          start: inv.start,
+          end: inv.end,
+          location: inv.location,
+          meetLink: inv.meetLink,
+          notes: null
+        })
+      )
+      toast('Proposed — review it in Calendar', 'success')
+    } catch (err) {
+      toast(String(err), 'error')
+    } finally {
+      setProposing(false)
+    }
+  }
+
+  const toggleThread = (threadId: string): void => {
+    setExpandedThreads((prev) => {
+      const next = new Set(prev)
+      if (next.has(threadId)) next.delete(threadId)
+      else next.add(threadId)
+      return next
+    })
   }
 
   /** Star/hide/tag patch; the refetch drops rows the patch filtered away
@@ -501,6 +626,170 @@ export default function EmailView(): JSX.Element {
     return true
   })
   const narrowed = q !== '' || classFilter.length > 0 || tagFilter !== null
+  // Threads group only what survived the filters (hidden mail never reaches
+  // this list). A group anchors where its best-ranked member sits, so priority
+  // pinning keeps time-sensitive threads on top; the newest member is the
+  // visible row, older ones expand beneath it.
+  const threads: { head: EmailMessage; rest: EmailMessage[] }[] = []
+  const byThread = new Map<string, { head: EmailMessage; rest: EmailMessage[] }>()
+  for (const m of shown) {
+    const g = byThread.get(m.threadId)
+    if (g) {
+      g.rest.push(m)
+    } else {
+      const ng = { head: m, rest: [] as EmailMessage[] }
+      byThread.set(m.threadId, ng)
+      threads.push(ng)
+    }
+  }
+  for (const g of threads) {
+    const ordered = [g.head, ...g.rest].sort((a, b) => b.date.localeCompare(a.date))
+    g.head = ordered[0]
+    g.rest = ordered.slice(1)
+  }
+  const cancelled = invite?.method?.toUpperCase() === 'CANCEL'
+  const inviteOnCalendar =
+    invite !== null &&
+    selected !== null &&
+    calEvents.some(
+      (ev) =>
+        ev.state !== 'dismissed' &&
+        (ev.sourceMessageId === selected.id ||
+          (invite.start !== null &&
+            minuteOf(ev.start) === minuteOf(invite.start) &&
+            normTitle(ev.title) === normTitle(inviteTitle(invite, selected))))
+    )
+
+  /** One list row; the thread head carries the ×N chip, expanded older
+   *  messages render as indented sub-rows through the same markup. */
+  const renderRow = (
+    m: EmailMessage,
+    sub: boolean,
+    threadCount = 1,
+    expanded = false
+  ): JSX.Element => (
+    <div
+      key={m.id}
+      onClick={() => setSelectedId(m.id)}
+      className={`group flex w-full cursor-pointer flex-col gap-0.5 border-b border-l-2 border-edge/50 text-left hover:bg-panel2 ${
+        sub ? 'py-1.5 pl-8 pr-3' : 'px-3 py-2'
+      } ${
+        m.classification === 'assessment'
+          ? 'border-l-amber-400'
+          : m.classification === 'interview'
+            ? 'border-l-cyan-500'
+            : 'border-l-transparent'
+      } ${selectedId === m.id ? 'bg-panel2' : ''}`}
+    >
+      <div className="flex items-center gap-2">
+        {(sub || /^\s*(re|fwd?):/i.test(m.subject)) && (
+          <CornerDownRight size={11} className="shrink-0 text-gray-500" aria-hidden="true" />
+        )}
+        <span className="min-w-0 truncate text-[11px] font-medium text-gray-300">
+          {fromName(m.from)}
+        </span>
+        <ClassChip classification={m.classification} />
+        {threadCount > 1 && (
+          <button
+            className={`shrink-0 rounded-full border px-1.5 text-[9px] font-semibold ${
+              expanded
+                ? 'border-cyan-700 bg-cyan-950/60 text-cyan-200'
+                : 'border-edge text-gray-400 hover:border-cyan-700 hover:text-cyan-300'
+            }`}
+            title={
+              expanded ? 'Collapse thread' : `Show ${threadCount - 1} earlier in this thread`
+            }
+            onClick={(e) => {
+              e.stopPropagation()
+              toggleThread(m.threadId)
+            }}
+          >
+            ×{threadCount}
+          </button>
+        )}
+        <div
+          className="relative ml-auto flex shrink-0 items-center gap-1.5"
+          onBlur={(e) => {
+            // Close the tag menu when focus leaves the anchor; moving
+            // into the menu's input keeps it open.
+            if (tagMenuId === m.id && !e.currentTarget.contains(e.relatedTarget as Node | null)) {
+              setTagMenuId(null)
+            }
+          }}
+        >
+          <button
+            className={
+              tagMenuId === m.id
+                ? 'text-cyan-300'
+                : 'text-gray-500 opacity-0 hover:text-cyan-300 focus:opacity-100 group-hover:opacity-100'
+            }
+            title="Tags"
+            aria-label="Tags"
+            onClick={(e) => {
+              e.stopPropagation()
+              setTagMenuId(tagMenuId === m.id ? null : m.id)
+            }}
+          >
+            <Tag size={12} aria-hidden="true" />
+          </button>
+          <button
+            className="text-gray-500 opacity-0 hover:text-gray-300 focus:opacity-100 group-hover:opacity-100"
+            title={m.hidden ? 'Unhide' : 'Hide'}
+            aria-label={m.hidden ? 'Unhide' : 'Hide'}
+            onClick={(e) => {
+              e.stopPropagation()
+              void patchMessage(m.id, { hidden: !m.hidden })
+            }}
+          >
+            {m.hidden ? (
+              <Eye size={12} aria-hidden="true" />
+            ) : (
+              <EyeOff size={12} aria-hidden="true" />
+            )}
+          </button>
+          <button
+            className={
+              m.favorite
+                ? 'text-amber-300'
+                : 'text-gray-500 opacity-0 hover:text-amber-300 focus:opacity-100 group-hover:opacity-100'
+            }
+            title={m.favorite ? 'Unstar' : 'Star'}
+            aria-label={m.favorite ? 'Unstar' : 'Star'}
+            onClick={(e) => {
+              e.stopPropagation()
+              void patchMessage(m.id, { favorite: !m.favorite })
+            }}
+          >
+            <Star size={12} className={m.favorite ? 'fill-amber-300' : ''} aria-hidden="true" />
+          </button>
+          <span className="text-[10px] text-gray-600">{relTime(m.date)}</span>
+          {tagMenuId === m.id && (
+            <TagMenu
+              message={m}
+              allTags={allTags}
+              onToggle={(tag) => toggleTag(m, tag)}
+              onCreate={(name) => void createAndAssignTag(m, name)}
+              onClose={() => setTagMenuId(null)}
+            />
+          )}
+        </div>
+      </div>
+      <div className="truncate text-xs text-gray-200">{m.subject || '(no subject)'}</div>
+      <div className="truncate text-[10px] text-gray-500">{m.snippet}</div>
+      {m.tags.length > 0 && (
+        <div className="flex flex-wrap gap-1 pt-0.5">
+          {m.tags.map((t) => (
+            <span
+              key={t}
+              className="rounded-full border border-cyan-900 bg-cyan-950/40 px-1.5 text-[9px] text-cyan-300"
+            >
+              {t}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 
   return (
     <div className="flex h-full flex-col">
@@ -566,25 +855,38 @@ export default function EmailView(): JSX.Element {
           {suggestions.map((m) => (
             <div
               key={m.id}
-              className="flex items-center gap-3 border-b border-edge/50 bg-cyan-950/40 px-4 py-2 last:border-b-0"
+              className="flex cursor-pointer items-center gap-3 border-b border-edge/50 bg-cyan-950/40 px-4 py-2 last:border-b-0 hover:bg-cyan-950/60"
+              title="Open this email below to verify before applying"
+              onClick={() => setSelectedId(m.id)}
             >
               <ClassChip classification={m.classification} />
-              <span className="text-xs text-gray-200">
+              <span className="shrink-0 text-xs text-gray-200">
                 Mark <span className="font-semibold">{m.suggestion?.company}</span> as{' '}
                 <span className="font-semibold">{m.suggestion?.suggestStatus}</span>
               </span>
-              <button
-                className="min-w-0 truncate text-left text-[11px] text-gray-500 hover:text-gray-300"
-                title={m.subject}
-                onClick={() => setSelectedId(m.id)}
-              >
-                {m.subject}
-              </button>
+              <span className="min-w-0 truncate text-[11px] text-gray-500">{m.subject}</span>
+              <Eye
+                size={12}
+                className="shrink-0 text-gray-500"
+                aria-hidden="true"
+              />
               <div className="ml-auto flex shrink-0 gap-1.5">
-                <button className="btn btn-primary px-2 py-0.5 text-[10px]" onClick={() => void applySuggestion(m)}>
+                <button
+                  className="btn btn-primary px-2 py-0.5 text-[10px]"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void applySuggestion(m)
+                  }}
+                >
                   <Check size={11} className="mr-0.5 inline" /> Apply
                 </button>
-                <button className="btn px-2 py-0.5 text-[10px]" onClick={() => void dismissSuggestion(m)}>
+                <button
+                  className="btn px-2 py-0.5 text-[10px]"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void dismissSuggestion(m)
+                  }}
+                >
                   <X size={11} className="mr-0.5 inline" /> Dismiss
                 </button>
               </div>
@@ -624,109 +926,15 @@ export default function EmailView(): JSX.Element {
               {narrowed ? 'No messages match your search or filters.' : EMPTY_HINT[filter]}
             </div>
           )}
-          {shown.map((m) => (
-            <div
-              key={m.id}
-              onClick={() => setSelectedId(m.id)}
-              className={`group flex w-full cursor-pointer flex-col gap-0.5 border-b border-l-2 border-edge/50 px-3 py-2 text-left hover:bg-panel2 ${
-                m.classification === 'assessment'
-                  ? 'border-l-amber-400'
-                  : m.classification === 'interview'
-                    ? 'border-l-cyan-500'
-                    : 'border-l-transparent'
-              } ${selectedId === m.id ? 'bg-panel2' : ''}`}
-            >
-              <div className="flex items-center gap-2">
-                <span className="min-w-0 truncate text-[11px] font-medium text-gray-300">
-                  {fromName(m.from)}
-                </span>
-                <ClassChip classification={m.classification} />
-                <div
-                  className="relative ml-auto flex shrink-0 items-center gap-1.5"
-                  onBlur={(e) => {
-                    // Close the tag menu when focus leaves the anchor; moving
-                    // into the menu's input keeps it open.
-                    if (
-                      tagMenuId === m.id &&
-                      !e.currentTarget.contains(e.relatedTarget as Node | null)
-                    ) {
-                      setTagMenuId(null)
-                    }
-                  }}
-                >
-                  <button
-                    className={
-                      tagMenuId === m.id
-                        ? 'text-cyan-300'
-                        : 'text-gray-500 opacity-0 hover:text-cyan-300 focus:opacity-100 group-hover:opacity-100'
-                    }
-                    title="Tags"
-                    aria-label="Tags"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setTagMenuId(tagMenuId === m.id ? null : m.id)
-                    }}
-                  >
-                    <Tag size={12} aria-hidden="true" />
-                  </button>
-                  <button
-                    className="text-gray-500 opacity-0 hover:text-gray-300 focus:opacity-100 group-hover:opacity-100"
-                    title={m.hidden ? 'Unhide' : 'Hide'}
-                    aria-label={m.hidden ? 'Unhide' : 'Hide'}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      void patchMessage(m.id, { hidden: !m.hidden })
-                    }}
-                  >
-                    {m.hidden ? (
-                      <Eye size={12} aria-hidden="true" />
-                    ) : (
-                      <EyeOff size={12} aria-hidden="true" />
-                    )}
-                  </button>
-                  <button
-                    className={
-                      m.favorite
-                        ? 'text-amber-300'
-                        : 'text-gray-500 opacity-0 hover:text-amber-300 focus:opacity-100 group-hover:opacity-100'
-                    }
-                    title={m.favorite ? 'Unstar' : 'Star'}
-                    aria-label={m.favorite ? 'Unstar' : 'Star'}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      void patchMessage(m.id, { favorite: !m.favorite })
-                    }}
-                  >
-                    <Star size={12} className={m.favorite ? 'fill-amber-300' : ''} aria-hidden="true" />
-                  </button>
-                  <span className="text-[10px] text-gray-600">{relTime(m.date)}</span>
-                  {tagMenuId === m.id && (
-                    <TagMenu
-                      message={m}
-                      allTags={allTags}
-                      onToggle={(tag) => toggleTag(m, tag)}
-                      onCreate={(name) => void createAndAssignTag(m, name)}
-                      onClose={() => setTagMenuId(null)}
-                    />
-                  )}
-                </div>
+          {threads.map((g) => {
+            const expanded = expandedThreads.has(g.head.threadId)
+            return (
+              <div key={g.head.threadId}>
+                {renderRow(g.head, false, g.rest.length + 1, expanded)}
+                {expanded && g.rest.map((m) => renderRow(m, true))}
               </div>
-              <div className="truncate text-xs text-gray-200">{m.subject || '(no subject)'}</div>
-              <div className="truncate text-[10px] text-gray-500">{m.snippet}</div>
-              {m.tags.length > 0 && (
-                <div className="flex flex-wrap gap-1 pt-0.5">
-                  {m.tags.map((t) => (
-                    <span
-                      key={t}
-                      className="rounded-full border border-cyan-900 bg-cyan-950/40 px-1.5 text-[9px] text-cyan-300"
-                    >
-                      {t}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
+            )
+          })}
         </div>
 
         <div className="flex min-w-0 flex-1 flex-col overflow-auto">
@@ -751,12 +959,109 @@ export default function EmailView(): JSX.Element {
                 </div>
               </div>
               <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
+                {invite && (
+                  <div
+                    className={`mb-4 max-w-3xl rounded-md border bg-panel p-3 ${
+                      cancelled ? 'border-red-900' : 'border-cyan-900'
+                    }`}
+                  >
+                    {cancelled && (
+                      <div className="mb-2 rounded border border-red-900 bg-red-900/20 px-2 py-1 text-[11px] font-bold uppercase text-red-400">
+                        Cancelled
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <CalendarDays
+                        size={14}
+                        className={`shrink-0 ${cancelled ? 'text-red-400' : 'text-cyan-300'}`}
+                        aria-hidden="true"
+                      />
+                      <span className="min-w-0 truncate text-sm font-semibold text-gray-100">
+                        {invite.title || 'Invitation'}
+                      </span>
+                      {!cancelled &&
+                        invite.start &&
+                        (inviteOnCalendar ? (
+                          <span className="ml-auto shrink-0 text-[10px] text-gray-500">
+                            On your calendar
+                          </span>
+                        ) : (
+                          <button
+                            className="btn ml-auto shrink-0 px-2 py-0.5 text-[10px]"
+                            disabled={proposing}
+                            title="Add this event to the calendar for review"
+                            onClick={() => void proposeInvite(invite, selected)}
+                          >
+                            <CalendarDays size={11} className="mr-1 inline" /> Propose
+                          </button>
+                        ))}
+                    </div>
+                    <div className="mt-2 flex flex-col gap-1 text-[11px] text-gray-300">
+                      {invite.start && (
+                        <div className="flex gap-2">
+                          <span className="w-16 shrink-0 text-gray-500">When</span>
+                          <span>{fmtWhen(invite.start, invite.end)}</span>
+                        </div>
+                      )}
+                      {invite.location && (
+                        <div className="flex gap-2">
+                          <span className="w-16 shrink-0 text-gray-500">Where</span>
+                          <span className="min-w-0 break-words">{invite.location}</span>
+                        </div>
+                      )}
+                      {invite.organizer && (
+                        <div className="flex gap-2">
+                          <span className="w-16 shrink-0 text-gray-500">Organizer</span>
+                          <span className="min-w-0 truncate">{invite.organizer}</span>
+                        </div>
+                      )}
+                      {!cancelled && invite.meetLink && (
+                        <div className="flex gap-2 pt-0.5">
+                          <span className="w-16 shrink-0" aria-hidden="true" />
+                          <button
+                            className="btn px-2 py-0.5 text-[10px]"
+                            title={invite.meetLink}
+                            onClick={() =>
+                              void call('app:openExternal', { url: invite.meetLink as string }).catch(
+                                (err) => toast(String(err), 'error')
+                              )
+                            }
+                          >
+                            <ExternalLink size={11} className="mr-1 inline" /> Join
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
                 {bodyErr ? (
                   <div className="text-xs text-red-400">{bodyErr}</div>
                 ) : body === null ? (
                   <div className="text-xs text-gray-600">Loading message…</div>
                 ) : (
-                  <LinkifiedBody text={body} />
+                  (() => {
+                    const { main, quoted } = splitQuoted(body)
+                    return (
+                      <>
+                        <LinkifiedBody text={main} />
+                        {quoted !== null && (
+                          <div className="mt-3 max-w-3xl">
+                            <button
+                              className="text-[11px] text-gray-500 hover:text-gray-300"
+                              onClick={() => setShowQuoted(!showQuoted)}
+                            >
+                              {showQuoted ? 'Hide quoted history' : 'Show quoted history'}
+                            </button>
+                            {showQuoted && (
+                              <div className="mt-2 border-l-2 border-edge pl-3 opacity-70">
+                                <LinkifiedBody text={quoted} />
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    )
+                  })()
                 )}
               </div>
 
