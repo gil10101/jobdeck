@@ -92,6 +92,12 @@ export interface IpcInvokeContract {
   'knowledge:addFiles': { req: void; res: { added: number } }
   /** Confirms, then moves the file (or folder) to the OS trash. */
   'knowledge:removeFile': { req: { name: string }; res: { removed: boolean } }
+  /** Whether a build can run now: 'profile' (full), 'minimal' (no profile;
+   *  builds read uploads/notes), 'blocked' (no candidate material at all). */
+  'build:readiness': {
+    req: void
+    res: { mode: 'profile' | 'minimal' | 'blocked'; message: string | null }
+  }
   /** Files in <workspace>/uploads — the material extraction and builds read. */
   'library:listUploads': { req: void; res: FolderEntry[] }
   /** Confirms, then moves one upload to the OS trash. */
@@ -439,6 +445,7 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'knowledge:setNotes',
   'knowledge:addFiles',
   'knowledge:removeFile',
+  'build:readiness',
   'library:listUploads',
   'library:removeUpload',
   'master:getResume',

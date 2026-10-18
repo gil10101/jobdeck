@@ -15,6 +15,7 @@ import { importFromXlsx } from './xlsx/importXlsx'
 import { exportToXlsx } from './xlsx/exportXlsx'
 import { INTAKE_IMAGES_DIR, MASTER_DIR, SCOUT_DIR, TMP_DIR, UPLOADS_DIR, toAbs, toRel } from './paths'
 import { safeChildPath } from './fsops/safePath'
+import { assertCanBuild, workspaceBuildReadiness } from './agent/readinessCheck'
 import {
   agentReadableUploads,
   agentReadablePath,
@@ -244,6 +245,7 @@ export function registerIpc(services: Services): void {
   })
   handle('browser:buildFromPage', async ({ url, html, title, bodyText }) => {
     if (!/^https?:\/\//i.test(url)) throw new Error('only http(s) pages can be built from')
+    assertCanBuild()
     // The rendered DOM sees what the logged-in user sees, so its JSON-LD is
     // tried first (auth-gated SPA listings like board detail pages); a
     // server-side refetch covers pages whose markup only ships in the initial
@@ -434,6 +436,10 @@ export function registerIpc(services: Services): void {
     return { removed: true }
   })
 
+  // Drives Build/Accept gating and hints in the renderer; re-read on every
+  // 'material' or 'profile' push.
+  handle('build:readiness', () => workspaceBuildReadiness())
+
   // ---- uploads: the raw material extraction and minimal builds read ----
   handle('library:listUploads', () => listFolder(UPLOADS_DIR).filter((e) => e.kind === 'file'))
   handle('library:removeUpload', async ({ name }) => {
@@ -494,6 +500,7 @@ export function registerIpc(services: Services): void {
     if (!postingText.trim() && imagePaths.length === 0) {
       throw new Error('nothing to build from: no posting text and no screenshots')
     }
+    assertCanBuild()
     return runner.start({
       intakeId: input.intakeId,
       postingText,
@@ -528,6 +535,9 @@ export function registerIpc(services: Services): void {
     if (!candidate.postingText.trim() && !candidate.applyUrl) {
       throw new Error('candidate has no posting text or apply URL to build from')
     }
+    // Before the run, the row and the candidate state: a refused build must
+    // leave nothing behind.
+    assertCanBuild()
     // Start the build first so the tracker row can bind to its slug — the
     // finished report then fills in this same row instead of creating a new one.
     const run = runner.start({
@@ -779,6 +789,7 @@ export function registerIpc(services: Services): void {
     const meta = runStore.getMeta(runId)
     if (!meta) throw new Error(`run not found: ${runId}`)
     if (meta.kind !== 'build') throw new Error('only build runs can be rebuilt')
+    assertCanBuild()
     if (meta.status !== 'failed' && meta.status !== 'cancelled') {
       throw new Error(`only failed or cancelled builds can be rebuilt (this one is ${meta.status})`)
     }

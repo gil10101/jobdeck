@@ -7,6 +7,8 @@ import {
   APP_DIR,
   MASTER_DIR,
   REPO_ROOT,
+  TMP_DIR,
+  UPLOADS_DIR,
   resolveBun,
   resolveLatex,
   resolvePdftotext,
@@ -16,6 +18,7 @@ import {
 } from '../paths'
 import { boardsAvailabilityNote } from '../boards/boardsBridge'
 import { pickExampleFolder } from '../fsops/FolderScanner'
+import { agentReadableUploads, masterResumeNames, resolveMasterResume } from './buildReadiness'
 import {
   renderAnswersInfoMd,
   renderCoverLetterStyleMd,
@@ -131,29 +134,46 @@ function imagesSection(imagePaths: string[]): string {
   ].join('\n')
 }
 
-/** The ONLY filenames read as a master résumé from the workspace master/
- *  folder: the profile's own output stem, then the shipped starter template's
- *  name. A file under any other name there is ignored. */
-function masterResumeNames(fileBasename: string): [string, string] {
-  return [`${fileBasename}_Resume.tex`, 'main_example.tex']
-}
-
-function masterResumePath(p: ProfileFile): string {
-  const names = masterResumeNames(p.documents.fileBasename)
-  for (const name of names) {
-    if (fs.existsSync(path.join(MASTER_DIR, name))) return `master/${name}`
+/** STEP 1's first bullet: copy the master résumé, or say plainly that there
+ *  is none — a missing file must never be presented as a path to Read. */
+function masterResumeStep(fileBasename: string | null): string {
+  const name = resolveMasterResume(MASTER_DIR, fileBasename)
+  if (name) {
+    return `- Read the master résumé: \`master/${name}\` — copy its preamble/macros EXACTLY (including any \`glyphtounicode\` ATS block).`
   }
   // The accepted names are spelled out so a master résumé saved under some
   // other name reads as a fixable mistake instead of a missing file.
-  const accepted = names.map((n) => `\`master/${n}\``).join(' or ')
-  return `(no master résumé — the only names read are ${accepted}, and a file under any other name in master/ is ignored. Construct the preamble yourself: article class, ATS-safe single column, lmodern, glyphtounicode)`
+  const accepted = masterResumeNames(fileBasename).map((n) => `\`master/${n}\``).join(' or ')
+  return `- There is no master résumé (only ${accepted} would be read). Write the preamble yourself: \`article\` class, ATS-safe single column, \`lmodern\`, and the \`glyphtounicode\` block (guarded as the LaTeX instruction above says).`
 }
 
-function exampleFolderLine(): string {
+function exampleFolderLine(hasMaster: boolean): string {
   const example = pickExampleFolder()
-  return example
-    ? `Also read \`${example}/\` (a COMPLETED application) and replicate its structure and quality.`
-    : 'No completed example exists yet — follow the master résumé and this spec exactly.'
+  if (example) return `Also read \`${example}/\` (a COMPLETED application) and replicate its structure and quality.`
+  return hasMaster
+    ? 'No completed example exists yet — follow the master résumé and this spec exactly.'
+    : 'No completed example exists yet — follow this spec exactly.'
+}
+
+/** Stand-in for the profile when none exists: the uploaded files themselves,
+ *  for the agent to Read. Facts come only from them. */
+function candidateSourcesSection(deriveStem: boolean): string {
+  const { files, skipped } = agentReadableUploads(UPLOADS_DIR, path.join(TMP_DIR, 'sources'))
+  const lines = [
+    '## CANDIDATE SOURCE MATERIAL (no structured profile yet — authoritative)',
+    'Read EVERY file below before writing anything. They are the only source of facts about the candidate: never invent, round up, or embellish an employer, title, date, degree, skill, or metric they do not state. Where they disagree, prefer the most recent document.'
+  ]
+  if (deriveStem) {
+    lines.push(
+      'Take the candidate\'s full name from them and use it as the output file stem in the form `FirstName_LastName` (ASCII letters and underscores) wherever this prompt writes `<FirstName_LastName>`.'
+    )
+  }
+  if (files.length) lines.push('', ...files.map((f) => `- ${f}`))
+  else lines.push('', '- (no uploaded files — use the additional context below as the source)')
+  if (skipped.length) {
+    lines.push('', `Unreadable uploads (ignored): ${skipped.join(', ')}.`)
+  }
+  return lines.join('\n') + '\n'
 }
 
 function pdftotextLine(): string {
@@ -187,23 +207,39 @@ function latexLine(): string {
   return `Compile with ${eng.kind}: \`"${eng.path}" -interaction=nonstopmode <file.tex>\` run TWICE per document (hyperref). Confirm the log says \`(1 page\`.`
 }
 
-/** Build-application prompt — fully self-contained; requires a profile. */
-export function buildPrompt(slots: PromptSlots, profile: ProfileFile): string {
+/**
+ * Build-application prompt. With a profile it is fully self-contained; without
+ * one ("minimal" mode, see buildReadiness.ts) the agent reads the uploaded
+ * files as the candidate's facts and derives the name and file stem itself.
+ */
+export function buildPrompt(slots: PromptSlots, profile: ProfileFile | null): string {
   const template = fs.readFileSync(TEMPLATE_PATH, 'utf-8')
+  const stem = profile?.documents.fileBasename || null
+  const hasMaster = resolveMasterResume(MASTER_DIR, stem) !== null
+  // Profile-shaped sections that carry style and rule defaults render from the
+  // empty skeleton; the ones that would state facts are replaced outright.
+  const p = profile ?? emptyProfile()
   return fill(template, {
-    CANDIDATE_NAME: profile.identity.fullName,
-    FILE_BASENAME: profile.documents.fileBasename,
-    PROFILE_MD: renderProfileMd(profile),
+    CANDIDATE_NAME: profile?.identity.fullName || 'the candidate',
+    CANDIDATE_SOURCE_LINE: profile
+      ? 'Everything you need to know about the candidate is IN THIS PROMPT — do not look for profile files.'
+      : 'There is no structured profile yet: the candidate\'s facts are in the files listed under CANDIDATE SOURCE MATERIAL — Read them before writing anything.',
+    FILE_BASENAME: stem ?? '<FirstName_LastName>',
+    PROFILE_MD: profile ? renderProfileMd(profile) : candidateSourcesSection(true),
     MASTER_CONTEXT_MD: masterContextSection(),
     KNOWLEDGE_MD: knowledgeSection(),
     USER_NOTES_MD: userNotesSection(slots.notes),
-    TAILORING_RULES_MD: renderTailoringRulesMd(profile),
-    ANSWERS_INFO_MD: renderAnswersInfoMd(profile),
-    COVER_LETTER_STORIES_MD: renderStoriesMd(profile, 'cover_letter'),
-    COVER_LETTER_STYLE_MD: renderCoverLetterStyleMd(profile),
-    EXTRA_RULES_MD: renderExtraRulesMd(profile),
-    MASTER_RESUME_PATH: masterResumePath(profile),
-    EXAMPLE_FOLDER_LINE: exampleFolderLine(),
+    TAILORING_RULES_MD: renderTailoringRulesMd(p),
+    ANSWERS_INFO_MD: profile
+      ? renderAnswersInfoMd(profile)
+      : '## SAVED APPLICATION INFO\nNone on file. Take name, email, phone, location and links from the source files; write "not on file" for anything they do not state.',
+    COVER_LETTER_STORIES_MD: profile
+      ? renderStoriesMd(profile, 'cover_letter')
+      : '- None on file — build only on experience the source files state.',
+    COVER_LETTER_STYLE_MD: renderCoverLetterStyleMd(p),
+    EXTRA_RULES_MD: renderExtraRulesMd(p),
+    MASTER_RESUME_STEP: masterResumeStep(stem),
+    EXAMPLE_FOLDER_LINE: exampleFolderLine(hasMaster),
     PDFTOTEXT_LINE: pdftotextLine(),
     SLUG: slots.slug,
     POSTING_BLOCK: fenceUntrusted(
@@ -224,14 +260,18 @@ export function buildPrompt(slots: PromptSlots, profile: ProfileFile): string {
 
 export function buildInterviewPrompt(
   s: { folderRel: string; position: string; company: string },
-  profile: ProfileFile
+  profile: ProfileFile | null
 ): string {
   const template = fs.readFileSync(INTERVIEW_TEMPLATE_PATH, 'utf-8')
   return fill(template, {
-    CANDIDATE_NAME: profile.identity.fullName,
-    PROFILE_MD: renderProfileMd(profile),
-    INTERVIEW_STORIES_MD: renderStoriesMd(profile, 'interview'),
-    LOGISTICS_MD: renderLogisticsMd(profile),
+    CANDIDATE_NAME: profile?.identity.fullName || 'The candidate',
+    // Without a profile the submitted documents in the folder are the record
+    // of what was claimed; the uploads back them up.
+    PROFILE_MD: profile ? renderProfileMd(profile) : candidateSourcesSection(false),
+    INTERVIEW_STORIES_MD: profile
+      ? renderStoriesMd(profile, 'interview')
+      : '- None on file — draw stories only from the submitted documents and the source files.',
+    LOGISTICS_MD: renderLogisticsMd(profile ?? emptyProfile()),
     REPO_ROOT: REPO_ROOT,
     TODAY_ISO: todayISO(),
     FOLDER: s.folderRel,

@@ -38,6 +38,7 @@ import { localFileUrl } from '@shared/ipc'
 import { call } from '../api'
 import { parsePostingSections } from '../lib/postingSections'
 import { useApp, companyKey } from '../store'
+import BuildReadinessNotice from '../components/BuildReadinessNotice'
 import RatingBadge from '../components/RatingBadge'
 
 /** Icons a custom folder can be created with; keys are persisted on the folder. */
@@ -108,6 +109,7 @@ function IntakeCard({
   const [role, setRole] = useState(item.roleHint)
   const toast = useApp((s) => s.toast)
   const navigate = useApp((s) => s.navigate)
+  const blockedReason = useApp((s) => (s.buildReadiness?.mode === 'blocked' ? s.buildReadiness.message : null))
   const info = useApp((s) => s.companies[companyKey(item.companyHint)])
   const [dragged, setDragged] = useState(false)
   const [notes, setNotes] = useState(item.notes ?? '')
@@ -134,7 +136,7 @@ function IntakeCard({
       toast(`Build queued: ${meta.slug}`)
       navigate({ view: 'runs', runId: meta.id })
     } catch (err) {
-      toast(`Failed to start build: ${String(err)}`, 'error')
+      toast(`Failed to start build: ${err instanceof Error ? err.message : String(err)}`, 'error')
     }
   }
 
@@ -186,7 +188,12 @@ function IntakeCard({
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {item.state === 'new' || item.state === 'failed' ? (
-            <button className="btn btn-primary px-2 py-0.5 text-[11px]" onClick={build}>
+            <button
+              className="btn btn-primary px-2 py-0.5 text-[11px]"
+              disabled={!!blockedReason}
+              title={blockedReason ?? undefined}
+              onClick={build}
+            >
               <Play size={11} className="mr-0.5 inline" /> Build
             </button>
           ) : item.runId ? (
@@ -596,6 +603,12 @@ export default function IntakeView(): JSX.Element {
   const buildAll = async (): Promise<void> => {
     const pending = visible.filter((i) => i.state === 'new')
     if (!pending.length) return
+    // One clear refusal instead of the same error once per posting.
+    const readiness = useApp.getState().buildReadiness
+    if (readiness?.mode === 'blocked') {
+      toast(readiness.message ?? 'Add your résumé first', 'error')
+      return
+    }
     setBuildingAll(true)
     let queued = 0
     for (const item of pending) {
@@ -609,7 +622,7 @@ export default function IntakeView(): JSX.Element {
         })
         queued++
       } catch (err) {
-        toast(`${item.title}: ${String(err)}`, 'error')
+        toast(`${item.title}: ${err instanceof Error ? err.message : String(err)}`, 'error')
       }
     }
     setBuildingAll(false)
@@ -676,6 +689,7 @@ export default function IntakeView(): JSX.Element {
 
   return (
     <div className="flex h-full flex-col overflow-auto">
+      <BuildReadinessNotice />
       <div className="flex items-center gap-2 border-b border-edge bg-panel px-4 py-2.5">
         <h1 className="text-sm font-semibold text-gray-100">Intake</h1>
         <span className="text-[11px] text-muted">

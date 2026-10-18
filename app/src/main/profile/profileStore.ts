@@ -18,7 +18,15 @@ export function loadProfile(): ProfileFile | null {
     // after they were saved) so every consumer — the editor and the prompt
     // renderers — sees a complete object and never reads an absent field.
     const result = validateProfile(raw)
-    cached = result.ok ? result.profile : (raw as ProfileFile)
+    if (result.ok) {
+      cached = result.profile
+    } else {
+      // A hand-edited or imported file can miss hard requirements; it is still
+      // the user's data, so it loads healed to a complete shape (renderers
+      // never read an absent field) instead of raw, and the problems are logged.
+      console.error('[profile] profile.json is incomplete:', result.problems.join('; '))
+      cached = result.partial ?? null
+    }
     return cached
   } catch (err) {
     console.error('[profile] load failed:', err)

@@ -14,6 +14,7 @@ onPush('push:storeChanged', ({ domains }) => {
   if (domains.includes('settings')) void s.refreshSettings()
   if (domains.includes('material') || domains.includes('profile')) {
     useApp.setState((st) => ({ materialRev: st.materialRev + 1 }))
+    void s.refreshBuildReadiness()
   }
 })
 

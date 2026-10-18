@@ -125,6 +125,8 @@ interface AppState {
   /** Bumped on every 'material' push (uploads, knowledge, master résumé or
    *  context changed); views that list candidate material reload on it. */
   materialRev: number
+  /** Whether builds can run (see build:readiness); null until first read. */
+  buildReadiness: IpcInvokeContract['build:readiness']['res'] | null
   rows: TrackerRow[]
   intake: IntakeItem[]
   intakeFolders: IntakeFolder[]
@@ -155,6 +157,7 @@ interface AppState {
   refreshPreflight: () => Promise<void>
   refreshCompanies: () => Promise<void>
   refreshCalendarProposed: () => Promise<void>
+  refreshBuildReadiness: () => Promise<void>
   toggleTheme: () => Promise<void>
   hydrate: () => Promise<void>
   upsertRunMeta: (meta: RunMeta) => void
@@ -197,6 +200,7 @@ export const useApp = create<AppState>((set, get) => ({
   config: null,
   configLoadError: null,
   materialRev: 0,
+  buildReadiness: null,
   rows: [],
   intake: [],
   intakeFolders: [],
@@ -252,6 +256,15 @@ export const useApp = create<AppState>((set, get) => ({
       // A config already in hand stays authoritative; only a failure before
       // the first answer leaves the app with nothing to route on.
       if (!get().config) set({ configLoadError: err instanceof Error ? err.message : String(err) })
+    }
+  },
+
+  refreshBuildReadiness: async () => {
+    try {
+      set({ buildReadiness: await call('build:readiness', undefined) })
+    } catch (err) {
+      // Gating is a convenience; main still refuses an impossible build.
+      console.error('[store] build:readiness failed:', err)
     }
   },
 
@@ -361,7 +374,8 @@ export const useApp = create<AppState>((set, get) => ({
       get().refreshSettings(),
       get().refreshPreflight(),
       get().refreshCompanies(),
-      get().refreshCalendarProposed()
+      get().refreshCalendarProposed(),
+      get().refreshBuildReadiness()
     ])
   },
 

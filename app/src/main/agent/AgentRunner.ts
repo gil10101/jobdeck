@@ -18,6 +18,7 @@ import { prefetchCustomBoards } from '../boards/customBoards'
 import { glassdoorFeedPath, readGlassdoorFeed } from '../boards/glassdoorFeed'
 import { scanApplications } from '../fsops/FolderScanner'
 import { parseCandidatesFile, parseReport, validateReport } from '../parsers/report'
+import { assertCanBuild } from './readinessCheck'
 import { validateProfile } from '../profile/profileSchema'
 import { loadProfile } from '../profile/profileStore'
 import { ensureRatingBg } from '../companies/ratingService'
@@ -306,9 +307,6 @@ export class AgentRunner {
         profile
       )
     }
-    if (!profile) {
-      throw new Error('no candidate profile yet — run onboarding first (Settings → Profile)')
-    }
     if (kind === 'interview') {
       return buildInterviewPrompt(
         {
@@ -319,6 +317,9 @@ export class AgentRunner {
         profile
       )
     }
+    // Checked at queue time too; re-checked here because material can be
+    // removed while a build waits for a slot.
+    assertCanBuild()
     // Notes fall back to the intake item's stored notes so every build path
     // (single build, build-all, retries) picks them up without re-plumbing.
     const notes =
@@ -478,7 +479,7 @@ export class AgentRunner {
       if (run.controller.signal.aborted) {
         this.finish(run, 'cancelled', 'cancelled by user')
       } else {
-        this.finish(run, 'failed', `agent error: ${String(err)}`)
+        this.finish(run, 'failed', `agent error: ${err instanceof Error ? err.message : String(err)}`)
       }
     } finally {
       this.active.delete(run.meta.id)
@@ -708,8 +709,36 @@ export class AgentRunner {
     if (status === 'failed' || status === 'cancelled') {
       this.setIntakeState(run.meta.intakeId, status === 'failed' ? 'failed' : 'new')
       this.salvageBuildFolder(run)
+      this.releaseAcceptedCandidate(run)
     }
     this.setStatus(run, status, errorText)
+  }
+
+  /**
+   * Accepting a scout candidate creates a placeholder tracker row bound to the
+   * build run before the build starts. When that build dies with nothing on
+   * disk, the placeholder would sit at "building docs" forever and the
+   * candidate could never be accepted again — so the row goes and the
+   * candidate returns to the scout list for a retry. A salvaged folder keeps
+   * both: there is real output to track.
+   */
+  private releaseAcceptedCandidate(run: ActiveRun): void {
+    if (run.meta.kind !== 'build') return
+    try {
+      const row = this.tracker.findBySlug(run.meta.slug)
+      if (row?.folderPath) return
+      if (row && row.runId === run.meta.id) this.tracker.deleteRow(row.id)
+      if (!this.store.state.candidates.some((c) => c.buildRunId === run.meta.id)) return
+      this.store.mutate(['candidates'], (s) => {
+        const c = s.candidates.find((x) => x.buildRunId === run.meta.id)
+        if (c && c.state === 'accepted') {
+          c.state = 'new'
+          c.buildRunId = null
+        }
+      })
+    } catch (err) {
+      console.error('[runner] releasing the accepted candidate failed:', err)
+    }
   }
 
   /**

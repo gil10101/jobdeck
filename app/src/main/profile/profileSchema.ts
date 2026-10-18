@@ -17,7 +17,15 @@ import {
  */
 export function validateProfile(
   raw: unknown
-): { ok: true; profile: ProfileFile; healed: string[] } | { ok: false; problems: string[] } {
+):
+  | { ok: true; profile: ProfileFile; healed: string[] }
+  | {
+      ok: false
+      problems: string[]
+      /** The input healed to a complete shape despite failing the hard
+       *  requirements: safe for renderers to read, not fit to save as-is. */
+      partial?: ProfileFile
+    } {
   const problems: string[] = []
   const healed: string[] = []
   if (!raw || typeof raw !== 'object') {
@@ -99,7 +107,7 @@ export function validateProfile(
     problems.push('at least one experience entry or project is required')
   }
 
-  if (problems.length) return { ok: false, problems }
+  if (problems.length) return { ok: false, problems, partial: merged }
 
   if (!merged.documents.fileBasename || merged.documents.fileBasename === 'Candidate') {
     merged.documents.fileBasename = sanitizeBasename(id.fullName)
