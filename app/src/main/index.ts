@@ -18,8 +18,12 @@ import { initProviderRuntime, stopShim } from './provider/providerRuntime'
 import { createMainWindow, installWebviewHardening } from './window'
 
 // Dev isolation: distinct userData so an ohmo dev instance never collides
-// with an installed build.
-if (!app.isPackaged) {
+// with an installed build. OHMO_USER_DATA points a run at a throwaway profile
+// (smoke tests, a clean first-run check) — it also scopes the single-instance
+// lock, so such a run coexists with a normal one.
+if (process.env.OHMO_USER_DATA) {
+  app.setPath('userData', path.resolve(process.env.OHMO_USER_DATA))
+} else if (!app.isPackaged) {
   app.setPath('userData', path.join(app.getPath('appData'), 'OhmoDev'))
 }
 
