@@ -39,5 +39,11 @@ function run() {
 // Ctrl-C reaches electron-vite directly (same process group), so the wrapper
 // only has to outlive it. A signal aimed at the wrapper alone is forwarded.
 process.on('SIGINT', () => {})
-process.on('SIGTERM', () => child?.kill('SIGTERM'))
+process.on('SIGTERM', () => {
+  if (!child?.pid) return
+  // With shell: true the child is cmd.exe; killing it alone orphans the real
+  // toolchain, so Windows takes down the whole tree.
+  if (process.platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'])
+  else child.kill('SIGTERM')
+})
 run()

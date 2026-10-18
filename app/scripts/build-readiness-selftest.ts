@@ -7,7 +7,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { check, finish, tmpDir } from './lib/harness.ts'
 
-const { assessBuildReadiness, readCandidateMaterial } = await import('../src/main/agent/buildReadiness.ts')
+const { assessBuildReadiness, isUsableProfile, readCandidateMaterial } = await import(
+  '../src/main/agent/buildReadiness.ts'
+)
 const paths = await import('../src/main/paths.ts')
 const { buildPrompt, buildInterviewPrompt } = await import('../src/main/agent/prompt.ts')
 const profileStore = await import('../src/main/profile/profileStore.ts')
@@ -116,6 +118,11 @@ try {
   rendered = `THREW: ${String(err)}`
 }
 check('renderer does not throw on the healed profile', rendered.startsWith('THREW'), false)
+check('a healed incomplete profile is not usable', isUsableProfile(healed), false)
+// uploads/resume.pdf still exists from above, so the build falls back to
+// minimal mode instead of claiming a full profile over blank facts.
+check('incomplete profile + uploads reads as minimal', workspaceBuildReadiness().mode, 'minimal')
+check('a valid profile is usable', isUsableProfile(draft.profile), true)
 
 fs.writeFileSync(paths.PROFILE_FILE, '"just a string"')
 profileStore.resetProfileCache()

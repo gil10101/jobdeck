@@ -19,6 +19,7 @@ import { glassdoorFeedPath, readGlassdoorFeed } from '../boards/glassdoorFeed'
 import { scanApplications } from '../fsops/FolderScanner'
 import { parseCandidatesFile, parseReport, validateReport } from '../parsers/report'
 import { assertCanBuild } from './readinessCheck'
+import { isUsableProfile } from './buildReadiness'
 import { validateProfile } from '../profile/profileSchema'
 import { loadProfile } from '../profile/profileStore'
 import { ensureRatingBg } from '../companies/ratingService'
@@ -291,7 +292,10 @@ export class AgentRunner {
         outputPath
       })
     }
-    const profile = loadProfile()
+    // An incomplete profile.json loads healed but is not a profile to build
+    // on (see isUsableProfile); those runs take the no-profile path.
+    const loaded = loadProfile()
+    const profile = isUsableProfile(loaded) ? loaded : null
     if (kind === 'scout') {
       return buildScoutPrompt(
         {

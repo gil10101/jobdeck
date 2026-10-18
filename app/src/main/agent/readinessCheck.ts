@@ -1,6 +1,6 @@
 import { MASTER_DIR, UPLOADS_DIR } from '../paths'
 import { loadProfile } from '../profile/profileStore'
-import { assessBuildReadiness, readCandidateMaterial, type BuildMode } from './buildReadiness'
+import { assessBuildReadiness, isUsableProfile, readCandidateMaterial, type BuildMode } from './buildReadiness'
 
 /** Build readiness of the live workspace (see assessBuildReadiness). */
 export function workspaceBuildReadiness(): { mode: BuildMode; message: string | null } {
@@ -9,7 +9,7 @@ export function workspaceBuildReadiness(): { mode: BuildMode; message: string | 
     readCandidateMaterial({
       masterDir: MASTER_DIR,
       uploadsDir: UPLOADS_DIR,
-      hasProfile: profile !== null,
+      hasProfile: isUsableProfile(profile),
       fileBasename: profile?.documents.fileBasename || null
     })
   )

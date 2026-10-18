@@ -86,6 +86,19 @@ export function agentReadableUploads(
   return { files, skipped }
 }
 
+/**
+ * A profile a build can stand on: a name and at least one role or project.
+ * loadProfile() also returns a healed copy of an incomplete hand-edited or
+ * imported profile.json (so renderers never crash); that copy must not be
+ * mistaken for the full path, or the prompt would claim "everything is here"
+ * over a blank name and no experience.
+ */
+export function isUsableProfile(
+  p: { identity: { fullName: string }; experience: unknown[]; projects: unknown[] } | null
+): boolean {
+  return !!p && p.identity.fullName.trim().length > 0 && (p.experience.length > 0 || p.projects.length > 0)
+}
+
 export interface CandidateMaterial {
   hasProfile: boolean
   uploads: number
