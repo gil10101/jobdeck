@@ -13,7 +13,7 @@
     "dev": "electron-vite dev --watch",
     "build": "electron-vite build",
     "start": "electron-vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.scripts.json",
     "test": "node scripts/email-selftest.ts && node scripts/portable-selftest.ts && node scripts/provider-selftest.ts && node scripts/preflight-selftest.ts",
     "probe:agent": "node scripts/probe-agent.mjs"
   },

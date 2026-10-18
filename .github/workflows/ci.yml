@@ -31,4 +31,8 @@ jobs:
 
       - run: npm run typecheck
 
+      # Bundling catches what tsc cannot: unresolved aliases, externalized
+      # deps, and renderer imports that only fail under vite.
+      - run: npm run build
+
       - run: npm test
