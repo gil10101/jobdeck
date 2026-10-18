@@ -22,13 +22,38 @@ import { useApp } from './store'
 export default function App(): JSX.Element {
   const route = useApp((s) => s.route)
   const config = useApp((s) => s.config)
+  const configLoadError = useApp((s) => s.configLoadError)
   // The browser stays mounted once visited: unmounting destroys its webview
   // guests, and with them per-tab navigation history and page state.
   const browserVisited = useRef(false)
   if (route.view === 'browser') browserVisited.current = true
 
+  // Nothing to route on until config:get answers: rendering the main UI here
+  // would fire workspace calls before main has said a workspace exists.
+  if (!config) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        {configLoadError ? (
+          <div className="panel w-[460px] p-6 text-xs leading-relaxed text-gray-400">
+            <div className="text-sm font-semibold text-red-400">The app could not load its settings</div>
+            <p className="mt-2">{configLoadError}</p>
+            <button
+              className="btn btn-primary mt-4"
+              onClick={() => void useApp.getState().hydrate()}
+            >
+              Retry
+            </button>
+          </div>
+        ) : (
+          <span className="text-xs text-gray-500">Loading…</span>
+        )}
+        <ToastHost />
+      </div>
+    )
+  }
+
   // First-run gate: setup wizard until a workspace exists AND onboarding finished.
-  if (config && (!config.workspacePath || !config.onboardedAt)) {
+  if (!config.workspacePath || !config.onboardedAt) {
     return (
       <div className="h-full">
         <OnboardingWizard />

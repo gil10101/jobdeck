@@ -151,6 +151,7 @@ export default function SettingsView(): JSX.Element {
   const [provTest, setProvTest] = useState<{ ok: boolean; message: string } | null>(null)
   const [provBusy, setProvBusy] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [switching, setSwitching] = useState(false)
   const [env, setEnv] = useState<EnvCheck | null>(null)
   // Holds the override the user is editing; empty means "auto-detect".
   const [toolDrafts, setToolDrafts] = useState<Record<ToolName, string>>({
@@ -547,6 +548,36 @@ export default function SettingsView(): JSX.Element {
       toast(String(err), 'error')
     } finally {
       setExporting(false)
+    }
+  }
+
+  // Main confirms and then restarts the app; a cancelled prompt resolves with
+  // switched=false and nothing changes.
+  const switchWorkspace = async (): Promise<void> => {
+    setSwitching(true)
+    try {
+      const res = await call('workspace:switch', undefined)
+      if (res.switched) toast('Restarting to open the workspace…', 'info')
+    } catch (err) {
+      toast(err instanceof Error ? err.message : String(err), 'error')
+    } finally {
+      setSwitching(false)
+    }
+  }
+
+  const revealWorkspace = (): void => {
+    void call('workspace:reveal', undefined).catch((err: unknown) =>
+      toast(err instanceof Error ? err.message : String(err), 'error')
+    )
+  }
+
+  // Clearing setup completion flips App's gate straight to the wizard.
+  const rerunSetup = async (): Promise<void> => {
+    try {
+      await call('onboarding:reset', undefined)
+      await useApp.getState().refreshConfig()
+    } catch (err) {
+      toast(err instanceof Error ? err.message : String(err), 'error')
     }
   }
 
@@ -1488,6 +1519,31 @@ export default function SettingsView(): JSX.Element {
           <div className="flex items-center gap-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
             <Archive size={11} aria-hidden="true" /> Workspace data
           </div>
+          <Row
+            label="Workspace folder"
+            hint={`Everything the app stores lives here${info ? `: ${info.repoRoot}` : ''}. Changing it opens another workspace (or starts a new one in an empty folder) after a restart; this one stays as it is.`}
+          >
+            <div className="flex gap-1.5">
+              <button className="btn px-2 py-1 text-[10px]" onClick={revealWorkspace}>
+                Show folder
+              </button>
+              <button
+                className="btn px-2 py-1 text-[10px]"
+                disabled={switching}
+                onClick={() => void switchWorkspace()}
+              >
+                {switching ? 'Switching…' : 'Change workspace…'}
+              </button>
+            </div>
+          </Row>
+          <Row
+            label="Setup wizard"
+            hint="Walk through setup again — model, your résumé and other material, profile review. Your workspace and existing data stay in place."
+          >
+            <button className="btn px-2 py-1 text-[10px]" onClick={() => void rerunSetup()}>
+              Re-run setup…
+            </button>
+          </Row>
           <Row
             label="Export workspace"
             hint="Packs your whole workspace — tracker, documents, runs, library — into a verifiable zip you can import on another machine from the setup screen. Credential files are held back, and the export tells you how many."

@@ -195,7 +195,20 @@ export interface IpcInvokeContract {
    *  to detection; a path the app cannot execute is rejected with an error. */
   'env:setToolPath': { req: { tool: ToolName; path: string | null }; res: EnvCheck }
   'workspace:choose': { req: { title?: string }; res: { path: string | null } }
-  'workspace:create': { req: { dir: string }; res: { workspacePath: string } }
+  /** Adopt a folder as the workspace (scaffolding a fresh one). When another
+   *  workspace is already live, config is repointed and restartRequired asks
+   *  the renderer to offer app:relaunch — services never re-root in-process. */
+  'workspace:create': {
+    req: { dir: string }
+    res: { workspacePath: string; restartRequired: boolean }
+  }
+  /** Settings → Change workspace: pick, confirm, write config, restart.
+   *  switched=false when the user cancelled at any prompt. */
+  'workspace:switch': { req: void; res: { switched: boolean } }
+  /** Open the workspace folder in the OS file manager. */
+  'workspace:reveal': { req: void; res: void }
+  /** Restart the app (after an import or create that repointed config). */
+  'app:relaunch': { req: void; res: void }
   /** Zip the whole workspace (denylist-scanned, hashed manifest) to a user-chosen
    *  file. `skipped` counts credential files held back, so the export never
    *  drops anything without saying so. */
@@ -260,6 +273,8 @@ export interface IpcInvokeContract {
   }
   'library:upload': { req: void; res: { added: number; names: string[] } }
   'onboarding:complete': { req: void; res: void }
+  /** Clear setup completion so the wizard reopens on the current workspace. */
+  'onboarding:reset': { req: void; res: void }
   'candidates:list': { req: void; res: CandidateJob[] }
   'candidates:accept': { req: { id: string }; res: { candidate: CandidateJob; run: RunMeta } }
   'candidates:reject': { req: { id: string }; res: void }
@@ -454,6 +469,9 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'env:setToolPath',
   'workspace:choose',
   'workspace:create',
+  'workspace:switch',
+  'workspace:reveal',
+  'app:relaunch',
   'workspace:export',
   'workspace:import',
   'app:pickFile',
@@ -466,6 +484,7 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'onboard:start',
   'library:upload',
   'onboarding:complete',
+  'onboarding:reset',
   'app:showItem',
   'app:openFolder',
   'app:openExternal',

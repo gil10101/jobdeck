@@ -38,7 +38,6 @@ import {
   writeGlassdoorFeed
 } from './boards/glassdoorFeed'
 import { APP_DATA_DIR, REPO_ROOT } from './paths'
-import { loadConfig } from './appConfig'
 import { buildArchive } from './workspace/archive'
 import { clearGeminiKey, clearOllamaKey, setGeminiKey, setOllamaKey } from './provider/providerKeyStore'
 import { ollamaModelDetails, providerStatus, testProvider } from './provider/providerRuntime'
@@ -833,8 +832,9 @@ export function registerIpc(services: Services): void {
   // ---- workspace export (portable zip with hashed manifest) ----
   // workspace:import lives in coreIpc.ts — it must work before any workspace exists.
   handle('workspace:export', async () => {
-    const workspacePath = loadConfig().workspacePath
-    if (!workspacePath) throw new Error('no workspace configured')
+    // The live root, not config.json: a pending import/switch has already
+    // repointed config at a folder this session is not running on.
+    const workspacePath = REPO_ROOT
     const win = services.getWindow()
     const d = new Date()
     const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`

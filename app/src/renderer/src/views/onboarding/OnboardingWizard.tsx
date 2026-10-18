@@ -35,7 +35,7 @@ export default function OnboardingWizard(): JSX.Element {
   const [draft, setDraft] = useState<ProfileFile | null>(null)
   const [gapAnswers, setGapAnswers] = useState<Record<string, string>>({})
   const [runPurpose, setRunPurpose] = useState<'extract' | 'refine'>('extract')
-  const [importRestart, setImportRestart] = useState(false)
+  const [restartNeeded, setRestartNeeded] = useState(false)
 
   // ---- extract/refine run watcher ----
   useEffect(() => {
@@ -74,13 +74,16 @@ export default function OnboardingWizard(): JSX.Element {
         title: 'Choose (or create) an empty folder for your workspace'
       })
       if (!path) return
-      await call('workspace:create', { dir: path })
-      await useApp.getState().refreshConfig()
-      // The workspace boot registered settings:* and provider:*; the provider
-      // now has a stored value, so both the settings slice and the preflight
-      // that depends on it are re-read before the model step renders.
-      await useApp.getState().refreshSettings()
-      void useApp.getState().refreshPreflight()
+      const res = await call('workspace:create', { dir: path })
+      if (res.restartRequired) {
+        setRestartNeeded(true)
+        return
+      }
+      // A full hydrate, not piecemeal refreshes: adopting a folder that already
+      // holds a profile ends setup right here (the gate in App flips), and the
+      // main UI must arrive with every slice loaded. The boot also registered
+      // settings:* and provider:*, which the model step reads.
+      await useApp.getState().hydrate()
       setStep('model')
     } catch (err) {
       toast(errText(err), 'error')
@@ -99,11 +102,10 @@ export default function OnboardingWizard(): JSX.Element {
       }
       if (!res.imported) return
       if (res.restartRequired) {
-        // Live services cannot re-root — the import goes live on next launch.
-        setImportRestart(true)
+        // Live services cannot re-root — the import goes live after a restart.
+        setRestartNeeded(true)
         return
       }
-      await useApp.getState().refreshConfig()
       toast('Workspace imported', 'success')
       // An archive carrying a profile has nothing left for setup to gather —
       // asking for CVs would be asking for what was just restored.
@@ -111,8 +113,7 @@ export default function OnboardingWizard(): JSX.Element {
         await finish()
         return
       }
-      await useApp.getState().refreshSettings()
-      void useApp.getState().refreshPreflight()
+      await useApp.getState().hydrate()
       setStep('model')
     } catch (err) {
       toast(errText(err), 'error')
@@ -238,8 +239,8 @@ export default function OnboardingWizard(): JSX.Element {
                 Your saved workspace could not be opened, so this session started without one:{' '}
                 {config.bootError}
                 <div className="mt-1 text-gray-400">
-                  Make that folder reachable and writable, then quit and reopen the app to load it —
-                  or pick a different folder below.
+                  Restore that folder and restart the app to load it, or choose it (or another
+                  folder) below.
                 </div>
               </div>
             )}
@@ -261,14 +262,14 @@ export default function OnboardingWizard(): JSX.Element {
             <div className="mt-5 flex flex-col gap-2">
               <button
                 className="btn btn-primary justify-center py-2.5"
-                disabled={busy || importRestart}
+                disabled={busy || restartNeeded}
                 onClick={createWorkspace}
               >
                 Create a new workspace…
               </button>
               <button
                 className="btn justify-center py-2.5"
-                disabled={busy || importRestart}
+                disabled={busy || restartNeeded}
                 onClick={importExport}
               >
                 <FolderDown size={13} /> Import an export…
@@ -277,10 +278,13 @@ export default function OnboardingWizard(): JSX.Element {
                 Moving from another machine? Import the zip made with Settings → Export workspace.
               </p>
             </div>
-            {importRestart && (
-              <p className="mt-3 text-[11px] leading-relaxed text-amber-300">
-                Import complete — quit and reopen the app to load the imported workspace.
-              </p>
+            {restartNeeded && (
+              <div className="mt-3 flex items-center gap-3 text-[11px] leading-relaxed text-amber-300">
+                <span>The new workspace opens after a restart.</span>
+                <button className="btn btn-primary" onClick={() => void call('app:relaunch', undefined)}>
+                  Restart now
+                </button>
+              </div>
             )}
           </div>
         )}

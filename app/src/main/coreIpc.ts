@@ -1,4 +1,4 @@
-import { BrowserWindow, app, dialog, ipcMain } from 'electron'
+import { BrowserWindow, app, dialog, ipcMain, shell } from 'electron'
 import fs from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
@@ -6,11 +6,12 @@ import type { EnvCheck, EnvPreflight, PrereqId, PrereqTool, ToolName } from '@sh
 import { configError, loadConfig, saveConfig } from './appConfig'
 import { claudeCredentialSignal } from './claudeAuth'
 import { installAllBoards } from './boards/boardsBridge'
-import { normalizeToolOverride, resolveBun, resolveLatex, toolStatus } from './paths'
+import { REPO_ROOT, normalizeToolOverride, resolveBun, resolveLatex, toolStatus } from './paths'
 import { prereqSpecsFor, scopeNoteFor, sortPrereqs } from './provider/prereqSpec'
 import { geminiKeySet } from './provider/providerKeyStore'
 import { currentProviderConfigOrNull, ollamaReachability } from './provider/providerRuntime'
 import { readManifest, verifyAndExtract } from './workspace/archive'
+import { classifyFolder, configPatchForSwitch, hasProfile as folderHasProfile, sameFolder } from './workspace/workspaceState'
 
 const requireFrom = createRequire(import.meta.url)
 
@@ -204,6 +205,39 @@ async function assertUsableWorkspace(
 }
 
 /**
+ * Screen a folder for adoption as the workspace: refuse what cannot work and
+ * ask before scaffolding into a folder that already holds unrelated files.
+ * Returns whether the folder is an existing workspace. Throws with a message
+ * the renderer shows verbatim; a declined prompt throws too.
+ */
+async function vetWorkspaceFolder(dir: string, win: BrowserWindow | null): Promise<boolean> {
+  await assertUsableWorkspace(dir, win)
+  const kind = classifyFolder(dir)
+  if (kind === 'notDirectory') throw new Error(`${dir} is a file, not a folder.`)
+  if (kind === 'nonEmptyOther') {
+    const { response } = await dialog.showMessageBox(win ?? new BrowserWindow({ show: false }), {
+      type: 'question',
+      buttons: ['Choose a different folder', 'Use this folder'],
+      defaultId: 0,
+      cancelId: 0,
+      message: 'This folder already contains other files',
+      detail: `The app adds its own folders (applications, master, uploads, runs, …) next to what is in ${dir}. Nothing there is changed or removed. An empty folder keeps things tidier.`
+    })
+    if (response !== 1) throw new Error('Workspace setup cancelled — choose an empty folder.')
+  }
+  return kind === 'workspace'
+}
+
+/** Create the folder if needed, scaffold a fresh one, and point config at it.
+ *  An existing workspace is adopted as-is (its board CLIs may be customized). */
+function adoptWorkspaceFolder(dir: string, isWorkspace: boolean): void {
+  fs.mkdirSync(dir, { recursive: true })
+  // Scaffold the bundled job-board CLIs so scout runs work out of the box.
+  if (!isWorkspace) installAllBoards(dir)
+  saveConfig(configPatchForSwitch(loadConfig(), dir, folderHasProfile(dir)))
+}
+
+/**
  * IPC that must work BEFORE a workspace exists (first-run/onboarding).
  * Workspace-dependent IPC lives in ipcRegistry.ts and is registered by
  * bootWorkspace() once a workspace is chosen.
@@ -217,6 +251,8 @@ export function registerCoreIpc(deps: {
    *  bound to the current root. A half-finished boot is false here even
    *  though workspaceReady() already flipped. */
   workspaceBooted: () => boolean
+  /** Restart the process so services come up on the configured workspace. */
+  relaunch: () => void
 }): void {
   function envCheck(): EnvCheck {
     return {
@@ -290,13 +326,58 @@ export function registerCoreIpc(deps: {
 
   handle('workspace:create', async ({ dir }: { dir: string }) => {
     if (!dir) throw new Error('no folder chosen')
-    await assertUsableWorkspace(dir, deps.getWindow())
-    fs.mkdirSync(dir, { recursive: true })
-    // Scaffold the bundled job-board CLIs so scout runs work out of the box.
-    installAllBoards(dir)
-    saveConfig({ workspacePath: dir })
+    const isWorkspace = await vetWorkspaceFolder(dir, deps.getWindow())
+    adoptWorkspaceFolder(dir, isWorkspace)
+    if (deps.workspaceBooted() && !sameFolder(REPO_ROOT, dir)) {
+      // Live services are bound to another root and cannot re-root: the new
+      // folder goes live after a restart, never silently on some later launch.
+      return { workspacePath: dir, restartRequired: true }
+    }
     await deps.completeSetup(dir)
-    return { workspacePath: dir }
+    return { workspacePath: dir, restartRequired: false }
+  })
+
+  // Settings → Change workspace. Services re-root only in a fresh process, so
+  // a confirmed switch writes config and restarts; a declined one writes
+  // nothing.
+  handle('workspace:switch', async () => {
+    const win = deps.getWindow()
+    const pick = await dialog.showOpenDialog(win ?? new BrowserWindow({ show: false }), {
+      title: 'Choose a workspace folder (an existing workspace, or an empty folder for a new one)',
+      properties: ['openDirectory', 'createDirectory']
+    })
+    const dir = pick.filePaths[0]
+    if (pick.canceled || !dir) return { switched: false }
+    if (deps.workspaceBooted() && sameFolder(REPO_ROOT, dir)) {
+      throw new Error('That folder is already the open workspace.')
+    }
+    const isWorkspace = await vetWorkspaceFolder(dir, win)
+    const { response } = await dialog.showMessageBox(win ?? new BrowserWindow({ show: false }), {
+      type: 'question',
+      buttons: ['Cancel', 'Switch and restart'],
+      defaultId: 1,
+      cancelId: 0,
+      message: isWorkspace ? 'Open this workspace?' : 'Start a new workspace here?',
+      detail: `${dir}\n\nThe app restarts to open it; agent runs in progress are stopped. ${
+        isWorkspace ? 'Its tracker, profile and documents load as they are.' : 'Setup runs next so you can add your résumé.'
+      } Your current workspace is left untouched and can be reopened the same way. Email and calendar connections belong to this computer, not the workspace, so they carry over.`
+    })
+    if (response !== 1) return { switched: false }
+    adoptWorkspaceFolder(dir, isWorkspace)
+    // Deferred so the reply reaches the renderer before the quit begins.
+    setImmediate(deps.relaunch)
+    return { switched: true }
+  })
+
+  handle('workspace:reveal', async () => {
+    const dir = deps.workspaceBooted() ? REPO_ROOT : loadConfig().workspacePath
+    if (!dir) throw new Error('no workspace configured')
+    const problem = await shell.openPath(dir)
+    if (problem) throw new Error(problem)
+  })
+
+  handle('app:relaunch', () => {
+    setImmediate(deps.relaunch)
   })
 
   // Lives here (not ipcRegistry.ts) so onboarding's "Import an export" card
@@ -341,8 +422,8 @@ export function registerCoreIpc(deps: {
       return { imported: false, error: message, restartRequired: false, hasProfile: false }
     }
     const workspacePath = path.join(destDir, 'workspace')
-    // Same config write onboarding's workspace:create uses.
-    saveConfig({ workspacePath })
+    // Same config transition onboarding's workspace:create uses.
+    saveConfig(configPatchForSwitch(loadConfig(), workspacePath, folderHasProfile(workspacePath)))
     if (deps.workspaceBooted()) {
       // Live services (store, watchers, runner) are bound to the old root and
       // cannot re-root at runtime — the import goes live on next launch.
@@ -358,6 +439,12 @@ export function registerCoreIpc(deps: {
 
   handle('onboarding:complete', () => {
     saveConfig({ onboardedAt: new Date().toISOString() })
+  })
+
+  // Reopen the setup wizard on the current workspace (Settings / Who I am).
+  // Nothing in the workspace is touched; finishing setup sets onboardedAt again.
+  handle('onboarding:reset', () => {
+    saveConfig({ onboardedAt: null })
   })
 
   handle('app:pickFile', async (req: { filters?: { name: string; extensions: string[] }[] }) => {

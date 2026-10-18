@@ -2,7 +2,7 @@ import { BrowserWindow, app, dialog } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { registerLocalFileScheme, installLocalFileHandler } from './protocol'
-import { initWorkspace } from './paths'
+import { initWorkspace, resetWorkspace } from './paths'
 import { loadConfig } from './appConfig'
 import { registerCoreIpc } from './coreIpc'
 import { Store } from './store/Store'
@@ -13,6 +13,7 @@ import { RunStore } from './agent/runStore'
 import { AgentRunner } from './agent/AgentRunner'
 import { initRatingService } from './companies/ratingService'
 import { registerIpc } from './ipcRegistry'
+import { resetProfileCache } from './profile/profileStore'
 import { initProviderRuntime, stopShim } from './provider/providerRuntime'
 import { createMainWindow, installWebviewHardening } from './window'
 
@@ -49,7 +50,19 @@ function send(channel: string, payload: unknown): void {
  */
 function bootWorkspace(workspacePath: string): void {
   if (workspaceBooted) return // already booted this session
+  try {
+    startWorkspaceServices(workspacePath)
+  } catch (err) {
+    // initWorkspace() points every path binding at the root before anything
+    // can fail; a half-finished boot must not leave them serving it.
+    resetWorkspace()
+    throw err
+  }
+}
+
+function startWorkspaceServices(workspacePath: string): void {
   initWorkspace(workspacePath)
+  resetProfileCache()
 
   // A previous attempt may have left a watcher running on the old root.
   todo?.stop()
@@ -104,6 +117,23 @@ function bootWorkspace(workspacePath: string): void {
   send('push:storeChanged', { domains: ['rows', 'intake', 'candidates', 'settings'] })
 }
 
+// Exit code a dev/preview launcher wrapper (scripts/launch.mjs) treats as
+// "start me again". electron-vite exits with electron's code when electron
+// closes, so app.relaunch() would come back to a dead dev server; the wrapper
+// restarts electron-vite instead. Set by the wrapper; absent for a plain
+// `electron .` launch, where app.relaunch() is the right tool.
+const RELAUNCH_EXIT_CODE = Number(process.env.OHMO_RELAUNCH_EXIT_CODE) || 0
+let relaunchRequested = false
+
+/** Restart the whole process — the only way services re-root onto a new
+ *  workspace. Goes through the normal quit path, so runs are aborted and the
+ *  store is flushed first. */
+function relaunchApp(): void {
+  relaunchRequested = true
+  if (!RELAUNCH_EXIT_CODE) app.relaunch()
+  app.quit()
+}
+
 /** Everything this process registers with Electron. Runs only in the instance
  *  that owns the single-instance lock. */
 function start(): void {
@@ -132,7 +162,8 @@ function start(): void {
       getWindow: () => mainWindow,
       completeSetup: (workspacePath) => bootWorkspace(workspacePath),
       bootError: () => bootError,
-      workspaceBooted: () => workspaceBooted
+      workspaceBooted: () => workspaceBooted,
+      relaunch: relaunchApp
     })
 
     const config = loadConfig()
@@ -175,7 +206,7 @@ function start(): void {
         type: 'error',
         title: 'Workspace could not be opened',
         message: `The workspace at ${config.workspacePath} could not be opened.`,
-        detail: `${bootError}\n\nThe app has started without it. Check that the folder exists and is writable, then pick it again in setup.`,
+        detail: `${bootError}\n\nThe app has started without it. Restore the folder and restart the app, or choose it (or another folder) in setup.`,
         buttons: ['OK']
       })
     }
@@ -201,7 +232,8 @@ function start(): void {
     runner?.abortAll('app quit')
     stopShim()
     void (store?.flush() ?? Promise.resolve()).finally(() => {
-      app.quit()
+      if (relaunchRequested && RELAUNCH_EXIT_CODE) app.exit(RELAUNCH_EXIT_CODE)
+      else app.quit()
     })
   })
 }

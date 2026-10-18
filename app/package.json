@@ -10,11 +10,11 @@
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev --watch",
+    "dev": "node scripts/launch.mjs dev --watch",
     "build": "electron-vite build",
-    "start": "electron-vite preview",
+    "start": "node scripts/launch.mjs preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.scripts.json",
-    "test": "node scripts/email-selftest.ts && node scripts/portable-selftest.ts && node scripts/provider-selftest.ts && node scripts/preflight-selftest.ts",
+    "test": "node scripts/email-selftest.ts && node scripts/portable-selftest.ts && node scripts/provider-selftest.ts && node scripts/preflight-selftest.ts && node scripts/workspace-selftest.ts && node scripts/ipc-contract-selftest.ts",
     "probe:agent": "node scripts/probe-agent.mjs"
   },
   "dependencies": {

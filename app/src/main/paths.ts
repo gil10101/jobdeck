@@ -66,6 +66,27 @@ export function initWorkspace(root: string): void {
   ensureAppDataDirs()
 }
 
+/** Undo initWorkspace() after a boot that failed partway, so nothing (the
+ *  local-file protocol, path helpers) keeps serving a root that never came up. */
+export function resetWorkspace(): void {
+  REPO_ROOT = NOT_READY
+  APP_DATA_DIR = NOT_READY
+  APPLICATIONS_DIR = NOT_READY
+  TODO_DIR = NOT_READY
+  MASTER_DIR = NOT_READY
+  TEMPLATES_DIR = NOT_READY
+  ONBOARDING_DIR = NOT_READY
+  UPLOADS_DIR = NOT_READY
+  RUNS_DIR = NOT_READY
+  EXPORTS_DIR = NOT_READY
+  TMP_DIR = NOT_READY
+  INTAKE_IMAGES_DIR = NOT_READY
+  SCOUT_DIR = NOT_READY
+  TRACKER_FILE = NOT_READY
+  PROFILE_FILE = NOT_READY
+  COMPANIES_FILE = NOT_READY
+}
+
 export function ensureAppDataDirs(): void {
   assertReady()
   for (const d of [

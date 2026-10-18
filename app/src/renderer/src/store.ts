@@ -119,6 +119,9 @@ interface AppState {
   route: Route
   /** null = not fetched yet; workspacePath null = first-run required. */
   config: AppConfigInfo | null
+  /** Set when config:get itself failed; the app then shows a retry screen
+   *  instead of a main UI wired to channels that may not exist. */
+  configLoadError: string | null
   rows: TrackerRow[]
   intake: IntakeItem[]
   intakeFolders: IntakeFolder[]
@@ -189,6 +192,7 @@ let preflightSeq = 0
 export const useApp = create<AppState>((set, get) => ({
   route: { view: 'tracker' },
   config: null,
+  configLoadError: null,
   rows: [],
   intake: [],
   intakeFolders: [],
@@ -238,10 +242,12 @@ export const useApp = create<AppState>((set, get) => ({
 
   refreshConfig: async () => {
     try {
-      set({ config: await call('config:get', undefined) })
+      set({ config: await call('config:get', undefined), configLoadError: null })
     } catch (err) {
-      // main may not be ready yet; a persistent failure must still be traceable
       console.error('[store] config:get failed:', err)
+      // A config already in hand stays authoritative; only a failure before
+      // the first answer leaves the app with nothing to route on.
+      if (!get().config) set({ configLoadError: err instanceof Error ? err.message : String(err) })
     }
   },
 
