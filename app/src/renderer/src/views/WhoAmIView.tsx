@@ -4,8 +4,9 @@
 // per-section forms are the same components the Settings editor renders.
 
 import { useEffect, useState } from 'react'
-import { SquarePen, UserRound } from 'lucide-react'
+import { SquarePen, UserRound, X } from 'lucide-react'
 import type { ProfileFile } from '@shared/profile'
+import type { FolderEntry } from '@shared/types'
 import { call, onPush } from '../api'
 import { useApp } from '../store'
 import { PROFILE_SECTIONS } from '../components/profile/ProfileEditor'
@@ -13,7 +14,7 @@ import SkillsChipEditor from '../components/profile/SkillsChipEditor'
 
 interface KnowledgeInfo {
   notes: string
-  files: { name: string; sizeKb: number }[]
+  files: FolderEntry[]
 }
 
 /** "start – end", with an explicit Present while the end is open. */
@@ -116,6 +117,8 @@ function PreBlock({ text }: { text: string }): JSX.Element {
 
 export default function WhoAmIView(): JSX.Element {
   const toast = useApp((s) => s.toast)
+  const navigate = useApp((s) => s.navigate)
+  const materialRev = useApp((s) => s.materialRev)
   const [loading, setLoading] = useState(true)
   const [profile, setProfile] = useState<ProfileFile | null>(null)
   const [masterContext, setMasterContext] = useState('')
@@ -138,6 +141,35 @@ export default function WhoAmIView(): JSX.Element {
       setLoading(false)
     })
   }, [])
+
+  // Material changed elsewhere (Settings, Library): refresh the read-only
+  // context and knowledge sections. The profile has its own push below.
+  useEffect(() => {
+    if (materialRev === 0) return
+    void call('master:getContext', undefined)
+      .then(({ text }) => setMasterContext(text))
+      .catch(() => undefined)
+    void call('knowledge:get', undefined).then(setKb).catch(() => undefined)
+  }, [materialRev])
+
+  const removeKbFile = async (name: string): Promise<void> => {
+    try {
+      const { removed } = await call('knowledge:removeFile', { name })
+      if (removed) setKb((prev) => ({ ...prev, files: prev.files.filter((f) => f.name !== name) }))
+    } catch (err) {
+      toast(err instanceof Error ? err.message : String(err), 'error')
+    }
+  }
+
+  // Clearing setup completion flips App's gate straight to the wizard.
+  const rerunSetup = async (): Promise<void> => {
+    try {
+      await call('onboarding:reset', undefined)
+      await useApp.getState().refreshConfig()
+    } catch (err) {
+      toast(err instanceof Error ? err.message : String(err), 'error')
+    }
+  }
 
   // Assistant-made profile edits land while this tab is open — refetch on
   // push, but never while an edit draft is in progress (it must not be lost).
@@ -174,9 +206,21 @@ export default function WhoAmIView(): JSX.Element {
           <UserRound size={28} strokeWidth={1.5} className="text-gray-500" />
           <div className="mt-3 text-sm font-semibold text-gray-100">No profile yet</div>
           <p className="mt-1.5 text-[11px] leading-relaxed text-gray-500">
-            The agents have nothing to go on. Run onboarding to build your profile — it is the
-            source for every search, evaluation, and generated document.
+            Your profile is the source for every search, evaluation, and generated document.
+            Build it from your résumé — upload a file, pick one, or paste text — and review it
+            before anything is saved. Until then, builds read your uploaded files directly.
           </p>
+          <div className="mt-4 flex gap-2">
+            <button
+              className="btn btn-primary"
+              onClick={() => navigate({ view: 'settings' })}
+            >
+              Set up my profile
+            </button>
+            <button className="btn" onClick={() => void rerunSetup()}>
+              Re-run setup wizard
+            </button>
+          </div>
         </div>
       </div>
     )
@@ -574,10 +618,21 @@ export default function WhoAmIView(): JSX.Element {
               {kb.files.map((f) => (
                 <div
                   key={f.name}
-                  className="flex items-center gap-2 rounded-md border border-edge px-2 py-1 text-[11px]"
+                  className="group flex items-center gap-2 rounded-md border border-edge px-2 py-1 text-[11px]"
                 >
-                  <span className="min-w-0 flex-1 truncate text-gray-300">{f.name}</span>
-                  <span className="shrink-0 text-[10px] text-gray-600">{f.sizeKb} KB</span>
+                  <span className="min-w-0 flex-1 truncate text-gray-300">
+                    {f.name}
+                    {f.kind === 'dir' ? '/' : ''}
+                  </span>
+                  {f.kind === 'file' && <span className="shrink-0 text-[10px] text-gray-600">{f.sizeKb} KB</span>}
+                  <button
+                    className="shrink-0 text-gray-500 opacity-0 hover:text-red-400 focus:opacity-100 group-hover:opacity-100"
+                    onClick={() => void removeKbFile(f.name)}
+                    aria-label={`Remove ${f.name} from the knowledge base`}
+                    title="Move to the trash"
+                  >
+                    <X size={12} />
+                  </button>
                 </div>
               ))}
             </div>

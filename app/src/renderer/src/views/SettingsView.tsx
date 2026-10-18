@@ -6,6 +6,7 @@ import type {
   BoardsStatus,
   EmailStatus,
   EnvCheck,
+  FolderEntry,
   ToolName,
   ToolStatus
 } from '@shared/types'
@@ -124,7 +125,7 @@ export default function SettingsView(): JSX.Element {
   const [masterContextSaved, setMasterContextSaved] = useState(true)
   const [kbNotes, setKbNotes] = useState('')
   const [kbNotesSaved, setKbNotesSaved] = useState(true)
-  const [kbFiles, setKbFiles] = useState<{ name: string; sizeKb: number }[]>([])
+  const [kbFiles, setKbFiles] = useState<FolderEntry[]>([])
   const [emailStatus, setEmailStatus] = useState<EmailStatus | null>(null)
   const [clientIdDraft, setClientIdDraft] = useState('')
   // The stored secret is never echoed back; this holds only fresh input.
@@ -245,6 +246,16 @@ export default function SettingsView(): JSX.Element {
   useEffect(() => {
     if (settings) setReminderLeadDraft(String(settings.reminderLeadMinutes))
   }, [settings?.reminderLeadMinutes])
+
+  // Files added or removed elsewhere (Library, Who I am) show up here too.
+  // Notes are left alone: the textarea may hold unsaved edits.
+  const materialRev = useApp((s) => s.materialRev)
+  useEffect(() => {
+    if (materialRev === 0) return
+    void call('knowledge:get', undefined)
+      .then(({ files }) => setKbFiles(files))
+      .catch(() => undefined)
+  }, [materialRev])
 
   if (!settings) return <div className="p-6 text-sm text-gray-500">Loading…</div>
 
@@ -376,8 +387,8 @@ export default function SettingsView(): JSX.Element {
     try {
       const { added } = await call('knowledge:addFiles', undefined)
       if (added > 0) {
-        const { notes, files } = await call('knowledge:get', undefined)
-        setKbNotes(notes)
+        // Only the file list: the notes textarea may hold unsaved edits.
+        const { files } = await call('knowledge:get', undefined)
         setKbFiles(files)
         toast(`Added ${added} file${added === 1 ? '' : 's'}`, 'success')
       }
@@ -388,8 +399,8 @@ export default function SettingsView(): JSX.Element {
 
   const removeKbFile = async (name: string): Promise<void> => {
     try {
-      await call('knowledge:removeFile', { name })
-      setKbFiles((prev) => prev.filter((f) => f.name !== name))
+      const { removed } = await call('knowledge:removeFile', { name })
+      if (removed) setKbFiles((prev) => prev.filter((f) => f.name !== name))
     } catch (err) {
       toast(String(err), 'error')
     }
@@ -683,12 +694,16 @@ export default function SettingsView(): JSX.Element {
                   key={f.name}
                   className="group flex items-center gap-2 rounded-md border border-edge px-2 py-1 text-[11px]"
                 >
-                  <span className="min-w-0 flex-1 truncate text-gray-300">{f.name}</span>
-                  <span className="shrink-0 text-[10px] text-gray-600">{f.sizeKb} KB</span>
+                  <span className="min-w-0 flex-1 truncate text-gray-300">
+                    {f.name}
+                    {f.kind === 'dir' ? '/' : ''}
+                  </span>
+                  {f.kind === 'file' && <span className="shrink-0 text-[10px] text-gray-600">{f.sizeKb} KB</span>}
                   <button
-                    className="invisible shrink-0 text-gray-500 hover:text-red-400 group-hover:visible"
+                    className="shrink-0 text-gray-500 opacity-0 hover:text-red-400 focus:opacity-100 group-hover:opacity-100"
                     onClick={() => void removeKbFile(f.name)}
-                    title="Remove from knowledge base"
+                    aria-label={`Remove ${f.name} from the knowledge base`}
+                    title="Move to the trash"
                   >
                     <X size={12} />
                   </button>

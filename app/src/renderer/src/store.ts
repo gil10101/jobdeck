@@ -122,6 +122,9 @@ interface AppState {
   /** Set when config:get itself failed; the app then shows a retry screen
    *  instead of a main UI wired to channels that may not exist. */
   configLoadError: string | null
+  /** Bumped on every 'material' push (uploads, knowledge, master résumé or
+   *  context changed); views that list candidate material reload on it. */
+  materialRev: number
   rows: TrackerRow[]
   intake: IntakeItem[]
   intakeFolders: IntakeFolder[]
@@ -193,6 +196,7 @@ export const useApp = create<AppState>((set, get) => ({
   route: { view: 'tracker' },
   config: null,
   configLoadError: null,
+  materialRev: 0,
   rows: [],
   intake: [],
   intakeFolders: [],

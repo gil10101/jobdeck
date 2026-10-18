@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, ArrowLeft, ArrowRight, Check, FolderDown, Upload } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, FolderDown, Upload, X } from 'lucide-react'
 import type { ProfileFile } from '@shared/profile'
-import type { RunMeta } from '@shared/types'
+import type { FolderEntry, RunMeta } from '@shared/types'
 import { call, onPush } from '../../api'
 import { useApp } from '../../store'
 import PrereqPanel from '../../components/PrereqPanel'
@@ -28,7 +28,14 @@ export default function OnboardingWizard(): JSX.Element {
   const toast = useApp((s) => s.toast)
   const [step, setStep] = useState<Step>(config?.workspacePath ? 'model' : 'workspace')
   const [busy, setBusy] = useState(false)
-  const [uploadNames, setUploadNames] = useState<string[]>([])
+  // What is actually in uploads/ — read from disk, so files added before a
+  // relaunch, a Back, or in an earlier attempt are shown (and removable)
+  // rather than silently fed to the extraction.
+  const [uploads, setUploads] = useState<FolderEntry[]>([])
+  // A profile saved in an earlier pass (setup quit before "Start", or setup
+  // re-run from Settings) is offered instead of being silently overwritten.
+  const [existingProfile, setExistingProfile] = useState<ProfileFile | null>(null)
+  const materialRev = useApp((s) => s.materialRev)
   const [pasteText, setPasteText] = useState('')
   const [run, setRun] = useState<RunMeta | null>(null)
   const [runStatusLine, setRunStatusLine] = useState('starting…')
@@ -36,6 +43,16 @@ export default function OnboardingWizard(): JSX.Element {
   const [gapAnswers, setGapAnswers] = useState<Record<string, string>>({})
   const [runPurpose, setRunPurpose] = useState<'extract' | 'refine'>('extract')
   const [restartNeeded, setRestartNeeded] = useState(false)
+
+  const workspaceLive = !!config?.workspacePath
+  useEffect(() => {
+    if (!workspaceLive) return
+    void call('library:listUploads', undefined).then(setUploads).catch(() => undefined)
+  }, [workspaceLive, materialRev, step])
+  useEffect(() => {
+    if (!workspaceLive) return
+    void call('profile:get', undefined).then(setExistingProfile).catch(() => undefined)
+  }, [workspaceLive, materialRev])
 
   // ---- extract/refine run watcher ----
   useEffect(() => {
@@ -125,11 +142,20 @@ export default function OnboardingWizard(): JSX.Element {
   // ---- step: sources ----
   const upload = async (): Promise<void> => {
     try {
-      const { added, names } = await call('library:upload', undefined)
+      const { added } = await call('library:upload', undefined)
       if (added) {
-        setUploadNames((prev) => [...prev, ...names])
+        setUploads(await call('library:listUploads', undefined))
         toast(`${added} file${added === 1 ? '' : 's'} added to your library`, 'success')
       }
+    } catch (err) {
+      toast(errText(err), 'error')
+    }
+  }
+
+  const removeUpload = async (name: string): Promise<void> => {
+    try {
+      const { removed } = await call('library:removeUpload', { name })
+      if (removed) setUploads((prev) => prev.filter((u) => u.name !== name))
     } catch (err) {
       toast(errText(err), 'error')
     }
@@ -195,6 +221,19 @@ export default function OnboardingWizard(): JSX.Element {
     await call('onboarding:complete', undefined).catch(() => undefined)
     await useApp.getState().refreshConfig()
     await useApp.getState().hydrate()
+  }
+
+  // Skipping is always allowed and never final: say where setup lives now.
+  const skip = async (): Promise<void> => {
+    await finish()
+    if (!existingProfile) {
+      useApp
+        .getState()
+        .toast(
+          'Setup skipped. Builds read whatever you upload in Library; build your profile anytime in Settings → Candidate profile or Who I am.',
+          'info'
+        )
+    }
   }
 
   const stepIndex: Record<Step, number> = {
@@ -299,7 +338,7 @@ export default function OnboardingWizard(): JSX.Element {
               <span className="text-[10px] text-gray-500">
                 Nothing chosen? Continue keeps the default and Settings can change it later.
               </span>
-              <button className="btn ml-auto text-gray-500" onClick={finish}>
+              <button className="btn ml-auto text-gray-500" onClick={() => void skip()}>
                 Skip setup for now
               </button>
             </div>
@@ -318,11 +357,32 @@ export default function OnboardingWizard(): JSX.Element {
                 <Upload size={13} /> Add files…
               </button>
             </div>
-            {uploadNames.length > 0 && (
+            {existingProfile && (
+              <div className="mt-3 rounded-md border border-edge bg-panel2 p-3 text-[11px] leading-relaxed text-gray-400">
+                This workspace already has a profile for{' '}
+                <span className="text-gray-200">{existingProfile.identity.fullName || 'you'}</span>.
+                Keep it, or extract again below to draft a replacement — nothing is saved until you
+                review it.
+                <div className="mt-2">
+                  <button className="btn btn-primary" onClick={() => setStep('done')}>
+                    Keep my profile <ArrowRight size={13} />
+                  </button>
+                </div>
+              </div>
+            )}
+            {uploads.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1">
-                {uploadNames.map((n, i) => (
-                  <span key={`${n}-${i}`} className="chip text-[10px] text-gray-300">
-                    {n}
+                {uploads.map((u) => (
+                  <span key={u.name} className="chip flex items-center gap-1 text-[10px] text-gray-300">
+                    {u.name}
+                    <button
+                      className="text-gray-500 hover:text-red-400"
+                      aria-label={`Remove ${u.name}`}
+                      title="Move to the trash — it will not be read"
+                      onClick={() => void removeUpload(u.name)}
+                    >
+                      <X size={10} />
+                    </button>
                   </span>
                 ))}
               </div>
@@ -337,7 +397,7 @@ export default function OnboardingWizard(): JSX.Element {
             <div className="mt-4 flex items-center gap-2">
               <button
                 className="btn btn-primary"
-                disabled={busy || (uploadNames.length === 0 && !pasteText.trim())}
+                disabled={busy || (uploads.length === 0 && !pasteText.trim())}
                 onClick={extract}
               >
                 Extract my profile <ArrowRight size={13} />
@@ -345,7 +405,7 @@ export default function OnboardingWizard(): JSX.Element {
               <button className="btn" onClick={() => setStep('model')}>
                 <ArrowLeft size={13} /> Model
               </button>
-              <button className="btn ml-auto text-gray-500" onClick={finish}>
+              <button className="btn ml-auto text-gray-500" onClick={() => void skip()}>
                 Skip setup for now
               </button>
             </div>

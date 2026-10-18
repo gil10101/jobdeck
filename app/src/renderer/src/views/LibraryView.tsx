@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ChevronDown, ChevronRight, RefreshCw, Upload } from 'lucide-react'
+import { ChevronDown, ChevronRight, RefreshCw, Star, Trash2, Upload } from 'lucide-react'
 import type { LibraryCategory, LibraryFile } from '@shared/types'
 import { localFileUrl } from '@shared/ipc'
 import { FolderIcon } from '../components/icons'
@@ -13,8 +13,49 @@ const KIND_BADGE: Record<LibraryFile['kind'], string> = {
   other: '···'
 }
 
-function Preview({ file }: { file: LibraryFile | null }): JSX.Element {
+/** IPC rejections arrive as Error — show the message, not "Error: message". */
+function errText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+function Preview({ file, onChanged }: { file: LibraryFile | null; onChanged: () => void }): JSX.Element {
   const toast = useApp((s) => s.toast)
+  const isUpload = !!file && /^uploads\/[^/]+$/.test(file.relPath)
+  const isMaster = !!file && /^master\/[^/]+\.tex$/.test(file.relPath)
+  const canBeMaster = !!file && !isMaster && file.name.toLowerCase().endsWith('.tex')
+
+  const removeUpload = (): void => {
+    if (!file) return
+    void call('library:removeUpload', { name: file.name })
+      .then(({ removed }) => {
+        if (removed) {
+          toast(`Moved ${file.name} to the trash`, 'success')
+          onChanged()
+        }
+      })
+      .catch((err) => toast(errText(err), 'error'))
+  }
+  const setMaster = (): void => {
+    if (!file) return
+    void call('master:setResume', { relPath: file.relPath })
+      .then(({ relPath }) => {
+        if (relPath) {
+          toast('Master résumé set — builds copy its layout', 'success')
+          onChanged()
+        }
+      })
+      .catch((err) => toast(errText(err), 'error'))
+  }
+  const removeMaster = (): void => {
+    void call('master:removeResume', undefined)
+      .then(({ removed }) => {
+        if (removed) {
+          toast('Master résumé moved to the trash', 'success')
+          onChanged()
+        }
+      })
+      .catch((err) => toast(errText(err), 'error'))
+  }
   const [text, setText] = useState<string | null>(null)
   const [truncated, setTruncated] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -49,6 +90,25 @@ function Preview({ file }: { file: LibraryFile | null }): JSX.Element {
           {file.relPath}
         </span>
         <span className="text-[10px] text-gray-600">{file.sizeKb} KB</span>
+        {canBeMaster && (
+          <button
+            className="btn px-2 py-0.5 text-[10px]"
+            title="Builds copy this file's LaTeX preamble and layout"
+            onClick={setMaster}
+          >
+            <Star size={11} /> Set as master résumé
+          </button>
+        )}
+        {(isUpload || isMaster) && (
+          <button
+            className="btn px-2 py-0.5 text-[10px]"
+            aria-label={`Move ${file.name} to the trash`}
+            title="Move to the trash — agents stop reading it"
+            onClick={isMaster ? removeMaster : removeUpload}
+          >
+            <Trash2 size={11} /> Remove
+          </button>
+        )}
         <button
           className="btn px-2 py-0.5 text-[10px]"
           title="Copy absolute path"
@@ -135,22 +195,20 @@ export default function LibraryView(): JSX.Element {
   const [selected, setSelected] = useState<LibraryFile | null>(null)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const toast = useApp((s) => s.toast)
+  const materialRev = useApp((s) => s.materialRev)
 
   const load = (): void => {
     call('library:list', undefined)
       .then((cats) => {
         setCategories(cats)
-        // Default selection: the master résumé PDF if present.
-        if (!selected) {
-          const master = cats
-            .flatMap((c) => c.files)
-            .find((f) => f.relPath.startsWith('cv/') && f.kind === 'pdf')
-          if (master) setSelected(master)
-        }
+        // Drop a selection whose file is gone (removed, or replaced as master).
+        const all = cats.flatMap((c) => c.files)
+        setSelected((prev) => (prev && all.some((f) => f.relPath === prev.relPath) ? prev : null))
       })
-      .catch((err) => toast(String(err), 'error'))
+      .catch((err) => toast(errText(err), 'error'))
   }
-  useEffect(load, [])
+  // Reloads on any material change, including ones made in Settings or setup.
+  useEffect(load, [materialRev])
 
   const toggle = (title: string): void => {
     setCollapsed((prev) => {
@@ -172,10 +230,7 @@ export default function LibraryView(): JSX.Element {
             onClick={() =>
               void call('library:upload', undefined)
                 .then(({ added }) => {
-                  if (added) {
-                    toast(`${added} file${added === 1 ? '' : 's'} added`, 'success')
-                    load()
-                  }
+                  if (added) toast(`${added} file${added === 1 ? '' : 's'} added`, 'success')
                 })
                 .catch((err) => toast(String(err), 'error'))
             }
@@ -225,7 +280,7 @@ export default function LibraryView(): JSX.Element {
         </div>
       </div>
       <div className="min-w-0 flex-1">
-        <Preview file={selected} />
+        <Preview file={selected} onChanged={load} />
       </div>
     </div>
   )

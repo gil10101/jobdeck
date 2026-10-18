@@ -276,7 +276,7 @@ export class AgentRunner {
   private buildRunPrompt(run: ActiveRun): string {
     const kind = run.meta.kind
     if (kind === 'onboard') {
-      const outputPath = path.join(TMP_DIR, 'profile.draft.json')
+      const outputPath = this.draftPath(run)
       if (run.input.refineDraft) {
         return buildRefinePrompt({
           draft: run.input.refineDraft,
@@ -381,7 +381,7 @@ export class AgentRunner {
     }
     if (run.meta.kind === 'onboard') {
       try {
-        fs.rmSync(path.join(TMP_DIR, 'profile.draft.json'), { force: true })
+        fs.rmSync(this.draftPath(run), { force: true })
       } catch {
         // best-effort: a stale draft that can't be removed will still be
         // caught by finalizeOnboard's validation
@@ -588,9 +588,16 @@ export class AgentRunner {
     this.finish(run, 'succeeded')
   }
 
+  /** One draft file per onboard run: two extractions (wizard + Settings, or a
+   *  retry while one is still running) must never read or delete each
+   *  other's draft. */
+  private draftPath(run: ActiveRun): string {
+    return path.join(TMP_DIR, `profile.draft.${run.meta.id}.json`)
+  }
+
   /** Validate the profile draft the onboard agent wrote — reviewed by a human, never auto-saved. */
   private finalizeOnboard(run: ActiveRun): void {
-    const draftPath = path.join(TMP_DIR, 'profile.draft.json')
+    const draftPath = this.draftPath(run)
     if (!fs.existsSync(draftPath)) {
       this.finish(run, 'failed', 'onboarding agent finished but wrote no profile draft')
       return

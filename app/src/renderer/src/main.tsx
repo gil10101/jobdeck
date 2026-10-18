@@ -12,6 +12,9 @@ onPush('push:storeChanged', ({ domains }) => {
   if (domains.includes('intake')) void s.refreshIntake()
   if (domains.includes('candidates')) void s.refreshCandidates()
   if (domains.includes('settings')) void s.refreshSettings()
+  if (domains.includes('material') || domains.includes('profile')) {
+    useApp.setState((st) => ({ materialRev: st.materialRev + 1 }))
+  }
 })
 
 onPush('push:runChanged', (meta) => {

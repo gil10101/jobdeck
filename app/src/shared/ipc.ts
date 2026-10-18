@@ -1,5 +1,6 @@
 // IPC contract — single source of truth for channel names + payload types.
 import type {
+  FolderEntry,
   ApplicationDetail,
   AppSettings,
   AssistantApproval,
@@ -84,12 +85,23 @@ export interface IpcInvokeContract {
   // <workspace>/master/knowledge/.
   'knowledge:get': {
     req: void
-    res: { notes: string; files: { name: string; sizeKb: number }[] }
+    res: { notes: string; files: FolderEntry[] }
   }
   'knowledge:setNotes': { req: { text: string }; res: void }
   /** Opens a file picker and copies the chosen files into the knowledge folder. */
   'knowledge:addFiles': { req: void; res: { added: number } }
-  'knowledge:removeFile': { req: { name: string }; res: void }
+  /** Confirms, then moves the file (or folder) to the OS trash. */
+  'knowledge:removeFile': { req: { name: string }; res: { removed: boolean } }
+  /** Files in <workspace>/uploads — the material extraction and builds read. */
+  'library:listUploads': { req: void; res: FolderEntry[] }
+  /** Confirms, then moves one upload to the OS trash. */
+  'library:removeUpload': { req: { name: string }; res: { removed: boolean } }
+  /** Workspace-relative path of the master résumé builds copy, or null. */
+  'master:getResume': { req: void; res: { relPath: string | null } }
+  /** Copy a library .tex in as the master résumé (asks before replacing one);
+   *  relPath null when the user declined. */
+  'master:setResume': { req: { relPath: string }; res: { relPath: string | null } }
+  'master:removeResume': { req: void; res: { removed: boolean } }
   'todo:rescan': { req: void; res: IntakeItem[] }
   'runs:start': {
     req: {
@@ -379,7 +391,11 @@ export interface IpcPushContract {
   'push:runEvent': { runId: string; event: RunEvent }
   'push:runChanged': RunMeta
   'push:todoNew': IntakeItem
-  'push:storeChanged': { domains: ('rows' | 'intake' | 'settings' | 'candidates' | 'profile')[] }
+  /** 'material' = anything a build or extraction reads about the candidate
+   *  changed: uploads, knowledge base, master résumé or context. */
+  'push:storeChanged': {
+    domains: ('rows' | 'intake' | 'settings' | 'candidates' | 'profile' | 'material')[]
+  }
   'push:companiesChanged': Record<string, CompanyInfo>
   'push:assistantEvent': { conversationId: string; event: RunEvent }
   'push:assistantApproval': AssistantApproval
@@ -423,6 +439,11 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'knowledge:setNotes',
   'knowledge:addFiles',
   'knowledge:removeFile',
+  'library:listUploads',
+  'library:removeUpload',
+  'master:getResume',
+  'master:setResume',
+  'master:removeResume',
   'todo:rescan',
   'runs:start',
   'runs:cancel',

@@ -1,4 +1,4 @@
-import { BrowserWindow, app, dialog, ipcMain, webContents } from 'electron'
+import { BrowserWindow, app, dialog, ipcMain, shell, webContents } from 'electron'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -13,7 +13,15 @@ import { scanApplications } from './fsops/FolderScanner'
 import { copyText, openExternal, openFolder, showItem } from './fsops/reveal'
 import { importFromXlsx } from './xlsx/importXlsx'
 import { exportToXlsx } from './xlsx/exportXlsx'
-import { INTAKE_IMAGES_DIR, MASTER_DIR, SCOUT_DIR, UPLOADS_DIR, toAbs, toRel } from './paths'
+import { INTAKE_IMAGES_DIR, MASTER_DIR, SCOUT_DIR, TMP_DIR, UPLOADS_DIR, toAbs, toRel } from './paths'
+import { safeChildPath } from './fsops/safePath'
+import {
+  agentReadableUploads,
+  agentReadablePath,
+  listFolder,
+  masterResumeNames,
+  resolveMasterResume
+} from './agent/buildReadiness'
 import { listLibrary, readLibraryFile } from './fsops/library'
 import { recompileDoc } from './latex/recompile'
 import {
@@ -353,17 +361,32 @@ export function registerIpc(services: Services): void {
   handle('master:setContext', ({ text }) => {
     fs.mkdirSync(MASTER_DIR, { recursive: true })
     fs.writeFileSync(path.join(MASTER_DIR, 'context.md'), text, 'utf-8')
+    send('push:storeChanged', { domains: ['material'] })
   })
+
+  // ---- candidate material changes: uploads, knowledge, master résumé ----
+  // One push domain for everything a build or extraction reads about the
+  // candidate, so open views (Library, Settings, Who I am) and the build
+  // readiness check refresh together.
+  const materialChanged = (): void => send('push:storeChanged', { domains: ['material'] })
+
+  /** Ask before moving a file to the OS trash. Recoverable, but still asked:
+   *  a mis-click on a résumé should cost nothing. */
+  const confirmTrash = async (label: string): Promise<boolean> => {
+    const bin = process.platform === 'win32' ? 'Recycle Bin' : 'Trash'
+    const { response } = await dialog.showMessageBox(services.getWindow() ?? new BrowserWindow({ show: false }), {
+      type: 'question',
+      buttons: ['Cancel', `Move to ${bin}`],
+      defaultId: 1,
+      cancelId: 0,
+      message: `Move ${label} to the ${bin}?`,
+      detail: `Agents stop seeing it right away. You can restore it from the ${bin}.`
+    })
+    return response === 1
+  }
 
   // ---- knowledge base: background-only notes + attached files ----
   const knowledgeDir = (): string => path.join(MASTER_DIR, 'knowledge')
-  const knowledgeFileName = (name: string): string => {
-    // Names come back from the renderer for removal — never let them traverse.
-    if (!name || name !== path.basename(name) || name.startsWith('.')) {
-      throw new Error(`invalid file name: ${name}`)
-    }
-    return path.join(knowledgeDir(), name)
-  }
   handle('knowledge:get', () => {
     let notes = ''
     try {
@@ -371,20 +394,7 @@ export function registerIpc(services: Services): void {
     } catch {
       /* none yet */
     }
-    let files: { name: string; sizeKb: number }[] = []
-    try {
-      files = fs
-        .readdirSync(knowledgeDir())
-        .filter((f) => !f.startsWith('.') && f !== 'notes.md')
-        .map((f) => ({
-          name: f,
-          sizeKb: Math.max(1, Math.round(fs.statSync(path.join(knowledgeDir(), f)).size / 1024))
-        }))
-        .sort((a, b) => a.name.localeCompare(b.name))
-    } catch {
-      /* empty */
-    }
-    return { notes, files }
+    return { notes, files: listFolder(knowledgeDir(), ['notes.md']) }
   })
   handle('knowledge:setNotes', ({ text }) => {
     fs.mkdirSync(knowledgeDir(), { recursive: true })
@@ -411,10 +421,63 @@ export function registerIpc(services: Services): void {
       fs.copyFileSync(src, dest)
       added++
     }
+    if (added) materialChanged()
     return { added }
   })
-  handle('knowledge:removeFile', ({ name }) => {
-    fs.rmSync(knowledgeFileName(name), { force: true })
+  handle('knowledge:removeFile', async ({ name }) => {
+    // Names come back from the renderer — never let them traverse.
+    const target = safeChildPath(knowledgeDir(), name)
+    if (!fs.existsSync(target)) return { removed: false }
+    if (!(await confirmTrash(`"${name}"`))) return { removed: false }
+    await shell.trashItem(target)
+    materialChanged()
+    return { removed: true }
+  })
+
+  // ---- uploads: the raw material extraction and minimal builds read ----
+  handle('library:listUploads', () => listFolder(UPLOADS_DIR).filter((e) => e.kind === 'file'))
+  handle('library:removeUpload', async ({ name }) => {
+    const target = safeChildPath(UPLOADS_DIR, name)
+    if (!fs.existsSync(target)) return { removed: false }
+    if (!(await confirmTrash(`"${name}"`))) return { removed: false }
+    await shell.trashItem(target)
+    materialChanged()
+    return { removed: true }
+  })
+
+  // ---- master résumé: the .tex builds copy their preamble from ----
+  const profileStem = (): string | null => loadProfile()?.documents.fileBasename || null
+  handle('master:getResume', () => {
+    const name = resolveMasterResume(MASTER_DIR, profileStem())
+    return { relPath: name ? `master/${name}` : null }
+  })
+  handle('master:setResume', async ({ relPath }) => {
+    const norm = relPath.split('\\').join('/')
+    // Only material the user put in the workspace library, and only LaTeX:
+    // builds copy the preamble verbatim, so anything else would mislead them.
+    if (!/^(uploads|templates|onboarding)\//.test(norm) || path.extname(norm).toLowerCase() !== '.tex') {
+      throw new Error('Only a .tex file from your library can be the master résumé.')
+    }
+    const src = toAbs(norm)
+    if (!fs.existsSync(src)) throw new Error(`file not found: ${relPath}`)
+    const existing = resolveMasterResume(MASTER_DIR, profileStem())
+    if (existing) {
+      if (!(await confirmTrash(`the current master résumé (${existing})`))) return { relPath: null }
+      await shell.trashItem(path.join(MASTER_DIR, existing))
+    }
+    const name = masterResumeNames(profileStem())[0]
+    fs.mkdirSync(MASTER_DIR, { recursive: true })
+    fs.copyFileSync(src, path.join(MASTER_DIR, name))
+    materialChanged()
+    return { relPath: `master/${name}` }
+  })
+  handle('master:removeResume', async () => {
+    const name = resolveMasterResume(MASTER_DIR, profileStem())
+    if (!name) return { removed: false }
+    if (!(await confirmTrash(`the master résumé (${name})`))) return { removed: false }
+    await shell.trashItem(path.join(MASTER_DIR, name))
+    materialChanged()
+    return { removed: true }
   })
   handle('todo:rescan', () => {
     todo.rescan()
@@ -651,19 +714,25 @@ export function registerIpc(services: Services): void {
       return runner.start({ kind: 'onboard', refineDraft: draft, refineAnswers: qa })
     }
     let sourceFiles: string[] = []
+    // Word files reach the agent as extracted text (its Read tool cannot open
+    // .docx); conversions land beside other run scratch in tmp/.
+    const convertDir = path.join(TMP_DIR, 'sources')
     if (source === 'uploads') {
       // "agent handles the rest": every file the user dropped into the library.
-      sourceFiles = fs.existsSync(UPLOADS_DIR)
-        ? fs
-            .readdirSync(UPLOADS_DIR)
-            .filter((f) => !f.startsWith('.'))
-            .map((f) => path.join(UPLOADS_DIR, f))
-        : []
+      const { files: readable, skipped } = agentReadableUploads(UPLOADS_DIR, convertDir)
+      sourceFiles = readable
       if (!sourceFiles.length && !text?.trim()) {
-        throw new Error('no uploads yet — add files in Library first')
+        throw new Error(
+          skipped.length
+            ? `could not read ${skipped.join(', ')} — save it as PDF and upload again`
+            : 'no uploads yet — add files in Library first'
+        )
       }
     } else if (source === 'files') {
-      sourceFiles = (files ?? []).filter((f) => fs.existsSync(f))
+      sourceFiles = (files ?? [])
+        .filter((f) => fs.existsSync(f))
+        .map((f) => agentReadablePath(f, convertDir))
+        .filter((f): f is string => f !== null)
       if (!sourceFiles.length && !text?.trim()) throw new Error('no readable source files')
     }
     return runner.start({ kind: 'onboard', sourceFiles, sourceText: text ?? '' })
@@ -672,7 +741,7 @@ export function registerIpc(services: Services): void {
   // ---- library uploads: drop in everything, agents consume it ----
   handle('library:upload', async () => {
     const win = services.getWindow()
-    const result = await dialog.showOpenDialog(win!, {
+    const result = await dialog.showOpenDialog(win ?? new BrowserWindow({ show: false }), {
       title: 'Add files to your library (CVs, cover letters, examples, notes — anything)',
       properties: ['openFile', 'multiSelections'],
       filters: [
@@ -700,6 +769,7 @@ export function registerIpc(services: Services): void {
         console.error('[library] upload copy failed:', err)
       }
     }
+    if (added) materialChanged()
     return { added, names }
   })
 

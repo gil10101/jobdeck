@@ -608,3 +608,10 @@ export interface EnvPreflight extends EnvCheck {
    *  ones alone when it is null. */
   tools: PrereqTool[]
 }
+
+/** One entry of a workspace folder listing (uploads, knowledge base). */
+export interface FolderEntry {
+  name: string
+  sizeKb: number
+  kind: 'file' | 'dir'
+}

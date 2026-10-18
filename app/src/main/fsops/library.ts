@@ -72,7 +72,16 @@ export const LIBRARY_DIRS = ['master', 'templates', 'uploads', 'onboarding']
 
 export function listLibrary(): LibraryCategory[] {
   return [
-    { title: 'Master résumé', files: listDir('master') },
+    // master/ holds the résumé builds copy AND background-only notes; showing
+    // both under one heading made notes look like résumé material.
+    { title: 'Master résumé', files: listDir('master', { depth: 0 }).filter((f) => f.name.endsWith('.tex')) },
+    {
+      title: 'Background notes (never on documents)',
+      files: [
+        ...listDir('master', { depth: 0 }).filter((f) => !f.name.endsWith('.tex')),
+        ...listDir('master/knowledge', { depth: 1 })
+      ]
+    },
     { title: 'My uploads', files: listDir('uploads') },
     { title: 'Templates', files: listDir('templates') },
     { title: 'Onboarding sources', files: listDir('onboarding') }
