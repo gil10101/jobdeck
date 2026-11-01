@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain, webContents } from 'electron'
+import { BrowserWindow, app, dialog, ipcMain, shell, webContents } from 'electron'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -7,12 +7,22 @@ import type { IpcChannel, IpcInvokeContract } from '@shared/ipc'
 import type { RunInput } from './agent/AgentRunner'
 import { buildApplicationDetail } from './parsers/detail'
 import { parseCandidatesFile } from './parsers/report'
-import { fetchPostingFromUrl } from './parsers/jobPostingUrl'
+import { extractJobPosting, fetchPostingFromUrl } from './parsers/jobPostingUrl'
+import { extractGlassdoorRowsFromHtml } from './boards/glassdoorParse'
 import { scanApplications } from './fsops/FolderScanner'
 import { copyText, openExternal, openFolder, showItem } from './fsops/reveal'
 import { importFromXlsx } from './xlsx/importXlsx'
 import { exportToXlsx } from './xlsx/exportXlsx'
-import { INTAKE_IMAGES_DIR, MASTER_DIR, SCOUT_DIR, UPLOADS_DIR, toAbs, toRel } from './paths'
+import { INTAKE_IMAGES_DIR, MASTER_DIR, SCOUT_DIR, TMP_DIR, UPLOADS_DIR, toAbs, toRel } from './paths'
+import { safeChildPath } from './fsops/safePath'
+import { assertCanBuild, workspaceBuildReadiness } from './agent/readinessCheck'
+import {
+  agentReadableUploads,
+  agentReadablePath,
+  listFolder,
+  masterResumeNames,
+  resolveMasterResume
+} from './agent/buildReadiness'
 import { listLibrary, readLibraryFile } from './fsops/library'
 import { recompileDoc } from './latex/recompile'
 import {
@@ -31,10 +41,20 @@ import {
   setCustomBoardEnabled,
   testCustomBoard
 } from './boards/customBoards'
+import {
+  glassdoorFeedStatus,
+  resolveGlassdoorSearches,
+  writeGlassdoorFeed
+} from './boards/glassdoorFeed'
 import { APP_DATA_DIR, REPO_ROOT } from './paths'
+import { buildArchive } from './workspace/archive'
+import { clearGeminiKey, clearOllamaKey, setGeminiKey, setOllamaKey } from './provider/providerKeyStore'
+import { ollamaModelDetails, providerStatus, testProvider } from './provider/providerRuntime'
 import { validateProfile } from './profile/profileSchema'
+import { buildEnvelope, parseEnvelope, validateModuleData } from './profile/moduleEnvelope'
 import { loadProfile, saveProfile } from './profile/profileStore'
-import type { ProfileFile } from '@shared/profile'
+import type { ProfileFile, ProfileModuleName } from '@shared/profile'
+import { PROFILE_MODULES, PROFILE_SCHEMA_VERSION, emptyProfile } from '@shared/profile'
 import { allCompanies } from './companies/companiesStore'
 import { backfillCompanies, ensureRating, ensureRatingBg, seedFromText } from './companies/ratingService'
 import type { AgentRunner } from './agent/AgentRunner'
@@ -54,7 +74,9 @@ import {
   parseClientJson,
   setGmailClientId
 } from './email/gmailAuth'
-import { getMessageBody } from './email/gmailClient'
+import { getMessageFull } from './email/gmailClient'
+import { parseIcs } from './email/icsParse'
+import { draftEmailReply } from './email/emailReply'
 import {
   clearEmailCache,
   createTag,
@@ -66,7 +88,18 @@ import {
   setSuggestionState,
   updateMessage
 } from './email/emailStore'
-import { EmailSync } from './email/emailSync'
+import { EmailSync, matchTrackerRow } from './email/emailSync'
+import {
+  addManual,
+  approveEvent,
+  dismissEvent,
+  listEvents,
+  proposeEvent,
+  proposedCount,
+  removeEvent,
+  updateEvent
+} from './calendar/calendarStore'
+import { ReminderLoop } from './calendar/reminders'
 
 export interface Services {
   store: Store
@@ -210,6 +243,66 @@ export function registerIpc(services: Services): void {
       role: posting.role
     })
   })
+  handle('browser:buildFromPage', async ({ url, html, title, bodyText }) => {
+    if (!/^https?:\/\//i.test(url)) throw new Error('only http(s) pages can be built from')
+    assertCanBuild()
+    // The rendered DOM sees what the logged-in user sees, so its JSON-LD is
+    // tried first (auth-gated SPA listings like board detail pages); a
+    // server-side refetch covers pages whose markup only ships in the initial
+    // response; the visible text is the last resort for pages with no
+    // structured data at all. Page content is untrusted third-party data —
+    // it flows into postingText, which the build pipeline already treats as
+    // untrusted.
+    // Glassdoor emits no JSON-LD (non-indexable pages), so extract its embedded
+    // job JSON directly — cleaner than the visible-text fallback would manage.
+    let posting = extractJobPosting(html.slice(0, 3_000_000), url)
+    if (!posting && /glassdoor\./i.test(url)) {
+      const rows = extractGlassdoorRowsFromHtml(html, Date.now())
+      const job = rows.find((r) => r.description) ?? rows[0]
+      if (job) {
+        const lines = [
+          job.title,
+          job.company ? `Company: ${job.company}` : '',
+          job.location ? `Location: ${job.location}` : '',
+          job.salary ? `Salary: ${job.salary}` : '',
+          job.postedAt ? `Posted: ${job.postedAt}` : '',
+          `Source: ${job.url || url}`,
+          '',
+          job.description ?? ''
+        ].filter((l) => l !== '')
+        posting = { role: job.title, company: job.company, text: lines.join('\n') }
+      }
+    }
+    if (!posting) posting = await fetchPostingFromUrl(url).catch(() => null)
+    if (!posting) {
+      const text = bodyText.trim().slice(0, 30_000)
+      if (text.length < 200) {
+        throw new Error(
+          'could not find a job posting on this page — open the listing itself (not the results list) and try again'
+        )
+      }
+      posting = {
+        role: title.trim().slice(0, 120) || '(untitled role)',
+        company: '',
+        text: `${title.trim()}\nSource: ${url}\n\n${text}`
+      }
+    }
+    const item = createIntakeItem({
+      text: posting.text,
+      url,
+      company: posting.company,
+      role: posting.role
+    })
+    const run = runner.start({
+      intakeId: item.id,
+      postingText: item.postingText,
+      imagePaths: [],
+      applyUrl: url,
+      companyHint: item.companyHint,
+      roleHint: item.roleHint
+    })
+    return { item, run }
+  })
   handle('intake:dismiss', ({ id }) => {
     store.mutate(['intake'], (s) => {
       const item = s.intake.find((i) => i.id === id)
@@ -270,17 +363,32 @@ export function registerIpc(services: Services): void {
   handle('master:setContext', ({ text }) => {
     fs.mkdirSync(MASTER_DIR, { recursive: true })
     fs.writeFileSync(path.join(MASTER_DIR, 'context.md'), text, 'utf-8')
+    send('push:storeChanged', { domains: ['material'] })
   })
+
+  // ---- candidate material changes: uploads, knowledge, master résumé ----
+  // One push domain for everything a build or extraction reads about the
+  // candidate, so open views (Library, Settings, Who I am) and the build
+  // readiness check refresh together.
+  const materialChanged = (): void => send('push:storeChanged', { domains: ['material'] })
+
+  /** Ask before moving a file to the OS trash. Recoverable, but still asked:
+   *  a mis-click on a résumé should cost nothing. */
+  const confirmTrash = async (label: string): Promise<boolean> => {
+    const bin = process.platform === 'win32' ? 'Recycle Bin' : 'Trash'
+    const { response } = await dialog.showMessageBox(services.getWindow() ?? new BrowserWindow({ show: false }), {
+      type: 'question',
+      buttons: ['Cancel', `Move to ${bin}`],
+      defaultId: 1,
+      cancelId: 0,
+      message: `Move ${label} to the ${bin}?`,
+      detail: `Agents stop seeing it right away. You can restore it from the ${bin}.`
+    })
+    return response === 1
+  }
 
   // ---- knowledge base: background-only notes + attached files ----
   const knowledgeDir = (): string => path.join(MASTER_DIR, 'knowledge')
-  const knowledgeFileName = (name: string): string => {
-    // Names come back from the renderer for removal — never let them traverse.
-    if (!name || name !== path.basename(name) || name.startsWith('.')) {
-      throw new Error(`invalid file name: ${name}`)
-    }
-    return path.join(knowledgeDir(), name)
-  }
   handle('knowledge:get', () => {
     let notes = ''
     try {
@@ -288,20 +396,7 @@ export function registerIpc(services: Services): void {
     } catch {
       /* none yet */
     }
-    let files: { name: string; sizeKb: number }[] = []
-    try {
-      files = fs
-        .readdirSync(knowledgeDir())
-        .filter((f) => !f.startsWith('.') && f !== 'notes.md')
-        .map((f) => ({
-          name: f,
-          sizeKb: Math.max(1, Math.round(fs.statSync(path.join(knowledgeDir(), f)).size / 1024))
-        }))
-        .sort((a, b) => a.name.localeCompare(b.name))
-    } catch {
-      /* empty */
-    }
-    return { notes, files }
+    return { notes, files: listFolder(knowledgeDir(), ['notes.md']) }
   })
   handle('knowledge:setNotes', ({ text }) => {
     fs.mkdirSync(knowledgeDir(), { recursive: true })
@@ -328,10 +423,67 @@ export function registerIpc(services: Services): void {
       fs.copyFileSync(src, dest)
       added++
     }
+    if (added) materialChanged()
     return { added }
   })
-  handle('knowledge:removeFile', ({ name }) => {
-    fs.rmSync(knowledgeFileName(name), { force: true })
+  handle('knowledge:removeFile', async ({ name }) => {
+    // Names come back from the renderer — never let them traverse.
+    const target = safeChildPath(knowledgeDir(), name)
+    if (!fs.existsSync(target)) return { removed: false }
+    if (!(await confirmTrash(`"${name}"`))) return { removed: false }
+    await shell.trashItem(target)
+    materialChanged()
+    return { removed: true }
+  })
+
+  // Drives Build/Accept gating and hints in the renderer; re-read on every
+  // 'material' or 'profile' push.
+  handle('build:readiness', () => workspaceBuildReadiness())
+
+  // ---- uploads: the raw material extraction and minimal builds read ----
+  handle('library:listUploads', () => listFolder(UPLOADS_DIR).filter((e) => e.kind === 'file'))
+  handle('library:removeUpload', async ({ name }) => {
+    const target = safeChildPath(UPLOADS_DIR, name)
+    if (!fs.existsSync(target)) return { removed: false }
+    if (!(await confirmTrash(`"${name}"`))) return { removed: false }
+    await shell.trashItem(target)
+    materialChanged()
+    return { removed: true }
+  })
+
+  // ---- master résumé: the .tex builds copy their preamble from ----
+  const profileStem = (): string | null => loadProfile()?.documents.fileBasename || null
+  handle('master:getResume', () => {
+    const name = resolveMasterResume(MASTER_DIR, profileStem())
+    return { relPath: name ? `master/${name}` : null }
+  })
+  handle('master:setResume', async ({ relPath }) => {
+    const norm = relPath.split('\\').join('/')
+    // Only material the user put in the workspace library, and only LaTeX:
+    // builds copy the preamble verbatim, so anything else would mislead them.
+    if (!/^(uploads|templates|onboarding)\//.test(norm) || path.extname(norm).toLowerCase() !== '.tex') {
+      throw new Error('Only a .tex file from your library can be the master résumé.')
+    }
+    const src = toAbs(norm)
+    if (!fs.existsSync(src)) throw new Error(`file not found: ${relPath}`)
+    const existing = resolveMasterResume(MASTER_DIR, profileStem())
+    if (existing) {
+      if (!(await confirmTrash(`the current master résumé (${existing})`))) return { relPath: null }
+      await shell.trashItem(path.join(MASTER_DIR, existing))
+    }
+    const name = masterResumeNames(profileStem())[0]
+    fs.mkdirSync(MASTER_DIR, { recursive: true })
+    fs.copyFileSync(src, path.join(MASTER_DIR, name))
+    materialChanged()
+    return { relPath: `master/${name}` }
+  })
+  handle('master:removeResume', async () => {
+    const name = resolveMasterResume(MASTER_DIR, profileStem())
+    if (!name) return { removed: false }
+    if (!(await confirmTrash(`the master résumé (${name})`))) return { removed: false }
+    await shell.trashItem(path.join(MASTER_DIR, name))
+    materialChanged()
+    return { removed: true }
   })
   handle('todo:rescan', () => {
     todo.rescan()
@@ -348,6 +500,7 @@ export function registerIpc(services: Services): void {
     if (!postingText.trim() && imagePaths.length === 0) {
       throw new Error('nothing to build from: no posting text and no screenshots')
     }
+    assertCanBuild()
     return runner.start({
       intakeId: input.intakeId,
       postingText,
@@ -382,6 +535,9 @@ export function registerIpc(services: Services): void {
     if (!candidate.postingText.trim() && !candidate.applyUrl) {
       throw new Error('candidate has no posting text or apply URL to build from')
     }
+    // Before the run, the row and the candidate state: a refused build must
+    // leave nothing behind.
+    assertCanBuild()
     // Start the build first so the tracker row can bind to its slug — the
     // finished report then fills in this same row instead of creating a new one.
     const run = runner.start({
@@ -472,13 +628,81 @@ export function registerIpc(services: Services): void {
 
   // ---- profile ----
   handle('profile:get', () => loadProfile())
-  handle('profile:save', ({ profile }) => {
+  // The ONLY write path for profile.json — module applies go through it too.
+  const saveValidatedProfile = (profile: ProfileFile): ProfileFile => {
     const result = validateProfile(profile)
     if (!result.ok) throw new Error(`profile invalid: ${result.problems.join('; ')}`)
     const saved = saveProfile(result.profile)
     // Views showing the profile (Who I am, Settings) refetch on this push.
     send('push:storeChanged', { domains: ['profile'] })
     return saved
+  }
+  handle('profile:save', ({ profile }) => saveValidatedProfile(profile))
+  // Renderer input is untrusted — a bad name would index arbitrary keys.
+  const knownModule = (module: string): ProfileModuleName => {
+    if (!(PROFILE_MODULES as readonly string[]).includes(module)) {
+      throw new Error(`unknown profile module: ${module}`)
+    }
+    return module as ProfileModuleName
+  }
+  handle('profile:exportModule', async ({ module }) => {
+    const name = knownModule(module)
+    const profile = loadProfile()
+    if (!profile) throw new Error('no profile saved yet — save the profile first')
+    // 'local': anything profile.json is allowed to hold must be exportable.
+    const checked = validateModuleData(name, profile[name], 'local')
+    if (!checked.ok) throw new Error(`${name} data invalid: ${checked.problems.join('; ')}`)
+    const win = services.getWindow()
+    const result = await dialog.showSaveDialog(win ?? new BrowserWindow({ show: false }), {
+      title: `Export profile module: ${name}`,
+      defaultPath: `${name}.module.json`,
+      filters: [{ name: 'Profile module JSON', extensions: ['json'] }]
+    })
+    if (result.canceled || !result.filePath) return { canceled: true, path: null }
+    const envelope = buildEnvelope(name, PROFILE_SCHEMA_VERSION, checked.data)
+    fs.writeFileSync(result.filePath, JSON.stringify(envelope, null, 2), 'utf-8')
+    return { canceled: false, path: result.filePath }
+  })
+  handle('profile:importModule', async () => {
+    const win = services.getWindow()
+    const result = await dialog.showOpenDialog(win ?? new BrowserWindow({ show: false }), {
+      title: 'Import a profile module',
+      properties: ['openFile'],
+      filters: [{ name: 'Profile module JSON', extensions: ['json'] }]
+    })
+    const file = result.filePaths[0]
+    const none = { module: null, current: null, incoming: null }
+    if (result.canceled || !file) return { canceled: true, error: null, ...none }
+    try {
+      const envelope = parseEnvelope(fs.readFileSync(file, 'utf-8'))
+      const checked = validateModuleData(envelope.module, envelope.data)
+      if (!checked.ok) {
+        return {
+          canceled: false,
+          error: `${envelope.module} data invalid: ${checked.problems.join('; ')}`,
+          ...none
+        }
+      }
+      // NO write here — both sides go back for side-by-side review.
+      const saved = loadProfile()
+      return {
+        canceled: false,
+        error: null,
+        module: envelope.module,
+        current: saved ? saved[envelope.module] : null,
+        incoming: checked.data
+      }
+    } catch (err) {
+      return { canceled: false, error: err instanceof Error ? err.message : String(err), ...none }
+    }
+  })
+  // Writes through saveValidatedProfile — the single profile.json write path.
+  handle('profile:applyModule', ({ module, data }) => {
+    const name = knownModule(module)
+    const checked = validateModuleData(name, data)
+    if (!checked.ok) throw new Error(`${name} data invalid: ${checked.problems.join('; ')}`)
+    const profile = loadProfile() ?? emptyProfile()
+    saveValidatedProfile({ ...profile, [name]: checked.data } as ProfileFile)
   })
   handle('profile:draft', ({ runId }) => {
     const meta = runner.get(runId).meta
@@ -500,19 +724,25 @@ export function registerIpc(services: Services): void {
       return runner.start({ kind: 'onboard', refineDraft: draft, refineAnswers: qa })
     }
     let sourceFiles: string[] = []
+    // Word files reach the agent as extracted text (its Read tool cannot open
+    // .docx); conversions land beside other run scratch in tmp/.
+    const convertDir = path.join(TMP_DIR, 'sources')
     if (source === 'uploads') {
       // "agent handles the rest": every file the user dropped into the library.
-      sourceFiles = fs.existsSync(UPLOADS_DIR)
-        ? fs
-            .readdirSync(UPLOADS_DIR)
-            .filter((f) => !f.startsWith('.'))
-            .map((f) => path.join(UPLOADS_DIR, f))
-        : []
+      const { files: readable, skipped } = agentReadableUploads(UPLOADS_DIR, convertDir)
+      sourceFiles = readable
       if (!sourceFiles.length && !text?.trim()) {
-        throw new Error('no uploads yet — add files in Library first')
+        throw new Error(
+          skipped.length
+            ? `could not read ${skipped.join(', ')} — save it as PDF and upload again`
+            : 'no uploads yet — add files in Library first'
+        )
       }
     } else if (source === 'files') {
-      sourceFiles = (files ?? []).filter((f) => fs.existsSync(f))
+      sourceFiles = (files ?? [])
+        .filter((f) => fs.existsSync(f))
+        .map((f) => agentReadablePath(f, convertDir))
+        .filter((f): f is string => f !== null)
       if (!sourceFiles.length && !text?.trim()) throw new Error('no readable source files')
     }
     return runner.start({ kind: 'onboard', sourceFiles, sourceText: text ?? '' })
@@ -521,7 +751,7 @@ export function registerIpc(services: Services): void {
   // ---- library uploads: drop in everything, agents consume it ----
   handle('library:upload', async () => {
     const win = services.getWindow()
-    const result = await dialog.showOpenDialog(win!, {
+    const result = await dialog.showOpenDialog(win ?? new BrowserWindow({ show: false }), {
       title: 'Add files to your library (CVs, cover letters, examples, notes — anything)',
       properties: ['openFile', 'multiSelections'],
       filters: [
@@ -549,6 +779,7 @@ export function registerIpc(services: Services): void {
         console.error('[library] upload copy failed:', err)
       }
     }
+    if (added) materialChanged()
     return { added, names }
   })
 
@@ -558,6 +789,7 @@ export function registerIpc(services: Services): void {
     const meta = runStore.getMeta(runId)
     if (!meta) throw new Error(`run not found: ${runId}`)
     if (meta.kind !== 'build') throw new Error('only build runs can be rebuilt')
+    assertCanBuild()
     if (meta.status !== 'failed' && meta.status !== 'cancelled') {
       throw new Error(`only failed or cancelled builds can be rebuilt (this one is ${meta.status})`)
     }
@@ -626,6 +858,39 @@ export function registerIpc(services: Services): void {
   handle('boards:removeCustom', ({ id }) => removeCustomBoard(id))
   handle('boards:setCustomEnabled', ({ id, enabled }) => setCustomBoardEnabled(id, enabled))
   handle('boards:listCustom', () => listCustomBoards())
+  handle('glassdoor:searches', () => {
+    const pasted = store.state.settings.glassdoorSearches ?? []
+    const searches = resolveGlassdoorSearches(pasted, loadProfile())
+    return { searches, autoDerived: pasted.length === 0 }
+  })
+  handle('glassdoor:writeFeed', ({ searches, payloads }) => {
+    const feed = writeGlassdoorFeed(searches, payloads, Date.now())
+    return { count: feed.rows.length, fetchedAt: feed.fetchedAt }
+  })
+  handle('glassdoor:feedStatus', () => glassdoorFeedStatus(Date.now()))
+
+  // ---- BYO model providers ----
+  handle('provider:setGeminiKey', ({ key }) => {
+    if (!key.trim()) throw new Error('empty API key')
+    setGeminiKey(key)
+    return { keySet: true }
+  })
+  handle('provider:clearGeminiKey', () => {
+    clearGeminiKey()
+    return { keySet: false }
+  })
+  handle('provider:setOllamaKey', ({ key }) => {
+    if (!key.trim()) throw new Error('empty API key')
+    setOllamaKey(key)
+    return { keySet: true }
+  })
+  handle('provider:clearOllamaKey', () => {
+    clearOllamaKey()
+    return { keySet: false }
+  })
+  handle('provider:status', () => providerStatus())
+  handle('provider:ollamaShow', ({ model }) => ollamaModelDetails(model))
+  handle('provider:test', () => testProvider())
 
   // ---- app info ----
   handle('app:info', () => ({ repoRoot: REPO_ROOT, appDataDir: APP_DATA_DIR }))
@@ -645,6 +910,31 @@ export function registerIpc(services: Services): void {
   })
   handle('app:absPath', ({ relPath }) => ({ absPath: toAbs(relPath) }))
 
+  // ---- workspace export (portable zip with hashed manifest) ----
+  // workspace:import lives in coreIpc.ts — it must work before any workspace exists.
+  handle('workspace:export', async () => {
+    // The live root, not config.json: a pending import/switch has already
+    // repointed config at a folder this session is not running on.
+    const workspacePath = REPO_ROOT
+    const win = services.getWindow()
+    const d = new Date()
+    const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
+    const result = await dialog.showSaveDialog(win ?? new BrowserWindow({ show: false }), {
+      title: 'Export workspace',
+      defaultPath: `workspace-export-${stamp}.zip`,
+      filters: [{ name: 'Zip archive', extensions: ['zip'] }]
+    })
+    if (result.canceled || !result.filePath) {
+      return { canceled: true, path: null, files: 0, skipped: 0 }
+    }
+    const { manifest, skipped } = buildArchive(workspacePath, result.filePath, app.getVersion())
+    return {
+      canceled: false,
+      path: result.filePath,
+      files: manifest.files.length,
+      skipped: skipped.length
+    }
+  })
   // ---- apply (experimental) ----
   handle('apply:insertText', async ({ text }) => {
     // webview guests are separate webContents; find the apply browser guest.
@@ -722,7 +1012,20 @@ export function registerIpc(services: Services): void {
     return emailStatus()
   })
   handle('email:list', ({ filter }) => listCachedMessages(filter))
-  handle('email:getBody', async ({ id }) => ({ text: await getMessageBody(id) }))
+  handle('email:getBody', async ({ id }) => {
+    const { text, ics } = await getMessageFull(id)
+    // Opening a message is the chance to reclassify it from the full body,
+    // healing a snippet-based miss (e.g. a rejection whose decisive line sat
+    // past the preview), refresh its tracker suggestion, and persist a newly
+    // parsed invite. An unparseable/absent ICS part must not clear a stored
+    // invite, hence undefined (leave alone) instead of null there.
+    const parsed = ics ? parseIcs(ics) : null
+    emailSync.reclassifyFromBody(id, text, parsed ?? undefined)
+    return { text, invite: getCachedMessage(id)?.invite ?? parsed?.invite ?? null }
+  })
+  handle('email:draftReply', ({ id, instructions }) =>
+    draftEmailReply(id, instructions, store.state.settings.model)
+  )
   handle('email:refresh', async () => {
     await emailSync.syncNow()
     return emailStatus()
@@ -751,6 +1054,58 @@ export function registerIpc(services: Services): void {
   })
   handle('email:tags', () => ({ tags: listTags() }))
   handle('email:createTag', ({ name }) => createTag(name))
+
+  // ---- calendar: events extracted from mail, plus reminders ----
+  // Reminders run regardless of Gmail state — manual events exist without it.
+  const reminders = new ReminderLoop({ store, send })
+  reminders.start()
+  const pushCalendarChanged = (): void =>
+    send('push:calendarChanged', { proposed: proposedCount() })
+  handle('calendar:list', () => listEvents())
+  handle('calendar:approve', ({ id }) => {
+    approveEvent(id)
+    pushCalendarChanged()
+    return listEvents()
+  })
+  handle('calendar:dismiss', ({ id }) => {
+    dismissEvent(id)
+    pushCalendarChanged()
+    return listEvents()
+  })
+  handle('calendar:remove', ({ id }) => {
+    removeEvent(id)
+    pushCalendarChanged()
+    return listEvents()
+  })
+  handle('calendar:add', (input) => {
+    addManual(input)
+    pushCalendarChanged()
+    return listEvents()
+  })
+  handle('calendar:update', ({ id, patch }) => {
+    updateEvent(id, patch)
+    pushCalendarChanged()
+    return listEvents()
+  })
+  handle('calendar:propose', (input) => {
+    // Same tracker match the sync path uses, so a card-proposed event carries
+    // its company/row link. The renderer never sees the ICS UID, so dedupe
+    // rests on sourceMessageId + title/start-minute.
+    const msg = input.sourceMessageId ? getCachedMessage(input.sourceMessageId) : null
+    const match = msg ? matchTrackerRow(msg.from, msg.subject, msg.snippet, tracker.listRows()) : null
+    proposeEvent({
+      ...input,
+      icsUid: null,
+      company: match?.company ?? null,
+      rowId: match?.id ?? null,
+      source: 'ics',
+      // The card's Propose is an explicit user action — it may resurrect a
+      // mistakenly dismissed proposal (automatic re-proposals never do).
+      restoreDismissed: true
+    })
+    pushCalendarChanged()
+    return listEvents()
+  })
 
   // ---- assistant: in-app chat, IPC channels mirror AssistantManager 1:1 ----
   const sessionDeps = {

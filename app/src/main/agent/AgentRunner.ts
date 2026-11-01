@@ -15,11 +15,21 @@ import {
 } from '../paths'
 import { assertScoutable, prefetchJobrightFeed } from '../boards/boardsBridge'
 import { prefetchCustomBoards } from '../boards/customBoards'
+import { glassdoorFeedPath, readGlassdoorFeed } from '../boards/glassdoorFeed'
 import { scanApplications } from '../fsops/FolderScanner'
 import { parseCandidatesFile, parseReport, validateReport } from '../parsers/report'
+import { assertCanBuild } from './readinessCheck'
+import { isUsableProfile } from './buildReadiness'
 import { validateProfile } from '../profile/profileSchema'
 import { loadProfile } from '../profile/profileStore'
 import { ensureRatingBg } from '../companies/ratingService'
+import { recompileDoc } from '../latex/recompile'
+import {
+  providerDisallowedTools,
+  providerEnv,
+  providerPromptAddendum,
+  resolveAgentModel
+} from '../provider/providerRuntime'
 import type { Store } from '../store/Store'
 import type { TrackerRepo } from '../store/trackerRepo'
 import type { TodoWatcher } from '../fsops/TodoWatcher'
@@ -71,6 +81,9 @@ interface ActiveRun {
   customBoards?: { relPath: string; boards: { label: string; ats: string; count: number }[] } | null
   /** Scout runs: enabled custom boards whose prefetch failed (named in the prompt). */
   customBoardsUnavailable?: string[]
+  /** Scout runs: browser-harvested Glassdoor feed (written before the run by the
+   *  renderer's harvest), read from its stable path at scout prep. */
+  glassdoorFeed?: { relPath: string; count: number } | null
 }
 
 type SendFn = (channel: 'push:runEvent' | 'push:runChanged', payload: unknown) => void
@@ -265,7 +278,7 @@ export class AgentRunner {
   private buildRunPrompt(run: ActiveRun): string {
     const kind = run.meta.kind
     if (kind === 'onboard') {
-      const outputPath = path.join(TMP_DIR, 'profile.draft.json')
+      const outputPath = this.draftPath(run)
       if (run.input.refineDraft) {
         return buildRefinePrompt({
           draft: run.input.refineDraft,
@@ -279,7 +292,10 @@ export class AgentRunner {
         outputPath
       })
     }
-    const profile = loadProfile()
+    // An incomplete profile.json loads healed but is not a profile to build
+    // on (see isUsableProfile); those runs take the no-profile path.
+    const loaded = loadProfile()
+    const profile = isUsableProfile(loaded) ? loaded : null
     if (kind === 'scout') {
       return buildScoutPrompt(
         {
@@ -289,13 +305,11 @@ export class AgentRunner {
           jobrightFeed: run.jobrightFeed ?? null,
           jobrightUnavailable: run.jobrightUnavailable ?? null,
           customBoards: run.customBoards ?? null,
-          customBoardsUnavailable: run.customBoardsUnavailable ?? []
+          customBoardsUnavailable: run.customBoardsUnavailable ?? [],
+          glassdoorFeed: run.glassdoorFeed ?? null
         },
         profile
       )
-    }
-    if (!profile) {
-      throw new Error('no candidate profile yet — run onboarding first (Settings → Profile)')
     }
     if (kind === 'interview') {
       return buildInterviewPrompt(
@@ -307,6 +321,9 @@ export class AgentRunner {
         profile
       )
     }
+    // Checked at queue time too; re-checked here because material can be
+    // removed while a build waits for a slot.
+    assertCanBuild()
     // Notes fall back to the intake item's stored notes so every build path
     // (single build, build-all, retries) picks them up without re-plumbing.
     const notes =
@@ -357,21 +374,31 @@ export class AgentRunner {
       if (custom.unavailable.length) {
         console.warn('[runner] custom board prefetch failures:', custom.unavailable.join('; '))
       }
+      // Glassdoor is harvested by the renderer's browser session into a stable
+      // file BEFORE this run starts (only a real session clears its bot check),
+      // so here we just read whatever the harvest left. Stale/empty = skipped.
+      if (this.store.state.settings.scoutGlassdoor) {
+        const feed = readGlassdoorFeed()
+        run.glassdoorFeed = feed?.rows.length
+          ? { relPath: toRel(glassdoorFeedPath()), count: feed.rows.length }
+          : null
+      }
     }
     if (run.meta.kind === 'onboard') {
       try {
-        fs.rmSync(path.join(TMP_DIR, 'profile.draft.json'), { force: true })
+        fs.rmSync(this.draftPath(run), { force: true })
       } catch {
         // best-effort: a stale draft that can't be removed will still be
         // caught by finalizeOnboard's validation
       }
     }
     try {
-      const prompt = this.buildRunPrompt(run)
+      const prompt = this.buildRunPrompt(run) + providerPromptAddendum()
       this.runStore.savePrompt(run.meta.id, prompt) // audit: exactly what the agent saw
 
       const { query } = await import('@anthropic-ai/claude-agent-sdk')
       const settings = this.store.state.settings
+      const model = resolveAgentModel(settings.model)
 
       const q = query({
         prompt,
@@ -386,8 +413,9 @@ export class AgentRunner {
           abortController: run.controller,
           includePartialMessages: settings.includePartialMessages,
           stderr: (data: string) => this.runStore.appendStderr(run.meta.id, data),
-          env: { ...process.env } as Record<string, string>,
-          ...(settings.model ? { model: settings.model } : {})
+          env: await providerEnv(),
+          ...(providerDisallowedTools().length ? { disallowedTools: providerDisallowedTools() } : {}),
+          ...(model ? { model } : {})
         }
       })
 
@@ -449,13 +477,13 @@ export class AgentRunner {
       }
       this.flushText(run, true)
 
-      this.finalize(run, resultOk, resultError)
+      await this.finalize(run, resultOk, resultError)
     } catch (err) {
       this.flushText(run, true)
       if (run.controller.signal.aborted) {
         this.finish(run, 'cancelled', 'cancelled by user')
       } else {
-        this.finish(run, 'failed', `agent error: ${String(err)}`)
+        this.finish(run, 'failed', `agent error: ${err instanceof Error ? err.message : String(err)}`)
       }
     } finally {
       this.active.delete(run.meta.id)
@@ -463,8 +491,37 @@ export class AgentRunner {
     }
   }
 
+  /** Build runs only: compile any document whose .tex exists but whose PDF
+   *  does not. Best-effort — a compile failure falls through to validation,
+   *  which reports the missing PDF. */
+  private async compileMissingPdfs(run: ActiveRun, folderAbs: string): Promise<void> {
+    if (run.meta.kind !== 'build') return
+    let names: string[] = []
+    try {
+      names = fs.readdirSync(folderAbs)
+    } catch {
+      return
+    }
+    for (const doc of ['resume', 'cover'] as const) {
+      const suffix = doc === 'resume' ? '_Resume' : '_Cover_Letter'
+      const hasTex = names.some((n) => n.endsWith(`${suffix}.tex`))
+      const hasPdf = names.some((n) => n.endsWith(`${suffix}.pdf`))
+      if (!hasTex || hasPdf) continue
+      try {
+        const { pages } = await recompileDoc(toRel(folderAbs), doc)
+        this.emit(run, {
+          kind: 'text',
+          text: `compiled the ${doc} app-side (${pages ?? '?'} page${pages === 1 ? '' : 's'}) — the agent wrote the .tex but skipped compilation`,
+          complete: true
+        })
+      } catch (err) {
+        console.warn(`[runner] app-side ${doc} compile failed:`, err)
+      }
+    }
+  }
+
   /** Verify the run output and wire up store state on success. */
-  private finalize(run: ActiveRun, sdkOk: boolean, sdkError: string | null): void {
+  private async finalize(run: ActiveRun, sdkOk: boolean, sdkError: string | null): Promise<void> {
     if (run.controller.signal.aborted) {
       this.finish(run, 'cancelled', 'cancelled by user')
       return
@@ -500,6 +557,9 @@ export class AgentRunner {
       this.finish(run, 'failed', `agent finished but ${run.meta.slug}/report.json is missing`)
       return
     }
+    // Weaker models write valid .tex but skip running the compiler. Compiling
+    // is mechanical — do it here rather than failing the whole build over it.
+    await this.compileMissingPdfs(run, folderAbs)
     let raw = ''
     try {
       raw = fs.readFileSync(reportPath, 'utf-8')
@@ -533,9 +593,16 @@ export class AgentRunner {
     this.finish(run, 'succeeded')
   }
 
+  /** One draft file per onboard run: two extractions (wizard + Settings, or a
+   *  retry while one is still running) must never read or delete each
+   *  other's draft. */
+  private draftPath(run: ActiveRun): string {
+    return path.join(TMP_DIR, `profile.draft.${run.meta.id}.json`)
+  }
+
   /** Validate the profile draft the onboard agent wrote — reviewed by a human, never auto-saved. */
   private finalizeOnboard(run: ActiveRun): void {
-    const draftPath = path.join(TMP_DIR, 'profile.draft.json')
+    const draftPath = this.draftPath(run)
     if (!fs.existsSync(draftPath)) {
       this.finish(run, 'failed', 'onboarding agent finished but wrote no profile draft')
       return
@@ -646,8 +713,36 @@ export class AgentRunner {
     if (status === 'failed' || status === 'cancelled') {
       this.setIntakeState(run.meta.intakeId, status === 'failed' ? 'failed' : 'new')
       this.salvageBuildFolder(run)
+      this.releaseAcceptedCandidate(run)
     }
     this.setStatus(run, status, errorText)
+  }
+
+  /**
+   * Accepting a scout candidate creates a placeholder tracker row bound to the
+   * build run before the build starts. When that build dies with nothing on
+   * disk, the placeholder would sit at "building docs" forever and the
+   * candidate could never be accepted again — so the row goes and the
+   * candidate returns to the scout list for a retry. A salvaged folder keeps
+   * both: there is real output to track.
+   */
+  private releaseAcceptedCandidate(run: ActiveRun): void {
+    if (run.meta.kind !== 'build') return
+    try {
+      const row = this.tracker.findBySlug(run.meta.slug)
+      if (row?.folderPath) return
+      if (row && row.runId === run.meta.id) this.tracker.deleteRow(row.id)
+      if (!this.store.state.candidates.some((c) => c.buildRunId === run.meta.id)) return
+      this.store.mutate(['candidates'], (s) => {
+        const c = s.candidates.find((x) => x.buildRunId === run.meta.id)
+        if (c && c.state === 'accepted') {
+          c.state = 'new'
+          c.buildRunId = null
+        }
+      })
+    } catch (err) {
+      console.error('[runner] releasing the accepted candidate failed:', err)
+    }
   }
 
   /**

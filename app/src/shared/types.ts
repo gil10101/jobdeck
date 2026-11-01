@@ -200,6 +200,9 @@ export type RunEvent =
   | { seq: number; ts: number; kind: 'status'; status: RunStatus }
   | { seq: number; ts: number; kind: 'init'; model: string; sessionId?: string }
   | { seq: number; ts: number; kind: 'text'; text: string; complete: boolean }
+  /** Model reasoning (Claude extended thinking, or thinking passed through the
+   *  provider shim) — shown dimmed, never part of the answer. */
+  | { seq: number; ts: number; kind: 'thinking'; text: string }
   | { seq: number; ts: number; kind: 'tool_start'; toolUseId: string; tool: string; summary: string }
   | { seq: number; ts: number; kind: 'tool_end'; toolUseId: string; ok: boolean; preview: string }
   | {
@@ -342,6 +345,11 @@ export interface ScanResult {
   conflicts: ScanConflict[]
 }
 
+/** Model backend an agent run goes through. Lives in AppSettings, which the
+ *  Store persists inside the workspace — so the provider is unknowable until a
+ *  workspace exists, and every consumer must handle that null case. */
+export type ProviderId = 'claude' | 'gemini' | 'ollama'
+
 export interface AppSettings {
   /** Parallel agent runs. Builds are independent (separate folders, separate
    *  LaTeX processes; store writes are serialized in the main process), so
@@ -360,6 +368,28 @@ export interface AppSettings {
    *  Email tab shows one-click suggestions instead (status flips from
    *  heuristic classification are too consequential to silently apply). */
   emailAutoApply: boolean
+  /** OS notifications for new job mail and calendar event reminders. */
+  emailNotifications: boolean
+  /** Minutes before an approved event's start for the "starting soon" reminder. */
+  reminderLeadMinutes: number
+  /** Harvest Glassdoor via the in-app browser session before each scout run.
+   *  Off by default: it drives the user's logged-in browser (real session, no
+   *  stored creds), which is a gray zone on Glassdoor's ToS. */
+  scoutGlassdoor: boolean
+  /** User-pasted Glassdoor search URLs to harvest; empty = auto-derive from the
+   *  profile's target roles. */
+  glassdoorSearches: string[]
+  /** Which model backend powers agents. claude = the Agent SDK's own auth;
+   *  gemini/ollama route the SDK through a local Anthropic-API shim. */
+  provider: ProviderId
+  geminiModel: string
+  ollamaUrl: string
+  ollamaModel: string
+  /** Ollama context window per request — model defaults are far too small
+   *  for agent prompts; lower it if the machine runs out of memory. */
+  ollamaNumCtx: number
+  /** Reasoning on thinking-capable local models — much slower per turn. */
+  ollamaThink: boolean
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -370,7 +400,17 @@ export const DEFAULT_SETTINGS: AppSettings = {
   insertTextEnabled: false,
   theme: 'dark',
   emailPollMinutes: 5,
-  emailAutoApply: false
+  emailAutoApply: false,
+  emailNotifications: true,
+  reminderLeadMinutes: 30,
+  scoutGlassdoor: false,
+  glassdoorSearches: [],
+  provider: 'claude',
+  geminiModel: 'gemini-3.6-flash',
+  ollamaUrl: 'http://127.0.0.1:11434',
+  ollamaModel: '',
+  ollamaNumCtx: 32768,
+  ollamaThink: false
 }
 
 // ---- Gmail integration ----
@@ -390,6 +430,18 @@ export interface EmailSuggestion {
   /** Row's company at match time, for the "Mark X as Y" banner. */
   company: string
   suggestStatus: StatusKey
+}
+
+/** Structured view of a message's text/calendar part. */
+export interface EmailInvite {
+  title: string | null
+  start: string | null
+  end: string | null
+  location: string | null
+  meetLink: string | null
+  organizer: string | null
+  /** iCalendar METHOD: REQUEST = invite/update, CANCEL = cancellation. */
+  method: string | null
 }
 
 /** Cached Gmail message: headers + snippet only — the body is fetched live on
@@ -416,6 +468,9 @@ export interface EmailMessage {
   hidden: boolean
   /** User-assigned tag names (from presets + custom tags). */
   tags: string[]
+  /** Parsed text/calendar metadata (derived facts, never the body).
+   *  undefined and null both mean no invite; consumers read `invite ?? null`. */
+  invite?: EmailInvite | null
 }
 
 /** Email list filters: content sweeps plus the user's own starred/hidden sets. */
@@ -431,6 +486,30 @@ export interface EmailStatus {
   email: string | null
   polling: boolean
   lastSyncAt: string | null
+}
+
+// ---- calendar ----
+
+/** One calendar entry, extracted from mail or added by hand. Proposed events
+ *  wait for explicit approval; reminders fire only for approved ones. */
+export interface CalendarEvent {
+  id: string
+  sourceMessageId: string | null
+  /** iCalendar UID — an update with the same UID replaces the event. */
+  icsUid: string | null
+  title: string
+  company: string | null
+  rowId: string | null
+  start: string
+  end: string | null
+  location: string | null
+  meetLink: string | null
+  notes: string | null
+  source: 'ics' | 'detected' | 'manual'
+  state: 'proposed' | 'approved' | 'dismissed'
+  createdAt: string
+  remindedDayBefore: boolean
+  remindedSoon: boolean
 }
 
 export interface TrackerStoreFile {
@@ -456,3 +535,83 @@ export interface LibraryCategory {
 }
 
 export type IpcResult<T> = { ok: true; data: T } | { ok: false; error: string }
+
+/** External LaTeX engines the builder knows how to drive. */
+export type LatexKind = 'pdflatex' | 'xelatex' | 'lualatex' | 'tectonic'
+
+/** Where an external command-line tool was found on this host. */
+export type ToolName = 'pdflatex' | 'pdftotext'
+
+/**
+ * Resolution outcome for one external tool. `path` is what the app will
+ * actually run; `override` is echoed back even when unusable so Settings can
+ * show the offending value together with `overrideError`.
+ */
+export interface ToolStatus {
+  tool: ToolName
+  ok: boolean
+  path: string | null
+  source: 'override' | 'detected' | 'none'
+  override: string | null
+  overrideError: string | null
+  /** LaTeX flavour of `path`; always null for pdftotext. */
+  kind: LatexKind | null
+}
+
+/**
+ * Every prerequisite the app can check. Which of them actually apply depends on
+ * the active provider — prereqSpec.ts owns that mapping, and it is the only
+ * place allowed to decide it, so onboarding and Settings cannot drift.
+ * - claude: the Claude Code agent runtime (native SDK package). Required under
+ *   EVERY provider; it runs the agent loop locally, and gemini/ollama only
+ *   redirect the model calls.
+ * - claudeAuth / geminiKey / ollamaServer: the credential or backend of one
+ *   provider; each applies to that provider alone.
+ */
+export type PrereqId = 'claude' | 'claudeAuth' | 'geminiKey' | 'ollamaServer' | 'latex' | 'bun'
+
+/** One host prerequisite, as shown by the onboarding preflight. */
+export interface PrereqTool {
+  id: PrereqId
+  label: string
+  ok: boolean
+  /** false = the app still runs; only the feature named in `remedy` is lost. */
+  required: boolean
+  /** What was (not) found on this host. */
+  detail: string
+  /** One line the user can act on. */
+  remedy: string
+  url: string
+}
+
+/** Detection of the two external tools Settings can override. */
+export interface EnvCheck {
+  pdflatex: ToolStatus
+  pdftotext: ToolStatus
+  platform: string
+  appVersion: string
+}
+
+/** env:check's full response: the tool rows above plus every host prerequisite,
+ *  worst-first, for the onboarding preflight. env:setToolPath returns the
+ *  EnvCheck half alone — it re-detects the two tools, not the whole host. */
+export interface EnvPreflight extends EnvCheck {
+  /** The provider `tools` was derived from, or null when no workspace exists
+   *  yet and the provider is therefore unknown. Consumers re-run env:check
+   *  after a provider switch and label the panel with this. */
+  provider: ProviderId | null
+  /** One line naming what `tools` covers: which provider it was evaluated for,
+   *  or — when provider is null — that the provider-specific rows are checked
+   *  once a workspace is chosen. */
+  scopeNote: string
+  /** Only the prerequisites that apply to `provider`; provider-independent
+   *  ones alone when it is null. */
+  tools: PrereqTool[]
+}
+
+/** One entry of a workspace folder listing (uploads, knowledge base). */
+export interface FolderEntry {
+  name: string
+  sizeKb: number
+  kind: 'file' | 'dir'
+}

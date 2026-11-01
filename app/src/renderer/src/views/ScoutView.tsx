@@ -11,6 +11,7 @@ import {
 import type { CandidateJob } from '@shared/types'
 import { call } from '../api'
 import { useApp, companyKey } from '../store'
+import BuildReadinessNotice from '../components/BuildReadinessNotice'
 import { candidateSections, leadingProse } from '../lib/postingSections'
 import RatingBadge from '../components/RatingBadge'
 
@@ -43,6 +44,7 @@ interface Actions {
 
 function ActionButtons({ c, actions }: { c: CandidateJob; actions: Actions }): JSX.Element {
   const navigate = useApp((s) => s.navigate)
+  const blockedReason = useApp((s) => (s.buildReadiness?.mode === 'blocked' ? s.buildReadiness.message : null))
   const busy = actions.busyId === c.id
   if (c.state === 'accepted') {
     return (
@@ -69,8 +71,8 @@ function ActionButtons({ c, actions }: { c: CandidateJob; actions: Actions }): J
     <>
       <button
         className="btn btn-green"
-        disabled={busy}
-        title="Add a tracker row and queue the résumé + cover-letter build"
+        disabled={busy || !!blockedReason}
+        title={blockedReason ?? 'Add a tracker row and queue the résumé + cover-letter build'}
         onClick={() => void actions.accept(c.id)}
       >
         <Check size={13} /> Accept
@@ -373,6 +375,7 @@ export default function ScoutView(): JSX.Element {
   const runs = useApp((s) => s.runs)
   const toast = useApp((s) => s.toast)
   const navigate = useApp((s) => s.navigate)
+  const requestScout = useApp((s) => s.requestScout)
   const [filter, setFilter] = useState<'new' | 'accepted' | 'rejected'>('new')
   const [sourceFilter, setSourceFilter] = useState('all')
   const [minFit, setMinFit] = useState(0)
@@ -417,7 +420,7 @@ export default function ScoutView(): JSX.Element {
         void useApp.getState().refreshRows()
         void useApp.getState().refreshRuns()
       } catch (err) {
-        toast(String(err), 'error')
+        toast(err instanceof Error ? err.message : String(err), 'error')
       } finally {
         setBusyId(null)
       }
@@ -429,16 +432,9 @@ export default function ScoutView(): JSX.Element {
   }
 
   // Standard sweep — custom instructions are composed in the History tab.
-  const startScout = async (): Promise<void> => {
-    try {
-      const meta = await call('scout:start', { instructions: undefined })
-      toast('Scout agent launched — watch it work in Runs', 'success')
-      void useApp.getState().refreshRuns()
-      navigate({ view: 'runs', runId: meta.id })
-    } catch (err) {
-      toast(String(err), 'error')
-    }
-  }
+  // requestScout runs the Glassdoor harvest first when enabled (store-driven,
+  // overlay lives at app level).
+  const startScout = (): void => void requestScout(undefined)
 
   const sources = [...new Set(candidates.map((c) => c.source))].sort()
   const shown = candidates.filter(
@@ -474,6 +470,7 @@ export default function ScoutView(): JSX.Element {
 
   return (
     <div className="flex h-full flex-col">
+      <BuildReadinessNotice />
       <div className="flex items-center gap-2 border-b border-edge bg-panel px-4 py-2.5">
         <h1 className="text-sm font-semibold text-gray-100">Scout</h1>
         {liveScout ? (

@@ -1,4 +1,5 @@
 import {
+  CalendarDays,
   FolderOpen,
   Globe,
   History,
@@ -20,6 +21,7 @@ const NAV = [
   { view: 'intake', label: 'Intake', Icon: Inbox },
   { view: 'history', label: 'History', Icon: History },
   { view: 'email', label: 'Email', Icon: Mail },
+  { view: 'calendar', label: 'Calendar', Icon: CalendarDays },
   { view: 'runs', label: 'Runs', Icon: Play },
   { view: 'library', label: 'Library', Icon: FolderOpen },
   { view: 'browser', label: 'Browser', Icon: Globe }
@@ -29,6 +31,7 @@ export default function Sidebar(): JSX.Element {
   const route = useApp((s) => s.route)
   const runs = useApp((s) => s.runs)
   const candidates = useApp((s) => s.candidates)
+  const calendarProposed = useApp((s) => s.calendarProposed)
   const navigate = useApp((s) => s.navigate)
   const theme = useApp((s) => s.settings?.theme ?? 'dark')
   const liveRuns = runs.filter((r) => r.status === 'running' || r.status === 'queued').length
@@ -63,6 +66,11 @@ export default function Sidebar(): JSX.Element {
               {item.view === 'scout' && newCandidates > 0 && (
                 <span className="ml-auto rounded-full bg-green-900/70 px-1.5 py-0.5 text-[10px] text-green-300">
                   {newCandidates}
+                </span>
+              )}
+              {item.view === 'calendar' && calendarProposed > 0 && (
+                <span className="ml-auto rounded-full bg-amber-900/70 px-1.5 py-0.5 text-[10px] text-amber-300">
+                  {calendarProposed}
                 </span>
               )}
             </button>

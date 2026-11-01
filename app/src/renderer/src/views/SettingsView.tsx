@@ -1,30 +1,87 @@
 import { useEffect, useState } from 'react'
-import { Check, X } from 'lucide-react'
-import type { AppSettings, BoardId, BoardsStatus, EmailStatus } from '@shared/types'
+import { Archive, BookUser, Bot, Briefcase, Check, Cpu, FolderOpen, Mail, Palette, Terminal, Workflow, X } from 'lucide-react'
+import type {
+  AppSettings,
+  BoardId,
+  BoardsStatus,
+  EmailStatus,
+  EnvCheck,
+  FolderEntry,
+  ToolName,
+  ToolStatus
+} from '@shared/types'
 import type { CustomBoard } from '@shared/profile'
+import type { IpcInvokeContract } from '@shared/ipc'
 import { call } from '../api'
 import { modelOptionsWith } from '../lib/models'
+import { PROVIDER_LABEL, PROVIDER_RUN_NOTE } from '../lib/providers'
 import { useApp } from '../store'
+import PrereqPanel from '../components/PrereqPanel'
 import ProfilePanel from './settings/ProfilePanel'
+import glassdoorLogo from '../assets/boards/glassdoor.svg'
+import jobrightLogo from '../assets/boards/jobright.svg'
+import linkedinLogo from '../assets/boards/linkedin.svg'
+
+type ProviderStatus = IpcInvokeContract['provider:status']['res']
+
+/** Board logo URL for a settings row, when one is bundled. */
+const BOARD_LOGOS: Record<string, string> = {
+  jobright: jobrightLogo,
+  linkedin: linkedinLogo,
+  glassdoor: glassdoorLogo
+}
 
 function Row({
   label,
   hint,
+  icon,
   children
 }: {
   label: string
   hint?: string
+  /** Optional logo URL rendered before the label (board rows). */
+  icon?: string
   children: React.ReactNode
 }): JSX.Element {
   return (
     <div className="flex items-start justify-between gap-6 border-b border-edge/50 py-3 last:border-b-0">
       <div>
-        <div className="text-xs font-medium text-gray-200">{label}</div>
+        <div className="flex items-center gap-2 text-xs font-medium text-gray-200">
+          {icon && <img src={icon} alt="" className="h-4 w-4 shrink-0 rounded-sm" />}
+          {label}
+        </div>
         {hint && <div className="mt-0.5 max-w-md text-[11px] leading-relaxed text-gray-500">{hint}</div>}
       </div>
       <div className="shrink-0 pt-0.5">{children}</div>
     </div>
   )
+}
+
+/** The two external binaries the builder shells out to. */
+const TOOLS: { id: ToolName; label: string; hint: string }[] = [
+  {
+    id: 'pdflatex',
+    label: 'LaTeX engine',
+    hint: 'Compiles the résumé and cover letter. pdflatex, xelatex, lualatex and tectonic all work. Leave the box empty to auto-detect.'
+  },
+  {
+    id: 'pdftotext',
+    label: 'pdftotext',
+    hint: 'From poppler. Optional — it powers the ATS text-layer check that reads the finished PDF back. Builds skip the check when it is missing.'
+  }
+]
+
+/** One line describing what the app will actually run for a tool. */
+function toolDetail(status: ToolStatus | null): string {
+  if (!status) return 'Checking…'
+  if (status.overrideError) {
+    return status.ok
+      ? `Saved path is unusable (${status.overrideError}); falling back to ${status.path}.`
+      : `Saved path is unusable (${status.overrideError}) and nothing else was found.`
+  }
+  if (!status.ok) return 'Not found on PATH or in the usual install locations.'
+  const kind = status.kind ? ` (${status.kind})` : ''
+  return `${status.source === 'override' ? 'Manual path' : 'Detected'}: ${status.path}${kind}`
 }
 
 function Toggle({
@@ -62,12 +119,13 @@ export default function SettingsView(): JSX.Element {
   const [testing, setTesting] = useState(false)
   const [modelDraft, setModelDraft] = useState('')
   const [maxTurnsDraft, setMaxTurnsDraft] = useState('')
+  const [reminderLeadDraft, setReminderLeadDraft] = useState('')
   const [backfillBusy, setBackfillBusy] = useState(false)
   const [masterContext, setMasterContext] = useState('')
   const [masterContextSaved, setMasterContextSaved] = useState(true)
   const [kbNotes, setKbNotes] = useState('')
   const [kbNotesSaved, setKbNotesSaved] = useState(true)
-  const [kbFiles, setKbFiles] = useState<{ name: string; sizeKb: number }[]>([])
+  const [kbFiles, setKbFiles] = useState<FolderEntry[]>([])
   const [emailStatus, setEmailStatus] = useState<EmailStatus | null>(null)
   const [clientIdDraft, setClientIdDraft] = useState('')
   // The stored secret is never echoed back; this holds only fresh input.
@@ -77,6 +135,41 @@ export default function SettingsView(): JSX.Element {
   const [customUrl, setCustomUrl] = useState('')
   const [customTest, setCustomTest] = useState<{ ok: boolean; text: string } | null>(null)
   const [customBusy, setCustomBusy] = useState<'test' | 'add' | null>(null)
+  const [gdFeed, setGdFeed] = useState<{ count: number; fetchedAt: string; stale: boolean } | null>(null)
+  const [gdSearchesDraft, setGdSearchesDraft] = useState('')
+  const [gdSaved, setGdSaved] = useState(true)
+  // Derived from the channel it consumes: an inline copy of this shape would
+  // drift from provider:status without the compiler noticing.
+  const [provStatus, setProvStatus] = useState<ProviderStatus | null>(null)
+  // Never echoes the stored keys back; these hold only fresh input until saved.
+  const [geminiKeyDraft, setGeminiKeyDraft] = useState('')
+  const [ollamaKeyDraft, setOllamaKeyDraft] = useState('')
+  const [ollamaInfo, setOllamaInfo] = useState<{ contextLength: number | null; tools: boolean | null } | null>(null)
+  const [geminiModelDraft, setGeminiModelDraft] = useState('')
+  const [ollamaUrlDraft, setOllamaUrlDraft] = useState('')
+  const [ollamaModelDraft, setOllamaModelDraft] = useState('')
+  const [ollamaCtxDraft, setOllamaCtxDraft] = useState('')
+  const [provTest, setProvTest] = useState<{ ok: boolean; message: string } | null>(null)
+  const [provBusy, setProvBusy] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [switching, setSwitching] = useState(false)
+  const [env, setEnv] = useState<EnvCheck | null>(null)
+  // Holds the override the user is editing; empty means "auto-detect".
+  const [toolDrafts, setToolDrafts] = useState<Record<ToolName, string>>({
+    pdflatex: '',
+    pdftotext: ''
+  })
+  const [toolBusy, setToolBusy] = useState<ToolName | null>(null)
+
+  // Declared before the mount effect that calls it (hoisted): env:check is the
+  // single source for both the drafts and the detection lines.
+  function applyEnv(next: EnvCheck): void {
+    setEnv(next)
+    setToolDrafts({
+      pdflatex: next.pdflatex.override ?? '',
+      pdftotext: next.pdftotext.override ?? ''
+    })
+  }
 
   useEffect(() => {
     void call('master:getContext', undefined)
@@ -89,6 +182,7 @@ export default function SettingsView(): JSX.Element {
       })
       .catch(() => undefined)
     void call('app:info', undefined).then(setInfo).catch(() => undefined)
+    void call('env:check', undefined).then(applyEnv).catch(() => undefined)
     void call('boards:getStatus', undefined)
       .then((s) => {
         setBoards(s)
@@ -105,7 +199,42 @@ export default function SettingsView(): JSX.Element {
     void call('boards:listCustom', undefined)
       .then(setCustomBoards)
       .catch(() => undefined)
+    void call('glassdoor:feedStatus', undefined)
+      .then(setGdFeed)
+      .catch(() => undefined)
+    void call('provider:status', undefined)
+      .then(setProvStatus)
+      .catch(() => undefined)
   }, [])
+
+  useEffect(() => {
+    if (settings) {
+      setGeminiModelDraft(settings.geminiModel)
+      setOllamaUrlDraft(settings.ollamaUrl)
+      setOllamaModelDraft(settings.ollamaModel)
+      setOllamaCtxDraft(String(settings.ollamaNumCtx))
+    }
+  }, [settings?.geminiModel, settings?.ollamaUrl, settings?.ollamaModel, settings?.ollamaNumCtx])
+
+  // Per-model metadata (context ceiling, tool support) for the hints below.
+  useEffect(() => {
+    setOllamaInfo(null)
+    const model = settings?.ollamaModel
+    if (!model || settings?.provider !== 'ollama') return
+    let stale = false
+    void call('provider:ollamaShow', { model })
+      .then((info) => {
+        if (!stale) setOllamaInfo(info)
+      })
+      .catch(() => undefined)
+    return () => {
+      stale = true
+    }
+  }, [settings?.ollamaModel, settings?.ollamaUrl, settings?.provider])
+
+  useEffect(() => {
+    if (settings) setGdSearchesDraft((settings.glassdoorSearches ?? []).join('\n'))
+  }, [settings?.glassdoorSearches])
 
   useEffect(() => {
     if (settings) {
@@ -114,12 +243,98 @@ export default function SettingsView(): JSX.Element {
     }
   }, [settings?.model, settings?.maxTurns])
 
+  useEffect(() => {
+    if (settings) setReminderLeadDraft(String(settings.reminderLeadMinutes))
+  }, [settings?.reminderLeadMinutes])
+
+  // Files added or removed elsewhere (Library, Who I am) show up here too.
+  // Notes are left alone: the textarea may hold unsaved edits.
+  const materialRev = useApp((s) => s.materialRev)
+  useEffect(() => {
+    if (materialRev === 0) return
+    void call('knowledge:get', undefined)
+      .then(({ files }) => setKbFiles(files))
+      .catch(() => undefined)
+  }, [materialRev])
+
   if (!settings) return <div className="p-6 text-sm text-gray-500">Loading…</div>
 
+  // Goes through the store so a provider switch re-evaluates the host
+  // preflight — the same path onboarding writes settings on.
   const patch = (p: Partial<AppSettings>): void => {
-    void call('settings:set', p)
-      .then(() => useApp.getState().refreshSettings())
+    void useApp
+      .getState()
+      .patchSettings(p)
       .catch((err) => toast(String(err), 'error'))
+  }
+
+  const refreshProviderStatus = async (): Promise<void> => {
+    try {
+      setProvStatus(await call('provider:status', undefined))
+    } catch {
+      /* status is advisory */
+    }
+  }
+
+  /** After a credential change: a stored key is itself one of the prerequisites
+   *  the panel below lists, so the shared list is re-read with the status. */
+  const refreshProviderState = async (): Promise<void> => {
+    await refreshProviderStatus()
+    await useApp.getState().refreshPreflight()
+  }
+
+  const saveGeminiKey = async (): Promise<void> => {
+    try {
+      await call('provider:setGeminiKey', { key: geminiKeyDraft })
+      setGeminiKeyDraft('')
+      await refreshProviderState()
+      toast('Gemini key saved (encrypted with the OS keychain)', 'success')
+    } catch (err) {
+      toast(String(err), 'error')
+    }
+  }
+
+  const clearGeminiKeyNow = async (): Promise<void> => {
+    try {
+      await call('provider:clearGeminiKey', undefined)
+      await refreshProviderState()
+      toast('Gemini key removed', 'success')
+    } catch (err) {
+      toast(String(err), 'error')
+    }
+  }
+
+  const saveOllamaKey = async (): Promise<void> => {
+    try {
+      await call('provider:setOllamaKey', { key: ollamaKeyDraft })
+      setOllamaKeyDraft('')
+      await refreshProviderState()
+      toast('Ollama key saved (encrypted with the OS keychain)', 'success')
+    } catch (err) {
+      toast(String(err), 'error')
+    }
+  }
+
+  const clearOllamaKeyNow = async (): Promise<void> => {
+    try {
+      await call('provider:clearOllamaKey', undefined)
+      await refreshProviderState()
+      toast('Ollama key removed', 'success')
+    } catch (err) {
+      toast(String(err), 'error')
+    }
+  }
+
+  const runProviderTest = async (): Promise<void> => {
+    setProvBusy(true)
+    setProvTest(null)
+    try {
+      setProvTest(await call('provider:test', undefined))
+    } catch (err) {
+      setProvTest({ ok: false, message: String(err) })
+    } finally {
+      setProvBusy(false)
+    }
   }
 
   const saveCreds = async (): Promise<void> => {
@@ -172,8 +387,8 @@ export default function SettingsView(): JSX.Element {
     try {
       const { added } = await call('knowledge:addFiles', undefined)
       if (added > 0) {
-        const { notes, files } = await call('knowledge:get', undefined)
-        setKbNotes(notes)
+        // Only the file list: the notes textarea may hold unsaved edits.
+        const { files } = await call('knowledge:get', undefined)
         setKbFiles(files)
         toast(`Added ${added} file${added === 1 ? '' : 's'}`, 'success')
       }
@@ -184,8 +399,8 @@ export default function SettingsView(): JSX.Element {
 
   const removeKbFile = async (name: string): Promise<void> => {
     try {
-      await call('knowledge:removeFile', { name })
-      setKbFiles((prev) => prev.filter((f) => f.name !== name))
+      const { removed } = await call('knowledge:removeFile', { name })
+      if (removed) setKbFiles((prev) => prev.filter((f) => f.name !== name))
     } catch (err) {
       toast(String(err), 'error')
     }
@@ -206,6 +421,9 @@ export default function SettingsView(): JSX.Element {
     try {
       const res = await call('boards:installBun', undefined)
       setBoards(res.status)
+      // The bun prerequisite's own remedy points at this button, so the panel
+      // must reflect the install rather than still asking for it.
+      await useApp.getState().refreshPreflight()
       toast(res.message, res.ok ? 'success' : 'error')
     } catch (err) {
       toast(String(err), 'error')
@@ -326,6 +544,85 @@ export default function SettingsView(): JSX.Element {
     }
   }
 
+  const exportWorkspace = async (): Promise<void> => {
+    setExporting(true)
+    try {
+      const res = await call('workspace:export', undefined)
+      // Canceled dialogs stay silent — nothing happened, nothing to report.
+      if (res.canceled) return
+      // Held-back credential files are named in the count, never omitted quietly.
+      const held = res.skipped
+        ? ` — ${res.skipped} credential file${res.skipped === 1 ? '' : 's'} held back`
+        : ''
+      toast(`Exported ${res.files} file${res.files === 1 ? '' : 's'}${held}`, 'success')
+    } catch (err) {
+      toast(String(err), 'error')
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  // Main confirms and then restarts the app; a cancelled prompt resolves with
+  // switched=false and nothing changes.
+  const switchWorkspace = async (): Promise<void> => {
+    setSwitching(true)
+    try {
+      const res = await call('workspace:switch', undefined)
+      if (res.switched) toast('Restarting to open the workspace…', 'info')
+    } catch (err) {
+      toast(err instanceof Error ? err.message : String(err), 'error')
+    } finally {
+      setSwitching(false)
+    }
+  }
+
+  const revealWorkspace = (): void => {
+    void call('workspace:reveal', undefined).catch((err: unknown) =>
+      toast(err instanceof Error ? err.message : String(err), 'error')
+    )
+  }
+
+  // Clearing setup completion flips App's gate straight to the wizard.
+  const rerunSetup = async (): Promise<void> => {
+    try {
+      await call('onboarding:reset', undefined)
+      await useApp.getState().refreshConfig()
+    } catch (err) {
+      toast(err instanceof Error ? err.message : String(err), 'error')
+    }
+  }
+
+  /** Persist an override (null clears it). Main rejects a path it cannot run. */
+  const saveToolPath = async (tool: ToolName, value: string | null): Promise<void> => {
+    setToolBusy(tool)
+    try {
+      applyEnv(await call('env:setToolPath', { tool, path: value }))
+      // The override decides the LaTeX verdict, so the prerequisite panel is
+      // stale until it is re-read — a fixed engine must stop reading as missing.
+      await useApp.getState().refreshPreflight()
+      toast(value ? 'Path saved' : 'Override cleared — back to auto-detection', 'success')
+    } catch (err) {
+      toast(String(err), 'error')
+    } finally {
+      setToolBusy(null)
+    }
+  }
+
+  const browseToolPath = async (tool: ToolName): Promise<void> => {
+    try {
+      const picked = await call('app:pickFile', {
+        // Windows binaries need the filter; POSIX executables have no extension.
+        filters:
+          env?.platform === 'win32'
+            ? [{ name: 'Programs', extensions: ['exe', 'bat', 'cmd'] }]
+            : undefined
+      })
+      if (picked.path) await saveToolPath(tool, picked.path)
+    } catch (err) {
+      toast(String(err), 'error')
+    }
+  }
+
   const runBackfill = async (): Promise<void> => {
     setBackfillBusy(true)
     try {
@@ -346,49 +643,43 @@ export default function SettingsView(): JSX.Element {
 
         <ProfilePanel />
 
+        {/* One card, two lanes: always-on context (can shape documents) and
+            background-only knowledge (never on documents). Separate stores
+            (master/context.md vs master/knowledge/) — the split is what keeps
+            "never on documents" enforceable at the prompt level. */}
         <div className="panel mt-4 px-4 py-3">
-          <div className="text-[10px] font-bold uppercase tracking-wide text-muted">
-            Master résumé context
+          <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-muted">
+            <BookUser size={11} aria-hidden="true" /> Agent context
           </div>
           <div className="mt-1 text-[11px] leading-relaxed text-gray-500">
-            Free-form context added to every build alongside your profile — extra skills, certs,
-            projects, or standing guidance the agent should always know. For one specific
-            application, use the notes field on its intake card or scout panel instead.
+            What every agent knows about you beyond the profile. For one specific application, use
+            the notes field on its intake card or scout panel instead.
+          </div>
+
+          <div className="mt-3 text-[11px] font-semibold text-gray-300">
+            Always-on notes
+            <span className="ml-2 font-normal text-gray-500">
+              added to every build — may shape the résumé and cover letter
+            </span>
           </div>
           <textarea
-            className="input mt-2 min-h-[7rem] w-full resize-y font-mono text-[11px] leading-relaxed"
-            placeholder={'e.g.\n- AWS Solutions Architect Associate (in progress, exam Aug 2026)\n- Coursework (context only — NEVER list on résumé or cover letter): Databases, Distributed Systems, Statistical Learning\n- Prefer "data practitioner" framing over "engineer" for analyst roles'}
+            className="input mt-1.5 min-h-[6rem] w-full resize-y font-mono text-[11px] leading-relaxed"
+            placeholder={'e.g.\n- AWS Solutions Architect Associate (in progress, exam Aug 2026)\n- Prefer "data practitioner" framing over "engineer" for analyst roles'}
             value={masterContext}
             onChange={(e) => {
               setMasterContext(e.target.value)
               setMasterContextSaved(false)
             }}
           />
-          <div className="mt-2 flex items-center gap-2">
-            <button
-              className="btn btn-primary px-2 py-1 text-[10px]"
-              disabled={masterContextSaved}
-              onClick={() => void saveMasterContext()}
-            >
-              {masterContextSaved ? 'Saved' : 'Save'}
-            </button>
-            <span className="text-[10px] text-gray-600">
-              Stored at master/context.md in your workspace.
+
+          <div className="mt-4 text-[11px] font-semibold text-gray-300">
+            Background only
+            <span className="ml-2 font-normal text-gray-500">
+              informs judgment and answers — never listed on a résumé or cover letter
             </span>
           </div>
-        </div>
-
-        <div className="panel mt-4 px-4 py-3">
-          <div className="text-[10px] font-bold uppercase tracking-wide text-muted">
-            Knowledge base — background only, never on documents
-          </div>
-          <div className="mt-1 text-[11px] leading-relaxed text-gray-500">
-            Notes and files (transcripts, syllabi, portfolios, old résumés — images and PDFs are
-            readable by agents) that inform fit judgment, application answers, and framing. Nothing
-            here is ever listed on a résumé or cover letter.
-          </div>
           <textarea
-            className="input mt-2 min-h-[5rem] w-full resize-y font-mono text-[11px] leading-relaxed"
+            className="input mt-1.5 min-h-[5rem] w-full resize-y font-mono text-[11px] leading-relaxed"
             placeholder={'e.g.\n- Coursework: Databases, Distributed Systems, Statistical Learning\n- Left retail job off the résumé; fine to mention in "other experience" questions'}
             value={kbNotes}
             onChange={(e) => {
@@ -396,21 +687,6 @@ export default function SettingsView(): JSX.Element {
               setKbNotesSaved(false)
             }}
           />
-          <div className="mt-2 flex items-center gap-2">
-            <button
-              className="btn btn-primary px-2 py-1 text-[10px]"
-              disabled={kbNotesSaved}
-              onClick={() => void saveKbNotes()}
-            >
-              {kbNotesSaved ? 'Saved' : 'Save notes'}
-            </button>
-            <button className="btn px-2 py-1 text-[10px]" onClick={() => void addKbFiles()}>
-              + Add files
-            </button>
-            <span className="text-[10px] text-gray-600">
-              Stored in master/knowledge/ in your workspace.
-            </span>
-          </div>
           {kbFiles.length > 0 && (
             <div className="mt-2 flex flex-col gap-1">
               {kbFiles.map((f) => (
@@ -418,12 +694,16 @@ export default function SettingsView(): JSX.Element {
                   key={f.name}
                   className="group flex items-center gap-2 rounded-md border border-edge px-2 py-1 text-[11px]"
                 >
-                  <span className="min-w-0 flex-1 truncate text-gray-300">{f.name}</span>
-                  <span className="shrink-0 text-[10px] text-gray-600">{f.sizeKb} KB</span>
+                  <span className="min-w-0 flex-1 truncate text-gray-300">
+                    {f.name}
+                    {f.kind === 'dir' ? '/' : ''}
+                  </span>
+                  {f.kind === 'file' && <span className="shrink-0 text-[10px] text-gray-600">{f.sizeKb} KB</span>}
                   <button
-                    className="invisible shrink-0 text-gray-500 hover:text-red-400 group-hover:visible"
+                    className="shrink-0 text-gray-500 opacity-0 hover:text-red-400 focus:opacity-100 group-hover:opacity-100"
                     onClick={() => void removeKbFile(f.name)}
-                    title="Remove from knowledge base"
+                    aria-label={`Remove ${f.name} from the knowledge base`}
+                    title="Move to the trash"
                   >
                     <X size={12} />
                   </button>
@@ -431,11 +711,34 @@ export default function SettingsView(): JSX.Element {
               ))}
             </div>
           )}
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              className="btn btn-primary px-2 py-1 text-[10px]"
+              disabled={masterContextSaved && kbNotesSaved}
+              onClick={() =>
+                void (async () => {
+                  // Sequential: a failed save leaves its own dirty flag set, so
+                  // the button stays enabled to retry just that one.
+                  if (!masterContextSaved) await saveMasterContext()
+                  if (!kbNotesSaved) await saveKbNotes()
+                })()
+              }
+            >
+              {masterContextSaved && kbNotesSaved ? 'Saved' : 'Save'}
+            </button>
+            <button className="btn px-2 py-1 text-[10px]" onClick={() => void addKbFiles()}>
+              + Add files
+            </button>
+            <span className="text-[10px] text-gray-600">
+              Stored at master/context.md and master/knowledge/ in your workspace — files (PDFs,
+              images) are readable by agents.
+            </span>
+          </div>
         </div>
 
         <div className="panel mt-4 px-4 py-1">
-          <div className="pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
-            Appearance
+          <div className="flex items-center gap-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
+            <Palette size={11} aria-hidden="true" /> Appearance
           </div>
           <Row label="Theme">
             <div className="flex gap-1">
@@ -456,28 +759,269 @@ export default function SettingsView(): JSX.Element {
         </div>
 
         <div className="panel mt-4 px-4 py-1">
-          <div className="pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
-            Agent runs
+          <div className="flex items-center gap-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
+            <Cpu size={11} aria-hidden="true" /> Model provider
           </div>
           <Row
-            label="Model override"
-            hint="Model used by agent runs. Default = your Claude Code default."
+            label="Backend"
+            hint="Powers every agent (builds, scout, assistant, email drafts). Gemini and Ollama route through a local translation layer; conversations keep their full context when you switch. Web search runs through Gemini grounding whenever a Gemini key is saved — even with Ollama as the backend. Tool-use quality varies by model — Claude models are tuned for this harness."
           >
-            <select
-              className="input w-44"
-              value={modelDraft}
-              onChange={(e) => {
-                setModelDraft(e.target.value)
-                patch({ model: e.target.value || undefined })
-              }}
-            >
-              {modelOptionsWith(modelDraft).map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
+            <div className="flex gap-1">
+              {(['claude', 'gemini', 'ollama'] as const).map((p) => (
+                <button
+                  key={p}
+                  className={`chip ${settings.provider === p ? 'border-cyan-700 bg-cyan-950/60 text-cyan-200' : ''}`}
+                  onClick={() => {
+                    patch({ provider: p })
+                    setProvTest(null)
+                    void refreshProviderStatus()
+                  }}
+                >
+                  {PROVIDER_LABEL[p]}
+                </button>
               ))}
-            </select>
+            </div>
           </Row>
+          {/* Someone who picked a local model to stay off an Anthropic account
+              needs to see, here, that the runtime requirement is not a sign-in
+              requirement — this is where they come to check. */}
+          <div className="pb-3 text-[11px] leading-relaxed text-gray-500">
+            {PROVIDER_RUN_NOTE[settings.provider ?? 'claude']}
+          </div>
+          {settings.provider === 'gemini' && (
+            <>
+              <Row
+                label="Gemini API key"
+                hint={
+                  provStatus?.geminiKeySet
+                    ? 'A key is stored, encrypted with the OS keychain. Paste a new one to replace it.'
+                    : 'From Google AI Studio. Stored encrypted with the OS keychain — never in the workspace, never passed to agent processes.'
+                }
+              >
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="password"
+                    className="input w-52"
+                    placeholder={provStatus?.geminiKeySet ? '(key set)' : 'AIza…'}
+                    value={geminiKeyDraft}
+                    onChange={(e) => setGeminiKeyDraft(e.target.value)}
+                  />
+                  <button
+                    className="btn px-2 py-1 text-[10px]"
+                    disabled={!geminiKeyDraft.trim()}
+                    onClick={() => void saveGeminiKey()}
+                  >
+                    Save
+                  </button>
+                  {provStatus?.geminiKeySet && (
+                    <button className="btn px-2 py-1 text-[10px]" onClick={() => void clearGeminiKeyNow()}>
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </Row>
+              <Row
+                label="Gemini model"
+                hint={
+                  provStatus?.geminiModels.length
+                    ? `All ${provStatus.geminiModels.length} chat models your key can use, from the live catalog.`
+                    : 'Flash models are fast and cheap. Save a key to list what it can use.'
+                }
+              >
+                {provStatus?.geminiModels.length ? (
+                  <select
+                    className="input h-8 w-52 py-0"
+                    value={settings.geminiModel}
+                    onChange={(e) => patch({ geminiModel: e.target.value })}
+                  >
+                    {(provStatus.geminiModels.includes(settings.geminiModel)
+                      ? provStatus.geminiModels
+                      : [settings.geminiModel, ...provStatus.geminiModels]
+                    ).map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    className="input w-52"
+                    placeholder="gemini-3.6-flash"
+                    value={geminiModelDraft}
+                    onChange={(e) => setGeminiModelDraft(e.target.value)}
+                    onBlur={() => {
+                      const v = geminiModelDraft.trim()
+                      if (v) patch({ geminiModel: v })
+                      else setGeminiModelDraft(settings.geminiModel)
+                    }}
+                  />
+                )}
+              </Row>
+            </>
+          )}
+          {settings.provider === 'ollama' && (
+            <>
+              <Row
+                label="Ollama URL"
+                hint={provStatus ? `Local server: ${provStatus.ollama.message}` : 'Local Ollama server address.'}
+              >
+                <input
+                  className="input w-52"
+                  value={ollamaUrlDraft}
+                  onChange={(e) => setOllamaUrlDraft(e.target.value)}
+                  onBlur={() => {
+                    const v = ollamaUrlDraft.trim()
+                    if (v) {
+                      patch({ ollamaUrl: v })
+                      void refreshProviderStatus()
+                    } else setOllamaUrlDraft(settings.ollamaUrl)
+                  }}
+                />
+              </Row>
+              <Row
+                label="Ollama API key"
+                hint={
+                  provStatus?.ollamaKeySet
+                    ? 'A key is stored, encrypted with the OS keychain. Only needed for ollama.com cloud models.'
+                    : 'Optional — only for ollama.com cloud models (marked "cloud" below). Local models need no key.'
+                }
+              >
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="password"
+                    className="input w-52"
+                    placeholder={provStatus?.ollamaKeySet ? '(key set)' : 'ollama.com key'}
+                    value={ollamaKeyDraft}
+                    onChange={(e) => setOllamaKeyDraft(e.target.value)}
+                  />
+                  <button
+                    className="btn px-2 py-1 text-[10px]"
+                    disabled={!ollamaKeyDraft.trim()}
+                    onClick={() => void saveOllamaKey()}
+                  >
+                    Save
+                  </button>
+                  {provStatus?.ollamaKeySet && (
+                    <button className="btn px-2 py-1 text-[10px]" onClick={() => void clearOllamaKeyNow()}>
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </Row>
+              <Row
+                label="Ollama model"
+                hint={
+                  ollamaInfo?.tools === false
+                    ? 'This model does NOT advertise tool support — agents will not work with it. Pick a tool-capable model.'
+                    : 'Must already be pulled (ollama pull …) or a cloud model. Pick a tool-capable model — agents depend on function calling.'
+                }
+              >
+                {provStatus?.ollama.models.length ? (
+                  <select
+                    className="input h-8 w-52 py-0"
+                    value={settings.ollamaModel}
+                    onChange={(e) => patch({ ollamaModel: e.target.value })}
+                  >
+                    {(settings.ollamaModel && !provStatus.ollama.models.includes(settings.ollamaModel)
+                      ? [settings.ollamaModel, ...provStatus.ollama.models]
+                      : ['', ...provStatus.ollama.models]
+                    ).map((m) => (
+                      <option key={m} value={m}>
+                        {m ? `${m}${/[-:]cloud$/.test(m) ? '  (cloud)' : ''}` : 'Pick a model…'}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    className="input w-52"
+                    placeholder="qwen3:14b"
+                    value={ollamaModelDraft}
+                    onChange={(e) => setOllamaModelDraft(e.target.value)}
+                    onBlur={() => patch({ ollamaModel: ollamaModelDraft.trim() })}
+                  />
+                )}
+              </Row>
+              <Row
+                label="Model reasoning"
+                hint="Thinking on capable models (qwen3…) can improve tool use but costs minutes of reasoning tokens per turn on laptop hardware."
+              >
+                <Toggle value={settings.ollamaThink} onChange={(v) => patch({ ollamaThink: v })} />
+              </Row>
+              <Row
+                label="Context window"
+                hint={
+                  ollamaInfo?.contextLength
+                    ? `Tokens per request (num_ctx). This model supports up to ${Math.round(ollamaInfo.contextLength / 1024)}k${
+                        settings.ollamaNumCtx > ollamaInfo.contextLength
+                          ? ' — your setting exceeds it and will be capped by the server'
+                          : ''
+                      }.`
+                    : 'Tokens per request (num_ctx). Agent prompts are large — keep this high; lower it only if the machine runs out of memory.'
+                }
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-gray-500">
+                    ≈{Math.round(parseInt(ollamaCtxDraft || '0', 10) / 1024)}k
+                  </span>
+                  <input
+                    className="input w-24 text-right"
+                    value={ollamaCtxDraft}
+                    onChange={(e) => setOllamaCtxDraft(e.target.value.replace(/\D/g, ''))}
+                    onBlur={() => {
+                      const n = parseInt(ollamaCtxDraft, 10)
+                      if (n >= 4096 && n <= 1_048_576) patch({ ollamaNumCtx: n })
+                      else setOllamaCtxDraft(String(settings.ollamaNumCtx))
+                    }}
+                  />
+                </div>
+              </Row>
+            </>
+          )}
+          {settings.provider !== 'claude' && (
+            <Row label="Connection" hint="One tiny request against the backend to validate key, model, and URL.">
+              <div className="flex items-center gap-2">
+                {provTest && (
+                  <span
+                    className={`max-w-64 text-right text-[10px] ${provTest.ok ? 'text-green-300' : 'text-amber-300'}`}
+                  >
+                    {provTest.message}
+                  </span>
+                )}
+                <button className="btn px-2 py-1 text-[10px]" disabled={provBusy} onClick={() => void runProviderTest()}>
+                  {provBusy ? 'Testing…' : 'Test'}
+                </button>
+              </div>
+            </Row>
+          )}
+          {/* Same list onboarding shows, for the backend selected above. */}
+          <PrereqPanel className="mb-3 mt-1" />
+        </div>
+
+        <div className="panel mt-4 px-4 py-1">
+          <div className="flex items-center gap-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
+            <Bot size={11} aria-hidden="true" /> Agent runs
+          </div>
+          {settings.provider === 'claude' && (
+            <Row
+              label="Model override"
+              hint="Model used by agent runs. Default = your Claude Code default."
+            >
+              <select
+                className="input h-8 w-44 py-0"
+                value={modelDraft}
+                onChange={(e) => {
+                  setModelDraft(e.target.value)
+                  patch({ model: e.target.value || undefined })
+                }}
+              >
+                {modelOptionsWith(modelDraft).map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </Row>
+          )}
           <Row label="Max turns per run" hint="Safety ceiling before a run is stopped.">
             <input
               className="input w-20 text-right"
@@ -518,8 +1062,8 @@ export default function SettingsView(): JSX.Element {
         </div>
 
         <div className="panel mt-4 px-4 py-1">
-          <div className="pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
-            Workflow
+          <div className="flex items-center gap-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
+            <Workflow size={11} aria-hidden="true" /> Workflow
           </div>
           <Row
             label="Rename folder to [DONE] on submit"
@@ -542,8 +1086,8 @@ export default function SettingsView(): JSX.Element {
         </div>
 
         <div className="panel mt-4 px-4 py-1">
-          <div className="pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
-            Job boards
+          <div className="flex items-center gap-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
+            <Briefcase size={11} aria-hidden="true" /> Job boards
           </div>
           {boards && !boards.bunOk && (
             <div className="mt-2 flex items-center justify-between gap-3 rounded-md border border-amber-700 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-300">
@@ -570,7 +1114,7 @@ export default function SettingsView(): JSX.Element {
                   : 'Public API — no credentials needed.'
                 : `Not installed. Install copies the bundled search CLI into ${b.path} inside your workspace (no network access needed).`
             return (
-              <Row key={b.id} label={jr ? 'jobright.ai' : b.id} hint={hint}>
+              <Row key={b.id} label={jr ? 'jobright.ai' : b.id} icon={BOARD_LOGOS[b.id]} hint={hint}>
                 <div className="flex flex-col items-end gap-1.5">
                   <div className="flex items-center gap-2">
                     {!b.enabled ? (
@@ -699,6 +1243,7 @@ export default function SettingsView(): JSX.Element {
           </Row>
           <Row
             label="Glassdoor ratings"
+            icon={glassdoorLogo}
             hint="Look up and cache a Glassdoor rating for every company across your tracker, intake, and scout candidates."
           >
             <button
@@ -709,11 +1254,57 @@ export default function SettingsView(): JSX.Element {
               {backfillBusy ? 'Fetching…' : 'Fetch ratings for all companies'}
             </button>
           </Row>
+          <Row
+            label="Glassdoor jobs (browser session)"
+            icon={glassdoorLogo}
+            hint="When on, the scout button first harvests your target Glassdoor searches through the in-app browser using YOUR logged-in session — no stored password, nothing sent. Safe because you drive it (and solve any bot check); it does automate your session, a gray zone on Glassdoor's ToS, so keep it low-volume. Sign into Glassdoor once in the Browser tab first."
+          >
+            <div className="flex flex-col items-end gap-1.5">
+              <Toggle
+                value={settings.scoutGlassdoor}
+                onChange={(v) => patch({ scoutGlassdoor: v })}
+              />
+              {settings.scoutGlassdoor && (
+                <>
+                  <textarea
+                    className="input h-20 w-72 resize-y text-[11px]"
+                    placeholder="Paste your Glassdoor LOCATION base URL (…/Job/new-york-jobs-SRCH_IL…IC1132348.htm) to auto-build a precise search per role at that location. Append filters and they carry to every role: ?fromAge=3 (posted <=3d), &seniorityType=internship (or entrylevel). Or paste full search URLs, one per line. Blank = keyword-only default."
+                    value={gdSearchesDraft}
+                    onChange={(e) => {
+                      setGdSearchesDraft(e.target.value)
+                      setGdSaved(false)
+                    }}
+                  />
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-muted">
+                      {gdFeed
+                        ? `Feed: ${gdFeed.count} jobs${gdFeed.stale ? ' (stale)' : ''}`
+                        : 'No feed yet — runs on your next scout'}
+                    </span>
+                    <button
+                      className="btn px-2 py-1 text-[10px]"
+                      disabled={gdSaved}
+                      onClick={() => {
+                        const list = gdSearchesDraft
+                          .split('\n')
+                          .map((l) => l.trim())
+                          .filter(Boolean)
+                        patch({ glassdoorSearches: list })
+                        setGdSaved(true)
+                      }}
+                    >
+                      {gdSaved ? 'Saved' : 'Save searches'}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </Row>
         </div>
 
         <div className="panel mt-4 px-4 py-1">
-          <div className="pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
-            Email (Gmail)
+          <div className="flex items-center gap-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
+            <Mail size={11} aria-hidden="true" /> Email (Gmail)
           </div>
           <Row
             label="Google OAuth client"
@@ -809,6 +1400,35 @@ export default function SettingsView(): JSX.Element {
               onChange={(v) => patch({ emailAutoApply: v })}
             />
           </Row>
+          <Row
+            label="Desktop notifications"
+            hint="OS notifications for new interview, assessment, and offer mail — and reminders for approved calendar events. Off silences both."
+          >
+            <Toggle
+              value={settings.emailNotifications}
+              onChange={(v) => patch({ emailNotifications: v })}
+            />
+          </Row>
+          <Row
+            label="Reminder lead (minutes)"
+            hint="How long before an approved event's start the 'starting soon' reminder fires (5–240). A day-before reminder always fires too."
+          >
+            <input
+              className="input w-20 text-right"
+              value={reminderLeadDraft}
+              onChange={(e) => setReminderLeadDraft(e.target.value.replace(/\D/g, ''))}
+              onBlur={() => {
+                const n = parseInt(reminderLeadDraft, 10)
+                if (Number.isFinite(n)) {
+                  const clamped = Math.min(240, Math.max(5, n))
+                  setReminderLeadDraft(String(clamped))
+                  patch({ reminderLeadMinutes: clamped })
+                } else {
+                  setReminderLeadDraft(String(settings.reminderLeadMinutes))
+                }
+              }}
+            />
+          </Row>
           <div className="py-3">
             <div className="text-[11px] font-medium text-gray-400">Set up your own OAuth client</div>
             <ol className="mt-1 list-decimal space-y-0.5 pl-5 text-[11px] leading-relaxed text-gray-500">
@@ -855,9 +1475,109 @@ export default function SettingsView(): JSX.Element {
           </div>
         </div>
 
+        {/* Detection is automatic (PATH, then the usual install locations); these
+            rows exist for the installs it cannot see — a GUI launch inherits a
+            minimal PATH, and portable TeX distributions live anywhere. */}
+        <div className="panel mt-4 px-4 py-1">
+          <div className="flex items-center gap-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
+            <Terminal size={11} aria-hidden="true" /> Document tools
+          </div>
+          {TOOLS.map((tool) => {
+            const status = env ? env[tool.id] : null
+            return (
+              <Row key={tool.id} label={tool.label} hint={`${tool.hint} ${toolDetail(status)}`}>
+                <div className="flex items-center gap-1.5">
+                  <span
+                    aria-hidden="true"
+                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                      !status ? 'bg-gray-500' : status.ok ? 'bg-green-300' : 'bg-red-400'
+                    }`}
+                  />
+                  <input
+                    className="input w-56 font-mono text-[10px]"
+                    placeholder={status?.path ?? 'auto-detect'}
+                    value={toolDrafts[tool.id]}
+                    onChange={(e) =>
+                      setToolDrafts((d) => ({ ...d, [tool.id]: e.target.value }))
+                    }
+                  />
+                  <button
+                    className="btn px-2 py-1 text-[10px]"
+                    disabled={toolBusy === tool.id}
+                    onClick={() => void browseToolPath(tool.id)}
+                  >
+                    Browse…
+                  </button>
+                  <button
+                    className="btn px-2 py-1 text-[10px]"
+                    disabled={toolBusy === tool.id || !toolDrafts[tool.id].trim()}
+                    onClick={() => void saveToolPath(tool.id, toolDrafts[tool.id])}
+                  >
+                    Save
+                  </button>
+                  {status?.override && (
+                    <button
+                      className="btn px-2 py-1 text-[10px]"
+                      disabled={toolBusy === tool.id}
+                      onClick={() => void saveToolPath(tool.id, null)}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </Row>
+            )
+          })}
+        </div>
+
+        <div className="panel mt-4 px-4 py-1">
+          <div className="flex items-center gap-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-muted">
+            <Archive size={11} aria-hidden="true" /> Workspace data
+          </div>
+          <Row
+            label="Workspace folder"
+            hint={`Everything the app stores lives here${info ? `: ${info.repoRoot}` : ''}. Changing it opens another workspace (or starts a new one in an empty folder) after a restart; this one stays as it is.`}
+          >
+            <div className="flex gap-1.5">
+              <button className="btn px-2 py-1 text-[10px]" onClick={revealWorkspace}>
+                Show folder
+              </button>
+              <button
+                className="btn px-2 py-1 text-[10px]"
+                disabled={switching}
+                onClick={() => void switchWorkspace()}
+              >
+                {switching ? 'Switching…' : 'Change workspace…'}
+              </button>
+            </div>
+          </Row>
+          <Row
+            label="Setup wizard"
+            hint="Walk through setup again — model, your résumé and other material, profile review. Your workspace and existing data stay in place."
+          >
+            <button className="btn px-2 py-1 text-[10px]" onClick={() => void rerunSetup()}>
+              Re-run setup…
+            </button>
+          </Row>
+          <Row
+            label="Export workspace"
+            hint="Packs your whole workspace — tracker, documents, runs, library — into a verifiable zip you can import on another machine from the setup screen. Credential files are held back, and the export tells you how many."
+          >
+            <button
+              className="btn px-2 py-1 text-[10px]"
+              disabled={exporting}
+              onClick={() => void exportWorkspace()}
+            >
+              {exporting ? 'Exporting…' : 'Export workspace…'}
+            </button>
+          </Row>
+        </div>
+
         {info && (
           <div className="panel mt-4 px-4 py-3">
-            <div className="text-[10px] font-bold uppercase tracking-wide text-muted">Locations</div>
+            <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-muted">
+              <FolderOpen size={11} aria-hidden="true" /> Locations
+            </div>
             <div className="mt-2 flex flex-col gap-1 text-[11px] text-gray-500">
               <div>
                 <span className="text-gray-400">Workspace:</span> {info.repoRoot}

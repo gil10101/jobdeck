@@ -27,16 +27,16 @@ export function renderProfileMd(p: ProfileFile): string {
     section(
       'Identity',
       [
-        `- Name: ${id.fullName}`,
-        `- Location: ${id.location}`,
-        `- Phone: ${id.phone}`,
-        `- Email: ${id.email}`,
+        id.fullName && `- Name: ${id.fullName}`,
+        id.location && `- Location: ${id.location}`,
+        id.phone && `- Phone: ${id.phone}`,
+        id.email && `- Email: ${id.email}`,
         id.linkedin && `- LinkedIn: ${id.linkedin}`,
         id.github && `- GitHub: ${id.github}`,
         id.website && `- Website: ${id.website}`,
         id.languages.length &&
           `- Languages: ${id.languages.map((l) => `${l.name} (${l.proficiency})`).join(', ')}`,
-        `- Work authorization: ${id.workAuth}`,
+        id.workAuth && `- Work authorization: ${id.workAuth}`,
         id.status && `- Current status: ${id.status}`
       ]
         .filter(Boolean)
@@ -212,14 +212,16 @@ export function renderAnswersInfoMd(p: ProfileFile): string {
   const edu = p.education[0]
   return [
     '## SAVED APPLICATION INFO (use exactly these values in application_answers.md)',
-    `- Full name: ${id.fullName}`,
-    `- Email: ${id.email}`,
-    `- Phone: ${id.phone}`,
-    `- Location: ${id.location}`,
+    // A blank value would read as "leave this field empty"; an absent line
+    // lets the agent mark the field as not on file instead.
+    id.fullName && `- Full name: ${id.fullName}`,
+    id.email && `- Email: ${id.email}`,
+    id.phone && `- Phone: ${id.phone}`,
+    id.location && `- Location: ${id.location}`,
     id.linkedin && `- LinkedIn: ${id.linkedin}`,
     id.github && `- GitHub: ${id.github}`,
     id.website && `- Website: ${id.website}`,
-    `- Work authorization: ${id.workAuth}`,
+    id.workAuth && `- Work authorization: ${id.workAuth}`,
     s.salary.desired && `- Desired salary: ${s.salary.desired}`,
     s.availability && `- Availability: ${s.availability}`,
     edu &&

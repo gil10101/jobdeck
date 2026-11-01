@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { AssistantStatus } from '@shared/types'
 import { modelOptionsWith } from '../../lib/models'
+import { useApp } from '../../store'
 
 export default function Composer({
   status,
@@ -16,6 +17,9 @@ export default function Composer({
   onStop: () => void
 }): JSX.Element {
   const [draft, setDraft] = useState('')
+  // Under gemini/ollama the backend model comes from Settings; a Claude
+  // picker here would silently do nothing.
+  const provider = useApp((s) => s.settings?.provider ?? 'claude')
 
   const send = (): void => {
     const text = draft.trim()
@@ -43,19 +47,28 @@ export default function Composer({
         }}
       />
       <div className="mt-1.5 flex items-center gap-2">
-        <select
-          className="input h-6 w-auto px-1.5 py-0 text-[10px] text-gray-400"
-          value={model}
-          onChange={(e) => onModelChange(e.target.value)}
-          aria-label="Model"
-          title="Model for assistant replies (applies from the next reply)"
-        >
-          {modelOptionsWith(model).map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
+        {provider === 'claude' ? (
+          <select
+            className="input h-6 w-auto px-1.5 py-0 text-[10px] text-gray-400"
+            value={model}
+            onChange={(e) => onModelChange(e.target.value)}
+            aria-label="Model"
+            title="Model for assistant replies (applies from the next reply)"
+          >
+            {modelOptionsWith(model).map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span
+            className="text-[10px] text-gray-500"
+            title="Model comes from Settings → Model provider"
+          >
+            via {provider}
+          </span>
+        )}
         <div className="flex-1" />
         {status !== 'idle' && (
           <button className="btn btn-danger" onClick={onStop}>

@@ -89,6 +89,13 @@ export default function Timeline({ events }: { events: RunEvent[] }): JSX.Elemen
             return <ToolRow key={e.seq} event={e} end={ends.get(e.toolUseId)} />
           case 'tool_end':
             return null // rendered inside its ToolRow
+          case 'thinking':
+            return (
+              <div key={e.seq} className="my-1 px-2 py-0.5 font-sans text-[11px] italic leading-relaxed text-gray-600">
+                <span className="mr-1 not-italic text-gray-500">thinking</span>
+                {e.text}
+              </div>
+            )
           case 'text':
             return (
               <div
@@ -122,15 +129,15 @@ export default function Timeline({ events }: { events: RunEvent[] }): JSX.Elemen
                     {e.errorText ?? 'agent errored'}
                   </>
                 )}
-                {(typeof e.contextTokens === 'number' || typeof e.costUsd === 'number') && (
+                {(typeof e.contextTokens === 'number' || typeof e.durationMs === 'number') && (
                   <span
                     className="ml-2 text-[10px] opacity-70"
-                    title="Context window used at the end of the run — subscription usage, not billed"
+                    title="Context window used at the end of the run — usage, not a bill"
                   >
                     {typeof e.contextTokens === 'number' && typeof e.contextWindow === 'number'
-                      ? `ctx ${Math.min(100, Math.round((e.contextTokens / e.contextWindow) * 100))}% (${Math.round(e.contextTokens / 1000)}k of ${Math.round(e.contextWindow / 1000)}k)`
-                      : `usage ≈$${(e.costUsd ?? 0).toFixed(2)}`}{' '}
-                    · {Math.round((e.durationMs ?? 0) / 1000)}s · {e.numTurns ?? '?'} turns
+                      ? `ctx ${Math.min(100, Math.round((e.contextTokens / e.contextWindow) * 100))}% (${Math.round(e.contextTokens / 1000)}k of ${Math.round(e.contextWindow / 1000)}k) · `
+                      : ''}
+                    {Math.round((e.durationMs ?? 0) / 1000)}s · {e.numTurns ?? '?'} turns
                   </span>
                 )}
               </div>

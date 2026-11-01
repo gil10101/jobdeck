@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
-import type { EmailFilter, EmailMessage } from '@shared/types'
+import type { EmailClassification, EmailFilter, EmailInvite, EmailMessage, EmailSuggestion } from '@shared/types'
 
 // Header/snippet cache for synced Gmail messages, in the app-data dir (0600 —
 // mail is personal and must never land in the workspace agents can read; the
@@ -17,6 +17,10 @@ interface EmailCacheFile {
   messages: EmailMessage[]
   lastSyncAt: string | null
   customTags?: string[]
+  /** Stamp of the FIRST completed calendar backfill sweep; null = not yet run. */
+  calendarBackfillAt?: string | null
+  /** Sweep version that completed; a bumped code version re-runs the sweep. */
+  calendarBackfillVersion?: number
 }
 
 function cacheFile(): string {
@@ -32,13 +36,17 @@ function load(): EmailCacheFile {
     cache = {
       messages: Array.isArray(parsed.messages) ? parsed.messages : [],
       lastSyncAt: parsed.lastSyncAt ?? null,
-      customTags: Array.isArray(parsed.customTags) ? parsed.customTags : []
+      customTags: Array.isArray(parsed.customTags) ? parsed.customTags : [],
+      calendarBackfillAt: parsed.calendarBackfillAt ?? null,
+      calendarBackfillVersion:
+        typeof parsed.calendarBackfillVersion === 'number' ? parsed.calendarBackfillVersion : undefined
     }
     // Migrations for per-message user state added after first release.
     for (const m of cache.messages) {
       m.favorite ??= false
       m.hidden ??= false
       m.tags ??= []
+      m.invite ??= null
     }
   } catch {
     cache = { messages: [], lastSyncAt: null, customTags: [] }
@@ -58,6 +66,27 @@ export function lastSyncAt(): string | null {
   return load().lastSyncAt
 }
 
+export function calendarBackfillAt(): string | null {
+  return load().calendarBackfillAt ?? null
+}
+
+/** Completed sweep version: 0 = never ran; a stamp without a version is the
+ *  pre-versioning sweep (1). */
+export function calendarBackfillVersion(): number {
+  const store = load()
+  return store.calendarBackfillVersion ?? (store.calendarBackfillAt ? 1 : 0)
+}
+
+/** Stamped after a COMPLETED backfill sweep — an interrupted sweep must retry.
+ *  The time stamp is pinned to the FIRST completion: repairDetectedYears
+ *  scopes to events minted before it, and a re-sweep must not widen that. */
+export function markCalendarBackfill(version: number): void {
+  const store = load()
+  store.calendarBackfillAt ??= new Date().toISOString()
+  store.calendarBackfillVersion = version
+  persist()
+}
+
 /** Every cached message, newest first — sync reconciliation needs hidden mail
  *  (or it would refetch it forever). Every other consumer must filter hidden
  *  out: the user hides mail to correct misclassification, so hidden means
@@ -66,17 +95,42 @@ export function allCachedMessages(): EmailMessage[] {
   return [...load().messages].sort((a, b) => b.date.localeCompare(a.date))
 }
 
-/** Newest first; 'job' = job-search-query matches, 'primary' = Gmail's
- *  Primary sweep, 'starred'/'hidden' = the user's own sets. Hidden messages
- *  only ever appear under 'hidden'. */
+/** Time-sensitive job actions float to the top of the starred/all
+ *  lists so a deadline is never buried under newer mail. Lower rank = higher.
+ *  Only recent, still-actionable items are pinned — an assessment handled
+ *  weeks ago drops back to date order. The Job list opts out: it reads
+ *  strictly newest-first. */
+const PRIORITY: Record<string, number> = { assessment: 0, interview: 1, offer: 2 }
+const PIN_WINDOW_MS = 21 * 24 * 60 * 60 * 1000
+
+function priorityRank(m: EmailMessage): number {
+  const base = PRIORITY[m.classification]
+  if (base === undefined) return 9
+  if (m.suggestionState === 'applied' || m.suggestionState === 'dismissed') return 9
+  if (Date.now() - new Date(m.date).getTime() > PIN_WINDOW_MS) return 9
+  return base
+}
+
+/** Priority first (time-sensitive on top), then newest within each tier. */
+function prioritize(list: EmailMessage[]): EmailMessage[] {
+  return [...list].sort((a, b) => priorityRank(a) - priorityRank(b) || b.date.localeCompare(a.date))
+}
+
+/** 'job' = job-search-query matches, 'primary' = Gmail's Primary sweep —
+ *  both in strict date order. 'starred'/'hidden' = the user's own sets.
+ *  Hidden messages only ever appear under 'hidden'. Assessment/interview/
+ *  offer mail is pinned to the top only in the starred and all lists. */
 export function listCachedMessages(filter: EmailFilter): EmailMessage[] {
   const all = allCachedMessages()
   if (filter === 'hidden') return all.filter((m) => m.hidden)
   const visible = all.filter((m) => !m.hidden)
+  // Job and Primary read strictly newest-first: both tabs are triaged
+  // chronologically, and pinned weeks-old interview mail buries what just
+  // arrived.
   if (filter === 'job') return visible.filter((m) => m.jobRelated)
   if (filter === 'primary') return visible.filter((m) => m.primary)
-  if (filter === 'starred') return visible.filter((m) => m.favorite)
-  return visible
+  if (filter === 'starred') return prioritize(visible.filter((m) => m.favorite))
+  return prioritize(visible)
 }
 
 export function getCachedMessage(id: string): EmailMessage | null {
@@ -117,6 +171,42 @@ export function updateMessage(
   }
   persist()
   return msg
+}
+
+/** Overwrite the derived fields (classification/job-related/suggestion) of one
+ *  cached message — used when a full-body reclassification supersedes the
+ *  snippet-based one made at sync. No-op for an unknown id; returns whether
+ *  anything actually changed. User state (star/hide/tags) is untouched.
+ *  `invite` undefined = leave the stored invite alone (the caller had no ICS
+ *  part to judge from); null/value = overwrite. */
+export function applyReclassification(
+  id: string,
+  fields: {
+    classification: EmailClassification
+    jobRelated: boolean
+    suggestion: EmailSuggestion | null
+    suggestionState: EmailMessage['suggestionState']
+    invite?: EmailInvite | null
+  }
+): boolean {
+  const msg = load().messages.find((m) => m.id === id)
+  if (!msg) return false
+  const inviteChanged =
+    fields.invite !== undefined && JSON.stringify(msg.invite ?? null) !== JSON.stringify(fields.invite)
+  const changed =
+    inviteChanged ||
+    msg.classification !== fields.classification ||
+    msg.jobRelated !== fields.jobRelated ||
+    msg.suggestionState !== fields.suggestionState ||
+    JSON.stringify(msg.suggestion) !== JSON.stringify(fields.suggestion)
+  if (!changed) return false
+  msg.classification = fields.classification
+  msg.jobRelated = fields.jobRelated
+  msg.suggestion = fields.suggestion
+  msg.suggestionState = fields.suggestionState
+  if (fields.invite !== undefined) msg.invite = fields.invite
+  persist()
+  return true
 }
 
 function normalizeTag(name: string): string {

@@ -1,30 +1,58 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeft, ArrowRight, Check, Upload } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, FolderDown, Upload, X } from 'lucide-react'
 import type { ProfileFile } from '@shared/profile'
-import type { RunMeta } from '@shared/types'
+import type { FolderEntry, RunMeta } from '@shared/types'
 import { call, onPush } from '../../api'
 import { useApp } from '../../store'
+import PrereqPanel from '../../components/PrereqPanel'
+import ProviderStep from './ProviderStep'
 import ProfileEditor from '../../components/profile/ProfileEditor'
 import GapAnswers from '../../components/profile/GapAnswers'
 
-type Step = 'workspace' | 'sources' | 'extract' | 'review' | 'done'
+type Step = 'workspace' | 'model' | 'sources' | 'extract' | 'review' | 'done'
+
+/** IPC rejections arrive as Error — show the message, not "Error: message". */
+function errText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
 
 /**
- * First-run setup: workspace → feed the agent everything → extracted profile
- * → review → go. Mirrors the repo's /setup flow, in-app.
+ * First-run setup: workspace → model backend → feed the agent everything →
+ * extracted profile → review → go. The only path that creates a workspace and
+ * a profile. The model step sits after the workspace (settings:* and provider:*
+ * exist only once it booted) and before extraction (the first agent run), so
+ * every later screen can describe the backend the user actually chose.
  */
 export default function OnboardingWizard(): JSX.Element {
   const config = useApp((s) => s.config)
   const toast = useApp((s) => s.toast)
-  const [step, setStep] = useState<Step>(config?.workspacePath ? 'sources' : 'workspace')
+  const [step, setStep] = useState<Step>(config?.workspacePath ? 'model' : 'workspace')
   const [busy, setBusy] = useState(false)
-  const [uploadNames, setUploadNames] = useState<string[]>([])
+  // What is actually in uploads/ — read from disk, so files added before a
+  // relaunch, a Back, or in an earlier attempt are shown (and removable)
+  // rather than silently fed to the extraction.
+  const [uploads, setUploads] = useState<FolderEntry[]>([])
+  // A profile saved in an earlier pass (setup quit before "Start", or setup
+  // re-run from Settings) is offered instead of being silently overwritten.
+  const [existingProfile, setExistingProfile] = useState<ProfileFile | null>(null)
+  const materialRev = useApp((s) => s.materialRev)
   const [pasteText, setPasteText] = useState('')
   const [run, setRun] = useState<RunMeta | null>(null)
   const [runStatusLine, setRunStatusLine] = useState('starting…')
   const [draft, setDraft] = useState<ProfileFile | null>(null)
   const [gapAnswers, setGapAnswers] = useState<Record<string, string>>({})
   const [runPurpose, setRunPurpose] = useState<'extract' | 'refine'>('extract')
+  const [restartNeeded, setRestartNeeded] = useState(false)
+
+  const workspaceLive = !!config?.workspacePath
+  useEffect(() => {
+    if (!workspaceLive) return
+    void call('library:listUploads', undefined).then(setUploads).catch(() => undefined)
+  }, [workspaceLive, materialRev, step])
+  useEffect(() => {
+    if (!workspaceLive) return
+    void call('profile:get', undefined).then(setExistingProfile).catch(() => undefined)
+  }, [workspaceLive, materialRev])
 
   // ---- extract/refine run watcher ----
   useEffect(() => {
@@ -63,11 +91,49 @@ export default function OnboardingWizard(): JSX.Element {
         title: 'Choose (or create) an empty folder for your workspace'
       })
       if (!path) return
-      await call('workspace:create', { dir: path })
-      await useApp.getState().refreshConfig()
-      setStep('sources')
+      const res = await call('workspace:create', { dir: path })
+      if (res.restartRequired) {
+        setRestartNeeded(true)
+        return
+      }
+      // A full hydrate, not piecemeal refreshes: adopting a folder that already
+      // holds a profile ends setup right here (the gate in App flips), and the
+      // main UI must arrive with every slice loaded. The boot also registered
+      // settings:* and provider:*, which the model step reads.
+      await useApp.getState().hydrate()
+      setStep('model')
     } catch (err) {
-      toast(String(err), 'error')
+      toast(errText(err), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const importExport = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      const res = await call('workspace:import', undefined)
+      if (res.error) {
+        toast(res.error, 'error')
+        return
+      }
+      if (!res.imported) return
+      if (res.restartRequired) {
+        // Live services cannot re-root — the import goes live after a restart.
+        setRestartNeeded(true)
+        return
+      }
+      toast('Workspace imported', 'success')
+      // An archive carrying a profile has nothing left for setup to gather —
+      // asking for CVs would be asking for what was just restored.
+      if (res.hasProfile) {
+        await finish()
+        return
+      }
+      await useApp.getState().hydrate()
+      setStep('model')
+    } catch (err) {
+      toast(errText(err), 'error')
     } finally {
       setBusy(false)
     }
@@ -76,13 +142,22 @@ export default function OnboardingWizard(): JSX.Element {
   // ---- step: sources ----
   const upload = async (): Promise<void> => {
     try {
-      const { added, names } = await call('library:upload', undefined)
+      const { added } = await call('library:upload', undefined)
       if (added) {
-        setUploadNames((prev) => [...prev, ...names])
+        setUploads(await call('library:listUploads', undefined))
         toast(`${added} file${added === 1 ? '' : 's'} added to your library`, 'success')
       }
     } catch (err) {
-      toast(String(err), 'error')
+      toast(errText(err), 'error')
+    }
+  }
+
+  const removeUpload = async (name: string): Promise<void> => {
+    try {
+      const { removed } = await call('library:removeUpload', { name })
+      if (removed) setUploads((prev) => prev.filter((u) => u.name !== name))
+    } catch (err) {
+      toast(errText(err), 'error')
     }
   }
 
@@ -99,7 +174,7 @@ export default function OnboardingWizard(): JSX.Element {
       setStep('extract')
       void useApp.getState().refreshRuns()
     } catch (err) {
-      toast(String(err), 'error')
+      toast(errText(err), 'error')
     } finally {
       setBusy(false)
     }
@@ -121,7 +196,7 @@ export default function OnboardingWizard(): JSX.Element {
       setStep('extract')
       void useApp.getState().refreshRuns()
     } catch (err) {
-      toast(String(err), 'error')
+      toast(errText(err), 'error')
     } finally {
       setBusy(false)
     }
@@ -135,7 +210,7 @@ export default function OnboardingWizard(): JSX.Element {
       toast(`Profile saved: ${saved.identity.fullName}`, 'success')
       setStep('done')
     } catch (err) {
-      toast(String(err), 'error')
+      toast(errText(err), 'error')
     } finally {
       setBusy(false)
     }
@@ -148,8 +223,28 @@ export default function OnboardingWizard(): JSX.Element {
     await useApp.getState().hydrate()
   }
 
-  const stepIndex: Record<Step, number> = { workspace: 0, sources: 1, extract: 2, review: 3, done: 4 }
-  const labels = ['Workspace', 'Your material', 'Extract', 'Review', 'Done']
+  // Skipping is always allowed and never final: say where setup lives now.
+  const skip = async (): Promise<void> => {
+    await finish()
+    if (!existingProfile) {
+      useApp
+        .getState()
+        .toast(
+          'Setup skipped. Builds read whatever you upload in Library; build your profile anytime in Settings → Candidate profile or Who I am.',
+          'info'
+        )
+    }
+  }
+
+  const stepIndex: Record<Step, number> = {
+    workspace: 0,
+    model: 1,
+    sources: 2,
+    extract: 3,
+    review: 4,
+    done: 5
+  }
+  const labels = ['Workspace', 'Model', 'Your material', 'Extract', 'Review', 'Done']
 
   return (
     <div className="flex h-full items-center justify-center overflow-auto py-8">
@@ -177,16 +272,77 @@ export default function OnboardingWizard(): JSX.Element {
 
         {step === 'workspace' && (
           <div className="mt-6">
+            {config?.bootError && (
+              <div className="mb-4 rounded-md border border-red-900 bg-panel2 p-3 text-[11px] leading-relaxed text-red-400">
+                <AlertTriangle size={12} className="mr-1 inline" />
+                Your saved workspace could not be opened, so this session started without one:{' '}
+                {config.bootError}
+                <div className="mt-1 text-gray-400">
+                  Restore that folder and restart the app to load it, or choose it (or another
+                  folder) below.
+                </div>
+              </div>
+            )}
+            {config?.configError && (
+              <div className="mb-4 rounded-md border border-red-900 bg-panel2 p-3 text-[11px] leading-relaxed text-red-400">
+                <AlertTriangle size={12} className="mr-1 inline" />
+                Your saved settings could not be read, so this may not be a first run: {config.configError}
+                <div className="mt-1 text-gray-400">
+                  If you already have a workspace, quit and repair that file first — setting up a new
+                  one moves the unreadable copy aside and points the app at the new folder.
+                </div>
+              </div>
+            )}
             <p className="text-xs leading-relaxed text-gray-400">
               Everything — tracker, tailored documents, agent runs, your library — lives inside one
-              workspace folder you choose.
+              workspace folder you choose. Pick a folder outside this app&apos;s source checkout: it
+              will hold your profile and run transcripts.
             </p>
             <div className="mt-5 flex flex-col gap-2">
-              <button className="btn btn-primary justify-center py-2.5" disabled={busy} onClick={createWorkspace}>
+              <button
+                className="btn btn-primary justify-center py-2.5"
+                disabled={busy || restartNeeded}
+                onClick={createWorkspace}
+              >
                 Create a new workspace…
               </button>
+              <button
+                className="btn justify-center py-2.5"
+                disabled={busy || restartNeeded}
+                onClick={importExport}
+              >
+                <FolderDown size={13} /> Import an export…
+              </button>
+              <p className="text-[11px] leading-relaxed text-gray-500">
+                Moving from another machine? Import the zip made with Settings → Export workspace.
+              </p>
             </div>
+            {restartNeeded && (
+              <div className="mt-3 flex items-center gap-3 text-[11px] leading-relaxed text-amber-300">
+                <span>The new workspace opens after a restart.</span>
+                <button className="btn btn-primary" onClick={() => void call('app:relaunch', undefined)}>
+                  Restart now
+                </button>
+              </div>
+            )}
           </div>
+        )}
+
+        {step === 'model' && (
+          <>
+            <ProviderStep />
+            <div className="mt-4 flex items-center gap-2">
+              <button className="btn btn-primary" onClick={() => setStep('sources')}>
+                Continue <ArrowRight size={13} />
+              </button>
+              <span className="text-[10px] text-gray-500">
+                Nothing chosen? Continue keeps the default and Settings can change it later.
+              </span>
+              <button className="btn ml-auto text-gray-500" onClick={() => void skip()}>
+                Skip setup for now
+              </button>
+            </div>
+          </>
         )}
 
         {step === 'sources' && (
@@ -201,11 +357,32 @@ export default function OnboardingWizard(): JSX.Element {
                 <Upload size={13} /> Add files…
               </button>
             </div>
-            {uploadNames.length > 0 && (
+            {existingProfile && (
+              <div className="mt-3 rounded-md border border-edge bg-panel2 p-3 text-[11px] leading-relaxed text-gray-400">
+                This workspace already has a profile for{' '}
+                <span className="text-gray-200">{existingProfile.identity.fullName || 'you'}</span>.
+                Keep it, or extract again below to draft a replacement — nothing is saved until you
+                review it.
+                <div className="mt-2">
+                  <button className="btn btn-primary" onClick={() => setStep('done')}>
+                    Keep my profile <ArrowRight size={13} />
+                  </button>
+                </div>
+              </div>
+            )}
+            {uploads.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1">
-                {uploadNames.map((n, i) => (
-                  <span key={`${n}-${i}`} className="chip text-[10px] text-gray-300">
-                    {n}
+                {uploads.map((u) => (
+                  <span key={u.name} className="chip flex items-center gap-1 text-[10px] text-gray-300">
+                    {u.name}
+                    <button
+                      className="text-gray-500 hover:text-red-400"
+                      aria-label={`Remove ${u.name}`}
+                      title="Move to the trash — it will not be read"
+                      onClick={() => void removeUpload(u.name)}
+                    >
+                      <X size={10} />
+                    </button>
                   </span>
                 ))}
               </div>
@@ -216,15 +393,19 @@ export default function OnboardingWizard(): JSX.Element {
               value={pasteText}
               onChange={(e) => setPasteText(e.target.value)}
             />
+            <PrereqPanel />
             <div className="mt-4 flex items-center gap-2">
               <button
                 className="btn btn-primary"
-                disabled={busy || (uploadNames.length === 0 && !pasteText.trim())}
+                disabled={busy || (uploads.length === 0 && !pasteText.trim())}
                 onClick={extract}
               >
                 Extract my profile <ArrowRight size={13} />
               </button>
-              <button className="btn ml-auto text-gray-500" onClick={finish}>
+              <button className="btn" onClick={() => setStep('model')}>
+                <ArrowLeft size={13} /> Model
+              </button>
+              <button className="btn ml-auto text-gray-500" onClick={() => void skip()}>
                 Skip setup for now
               </button>
             </div>

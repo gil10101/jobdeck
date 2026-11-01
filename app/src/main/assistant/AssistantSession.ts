@@ -4,6 +4,7 @@ import type { AssistantApproval, AssistantConversation, AssistantMessage, Assist
 import { mapMessage, stamp, type PartialRunEvent } from '../agent/eventMap'
 import type { RunStore } from '../agent/runStore'
 import { REPO_ROOT } from '../paths'
+import { providerEnv, providerPromptAddendum, resolveAgentModel } from '../provider/providerRuntime'
 import type { Store } from '../store/Store'
 import type { TrackerRepo } from '../store/trackerRepo'
 import { emptyUsage, loadConversation, readMemory, saveConversation } from './conversationStore'
@@ -225,7 +226,7 @@ export class AssistantSession {
             profileChanged: () => this.deps.send('push:storeChanged', { domains: ['profile'] })
           })
         }
-      const model = this.requestedModel || this.deps.store.state.settings.model
+      const model = resolveAgentModel(this.requestedModel || this.deps.store.state.settings.model)
       const q = query({
         prompt: this.inputStream(gen),
         options: {
@@ -233,7 +234,7 @@ export class AssistantSession {
           systemPrompt: {
             type: 'preset',
             preset: 'claude_code',
-            append: this.config.systemAppend?.() ?? this.systemAppend()
+            append: (this.config.systemAppend?.() ?? this.systemAppend()) + providerPromptAddendum()
           },
           settingSources: [],
           permissionMode: 'default',
@@ -241,7 +242,7 @@ export class AssistantSession {
           canUseTool: (name, input, { signal }) => this.canUse(name, input, signal),
           abortController: controller,
           includePartialMessages: true,
-          env: { ...process.env } as Record<string, string>,
+          env: await providerEnv(),
           ...(model ? { model } : {}),
           // Revived runs (after stop(), a died query, or an app restart) resume
           // the SDK session so the model keeps the conversation's prior context;

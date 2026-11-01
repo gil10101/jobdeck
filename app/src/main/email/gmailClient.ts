@@ -1,4 +1,5 @@
 import { GMAIL_API_403_HINT, getAccessToken } from './gmailAuth'
+import { GmailHttpError } from './gmailErrors'
 
 // Thin Gmail REST client over global fetch — no googleapis dependency. All
 // calls are read-only (gmail.readonly scope) and hit gmail.googleapis.com
@@ -19,8 +20,12 @@ export interface GmailMessageMeta {
   snippet: string
 }
 
+/** Ids come from the API, the renderer, and agent tools, so they are validated
+ *  before entering a URL. Thrown as a permanent failure (the 400 Gmail itself
+ *  would answer): a malformed id can never become fetchable, so a sweep must
+ *  record it and move on rather than retry it forever. */
 function assertMessageId(id: string): void {
-  if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error(`invalid message id: ${id}`)
+  if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new GmailHttpError(400, `invalid message id: ${id}`)
 }
 
 async function gmailGet<T>(pathAndQuery: string): Promise<T> {
@@ -29,8 +34,13 @@ async function gmailGet<T>(pathAndQuery: string): Promise<T> {
     headers: { Authorization: `Bearer ${token}` }
   })
   if (!res.ok) {
-    if (res.status === 403) throw new Error(GMAIL_API_403_HINT)
-    throw new Error(`Gmail API request failed (HTTP ${res.status} ${res.statusText})`)
+    // GmailHttpError carries the status so callers can tell a message that is
+    // gone for good (404) from one worth retrying (rate limit, 5xx).
+    if (res.status === 403) throw new GmailHttpError(403, GMAIL_API_403_HINT)
+    throw new GmailHttpError(
+      res.status,
+      `Gmail API request failed (HTTP ${res.status} ${res.statusText})`
+    )
   }
   return (await res.json()) as T
 }
@@ -64,8 +74,12 @@ interface RawMessage {
 
 interface RawPart {
   mimeType?: string
+  /** Attachment filename — calendar payloads sometimes arrive as generic
+   *  application/octet-stream named *.ics. */
+  filename?: string
   headers?: { name: string; value: string }[]
-  body?: { data?: string; size?: number }
+  /** Large parts carry attachmentId instead of inline data. */
+  body?: { data?: string; size?: number; attachmentId?: string }
   parts?: RawPart[]
 }
 
@@ -101,10 +115,13 @@ function htmlToText(html: string): string {
     .replace(/<head[\s\S]*?<\/head>/gi, '')
     .replace(/<(style|script)[\s\S]*?<\/\1>/gi, '')
     .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(p|div|tr|li|h[1-6]|blockquote)>/gi, '\n')
+    .replace(/<\/(p|div|tr|li|h[1-6]|blockquote|table)>/gi, '\n')
     // Table cells: without a separator, adjacent cell texts concatenate.
     .replace(/<\/(td|th)>/gi, ' ')
-    .replace(/<[^>]+>/g, '')
+    // Strip remaining tags to a SPACE, not '': adjacent inline elements
+    // ("<span>Event Name</span><span>AI Interview</span>") would otherwise
+    // concatenate; the whitespace collapse below eats the extras.
+    .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/gi, ' ')
     .replace(/&amp;/gi, '&')
     .replace(/&lt;/gi, '<')
@@ -130,23 +147,25 @@ function looksLikeHtml(text: string): boolean {
   return (tags?.length ?? 0) >= 4
 }
 
-/** Depth-first hunt for the first part of the wanted mime type with data. */
-function findPart(part: RawPart | undefined, mimeType: string): string | null {
+/** Depth-first hunt for the first part passing `match`. */
+function findPartBy(part: RawPart | undefined, match: (part: RawPart) => boolean): RawPart | null {
   if (!part) return null
-  if (part.mimeType === mimeType && part.body?.data) return part.body.data
+  if (match(part)) return part
   for (const child of part.parts ?? []) {
-    const hit = findPart(child, mimeType)
+    const hit = findPartBy(child, match)
     if (hit) return hit
   }
   return null
 }
 
-/** Full body as plain text (text/plain part, else stripped text/html). A
- *  text/plain part that is secretly HTML gets stripped too, so the Email tab
- *  and the assistant's get_email never render raw markup. */
-export async function getMessageBody(id: string): Promise<string> {
-  assertMessageId(id)
-  const msg = await gmailGet<RawMessage>(`/messages/${id}?format=full`)
+function findPart(part: RawPart | undefined, mimeType: string): string | null {
+  return findPartBy(part, (p) => p.mimeType === mimeType && !!p.body?.data)?.body?.data ?? null
+}
+
+/** Body as plain text (text/plain part, else stripped text/html). A text/plain
+ *  part that is secretly HTML gets stripped too, so the Email tab and the
+ *  assistant's get_email never render raw markup. */
+function extractText(msg: RawMessage): string {
   const plain = findPart(msg.payload, 'text/plain')
   if (plain) {
     const text = decodeBody(plain)
@@ -155,4 +174,53 @@ export async function getMessageBody(id: string): Promise<string> {
   const html = findPart(msg.payload, 'text/html')
   if (html) return htmlToText(decodeBody(html)).slice(0, BODY_CHAR_CAP)
   return msg.snippet ?? ''
+}
+
+export async function getMessageBody(id: string): Promise<string> {
+  assertMessageId(id)
+  const msg = await gmailGet<RawMessage>(`/messages/${id}?format=full`)
+  return extractText(msg)
+}
+
+/** Calendar part: text/calendar / application/ics mime type at any depth, or
+ *  any attachment named *.ics regardless of type (Outlook forwards and ATS
+ *  tooling ship those as application/octet-stream). */
+function isCalendarPart(p: RawPart): boolean {
+  const mt = p.mimeType?.toLowerCase() ?? ''
+  if (mt.startsWith('text/calendar') || mt === 'application/ics') return true
+  return p.filename?.toLowerCase().endsWith('.ics') ?? false
+}
+
+function assertAttachmentId(attachmentId: string): void {
+  if (!/^[A-Za-z0-9_-]+$/.test(attachmentId)) {
+    throw new Error(`invalid attachment id: ${attachmentId}`)
+  }
+}
+
+/** One format=full fetch yielding body text plus the raw ICS payload. A
+ *  calendar part delivered by reference (body.attachmentId, no inline data)
+ *  costs one extra attachments.get — same base64url payload. */
+export async function getMessageFull(id: string): Promise<{ text: string; ics: string | null }> {
+  assertMessageId(id)
+  const msg = await gmailGet<RawMessage>(`/messages/${id}?format=full`)
+  const part = findPartBy(
+    msg.payload,
+    (p) => isCalendarPart(p) && (!!p.body?.data || !!p.body?.attachmentId)
+  )
+  let ics: string | null = null
+  if (part?.body?.data) {
+    ics = decodeBody(part.body.data)
+  } else if (part?.body?.attachmentId) {
+    try {
+      assertAttachmentId(part.body.attachmentId)
+      const att = await gmailGet<{ data?: string }>(
+        `/messages/${id}/attachments/${part.body.attachmentId}`
+      )
+      if (att.data) ics = decodeBody(att.data)
+    } catch (err) {
+      // A lost invite must be visible in logs — but never fail the body fetch.
+      console.error('[email] ICS attachment fetch failed:', err)
+    }
+  }
+  return { text: extractText(msg), ics }
 }

@@ -1,38 +1,43 @@
-import type { EmailClassification, EmailMessage, EmailSuggestion, StatusKey, TrackerRow } from '@shared/types'
+import { BrowserWindow, Notification } from 'electron'
+import type { EmailClassification, EmailInvite, EmailMessage, EmailSuggestion, StatusKey, TrackerRow } from '@shared/types'
 import type { Store } from '../store/Store'
 import type { TrackerRepo } from '../store/trackerRepo'
+import { listEvents, proposeEvent, proposedCount, updateEvent } from '../calendar/calendarStore'
 import { gmailConfigured } from './gmailAuth'
-import { getMessageMeta, listMessages, type GmailMessageMeta } from './gmailClient'
-import { allCachedMessages, openSuggestionCount, upsertMessages } from './emailStore'
+import { getMessageFull, getMessageMeta, listMessages, type GmailMessageMeta } from './gmailClient'
+import { icsDedupeKey, parseIcs } from './icsParse'
+import { extractEvent } from './eventExtract'
+import { isPermanentFetchFailure } from './gmailErrors'
+import {
+  ASSESSMENT_DOMAINS,
+  ATS_DOMAINS,
+  classifyEmail,
+  deriveJobRelated,
+  fromDomainMatch,
+  reviseJobRelated
+} from './emailClassify'
+import {
+  allCachedMessages,
+  applyReclassification,
+  calendarBackfillAt,
+  calendarBackfillVersion,
+  getCachedMessage,
+  markCalendarBackfill,
+  openSuggestionCount,
+  upsertMessages
+} from './emailStore'
 
 // Main-process poll loop (TodoWatcher sibling): every N minutes pull
 // job-search-shaped mail + Primary-category and recent-inbox sweeps, classify
 // deterministically, and propose tracker status updates. Suggestions are
 // one-click by default; they are auto-applied ONLY behind settings.emailAutoApply.
 
-/** Coding-assessment platforms — mail from these IS the assessment. */
-const ASSESSMENT_DOMAINS = [
-  'hackerrank.com',
-  'codility.com',
-  'codesignal.com',
-  'karat.com',
-  'hirevue.com',
-  'testgorilla.com'
-]
-/** ATS notification senders — always job mail, but the subject picks the class. */
-const ATS_DOMAINS = [
-  'greenhouse.io',
-  'lever.co',
-  'ashbyhq.com',
-  'myworkday.com',
-  'icims.com',
-  'smartrecruiters.com'
-]
-
 /** Job-search mail, ~30 days back: subject terms OR a known assessment/ATS
- *  sender — assessment invites often carry no keyword in the subject at all. */
+ *  sender — assessment invites often carry no keyword in the subject at all.
+ *  Bare "offer" is deliberately absent (it pulled in retail "50% off" promos);
+ *  only "job offer"/"offer letter" qualify. */
 const JOB_QUERY =
-  'newer_than:30d (subject:(application OR applied OR applying OR interview OR assessment OR offer OR OA OR HackerRank OR Codility OR CodeSignal OR "take-home" OR "coding challenge" OR "online assessment" OR "next steps" OR "technical screen" OR invitation OR "complete your" OR schedule OR candidacy OR recruiter)' +
+  'newer_than:30d (subject:(application OR applied OR applying OR interview OR assessment OR "job offer" OR "offer letter" OR OA OR HackerRank OR Codility OR CodeSignal OR "take-home" OR "coding challenge" OR "online assessment" OR "personality assessment" OR "next steps" OR "technical screen" OR "phone screen" OR "phone conversation" OR invitation OR availability OR "complete your" OR schedule OR candidacy OR recruiter)' +
   ` OR from:(${[...ASSESSMENT_DOMAINS, ...ATS_DOMAINS].join(' OR ')}))`
 /** The "Primary" toggle set: Gmail's Primary category, recent. */
 const PRIMARY_QUERY = 'category:primary newer_than:7d'
@@ -43,47 +48,26 @@ const FETCH_CONCURRENCY = 5
 const MIN_POLL_MINUTES = 1
 const MAX_POLL_MINUTES = 120
 
-/** True when any address in the From header sits on (a subdomain of) one of
- *  `domains` — assessment invites often come from a mail.* subdomain. */
-function fromDomainMatch(from: string, domains: string[]): boolean {
-  const hosts = [...from.toLowerCase().matchAll(/@([a-z0-9-][a-z0-9.-]*)/g)].map((m) => m[1])
-  return hosts.some((h) => domains.some((d) => h === d || h.endsWith(`.${d}`)))
+/** OS-toast-worthy classes; everything else stays ambient in the tab. */
+const NOTIFY_CLASSES: EmailClassification[] = ['interview', 'assessment', 'offer']
+const NOTIFY_TITLES: Partial<Record<EmailClassification, string>> = {
+  interview: 'Interview email',
+  assessment: 'Assessment email',
+  offer: 'Offer email'
 }
-
-/** Deterministic classification from headers (+ snippet for the two classes
- *  whose subjects are usually generic, e.g. "Update on your application").
- *  Order matters: assessment invites mention interviews, rejections mention
- *  everything — most specific signals first. Assessment-platform senders are
- *  'assessment' outright; ATS senders fall through the subject rules first,
- *  then default by whether the subject mentions the application. */
-export function classifyEmail(from: string, subject: string, snippet: string): EmailClassification {
-  const s = subject
-  if (
-    /assessment|hackerrank|codility|codesignal|coding (challenge|test|exercise)|take[- ]home|\boa\b/i.test(s) ||
-    fromDomainMatch(from, ASSESSMENT_DOMAINS)
-  ) {
-    return 'assessment'
-  }
-  if (/offer letter|job offer|offer of employment|pleased to (extend|offer)|your offer/i.test(s)) {
-    return 'offer'
-  }
-  const rejection =
-    /unfortunately|we regret|not (be )?(moving|proceeding) forward|other candidates|not (been )?selected|no longer under consideration|pursue other (applicants|candidates)|position has been filled/i
-  if (rejection.test(s) || rejection.test(snippet)) return 'rejection'
-  if (/interview|technical screen|phone screen|screening call|next steps|invitation|schedule (a|your) (call|chat|conversation|meeting)|your availability|meet the team/i.test(s)) {
-    return 'interview'
-  }
-  const confirmation =
-    /application (was |has been )?(received|submitted)|(thank you|thanks) for (applying|your application)|we('ve| have) received your application|application confirmation|successfully (applied|submitted)/i
-  if (confirmation.test(s) || confirmation.test(snippet)) return 'confirmation'
-  if (fromDomainMatch(from, ATS_DOMAINS)) {
-    return /application/i.test(s) ? 'confirmation' : 'other'
-  }
-  if (/recruit|talent acquisition|sourcing|hiring team/i.test(from) || /\b(opportunity|opening|role at|position at)\b/i.test(s)) {
-    return 'recruiter'
-  }
-  return 'other'
-}
+/** Backfills (first sync, cache wipe) pull weeks of old mail — only messages
+ *  this recent are news worth a toast. */
+const NOTIFY_WINDOW_MS = 48 * 60 * 60 * 1000
+/** Individual toasts per sync pass; the overflow collapses into one summary. */
+const NOTIFY_MAX_PER_SYNC = 3
+/** Backfill sweep bounds: recent job mail only, hard-capped so the one-time
+ *  pass stays a bounded number of Gmail fetches. */
+const BACKFILL_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
+const BACKFILL_MAX = 60
+/** Bump when an extraction fix must re-sweep already-stamped caches — the
+ *  stamp alone would leave mail cached under the buggy code unhealed forever.
+ *  v2: message-date clock, direct-recruiter body classification, ICS refetch. */
+const BACKFILL_VERSION = 2
 
 /** Lowercase, punctuation → spaces, collapsed — the comparable form. */
 function normalizeText(text: string): string {
@@ -102,18 +86,17 @@ const SUGGEST_STATUS: Partial<Record<EmailClassification, StatusKey>> = {
 }
 
 /** Tracker match: normalized company name (≥ 4 chars — "hp" would match half
- *  the inbox) contained token-aligned in From+Subject; longest match wins.
- *  Confirmations only ever suggest applied from not_applied, and a suggestion
- *  matching the row's current status is noise, not news. */
-export function suggestForMessage(
-  classification: EmailClassification,
+ *  the inbox) contained token-aligned in From+Subject+snippet; longest match
+ *  wins. The snippet is searched because ATS mail (Lever/Greenhouse) hides the
+ *  company in the body, not the from-address or subject, so a rejection like
+ *  "...role at Acme" only matches once the body text is in scope. */
+export function matchTrackerRow(
   from: string,
   subject: string,
+  snippet: string,
   rows: TrackerRow[]
-): EmailSuggestion | null {
-  const status = SUGGEST_STATUS[classification]
-  if (!status) return null
-  const haystack = ` ${normalizeText(`${from} ${subject}`)} `
+): TrackerRow | null {
+  const haystack = ` ${normalizeText(`${from} ${subject} ${snippet}`)} `
   let best: TrackerRow | null = null
   let bestLen = 0
   for (const row of rows) {
@@ -123,10 +106,54 @@ export function suggestForMessage(
     best = row
     bestLen = needle.length
   }
+  return best
+}
+
+/** Status suggestion for one message (matchTrackerRow picks the row).
+ *  Confirmations only ever suggest applied from not_applied, and a suggestion
+ *  matching the row's current status is noise, not news. */
+export function suggestForMessage(
+  classification: EmailClassification,
+  from: string,
+  subject: string,
+  snippet: string,
+  rows: TrackerRow[]
+): EmailSuggestion | null {
+  const status = SUGGEST_STATUS[classification]
+  if (!status) return null
+  const best = matchTrackerRow(from, subject, snippet, rows)
   if (!best) return null
   if (classification === 'confirmation' && best.statusKey !== 'not_applied') return null
   if (best.statusKey === status) return null
   return { rowId: best.id, company: best.company, suggestStatus: status }
+}
+
+/** Subject minus leading Re:/Fwd: runs — the event-title fallback when an
+ *  invite carries no SUMMARY. */
+function cleanSubject(subject: string): string {
+  return subject.replace(/^\s*(?:(?:re|fwd?|fw)\s*:\s*)+/i, '').trim() || 'Interview'
+}
+
+/** parseIcs with failures surfaced: a throwing or VEVENT-less ICS part must be
+ *  visible in logs, not silently degrade to text detection. */
+function parseIcsLogged(raw: string, messageId: string): ReturnType<typeof parseIcs> {
+  try {
+    const parsed = parseIcs(raw)
+    if (!parsed) console.error(`[email] ICS part had no VEVENT (message ${messageId})`)
+    return parsed
+  } catch (err) {
+    console.error(`[email] ICS parse failed (message ${messageId}):`, err)
+    return null
+  }
+}
+
+/** Bring the app forward from an OS notification click. */
+function focusMainWindow(): void {
+  const win = BrowserWindow.getAllWindows()[0]
+  if (!win) return
+  if (win.isMinimized()) win.restore()
+  win.show()
+  win.focus()
 }
 
 async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
@@ -150,6 +177,9 @@ export class EmailSync {
   // Bumped on stop(): a sync already in flight must not write its results
   // after sign-out, or it would resurrect the cache clearEmailCache wiped.
   private generation = 0
+  // Messages the calendar backfill can never fetch (deleted server-side): they
+  // are dropped from the sweep instead of blocking its completion stamp.
+  private backfillSkips = new Set<string>()
 
   constructor(private deps: EmailSyncDeps) {
     // Interval changes land immediately, not after the old interval elapses.
@@ -188,6 +218,8 @@ export class EmailSync {
     this.generation++
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
+    // Sign-out wipes the cache; message ids must not outlive the account.
+    this.backfillSkips.clear()
   }
 
   private schedule(): void {
@@ -237,8 +269,59 @@ export class EmailSync {
       const autoApply = this.deps.store.state.settings.emailAutoApply
       const batch: EmailMessage[] = []
 
-      for (const meta of metas) {
-        batch.push(this.buildMessage(meta, jobIds.has(meta.id), primaryIds.has(meta.id), rows))
+      // Classify job mail from the FULL body, not just the snippet: the
+      // decisive line often sits past Gmail's ~200-char preview ("we have
+      // decided not to move forward..."). Only job-sweep or ATS/assessment
+      // senders get a body fetch, so the extra calls stay bounded; the body is
+      // used for classification then discarded (never cached — mail bodies
+      // must not touch disk).
+      const bodyWorthy = (m: GmailMessageMeta): boolean => {
+        if (jobIds.has(m.id) || fromDomainMatch(m.from, [...ATS_DOMAINS, ...ASSESSMENT_DOMAINS])) {
+          return true
+        }
+        // Direct recruiter mail outside the job sweep: a snippet that already
+        // reads as interview/assessment gets the full body too — the decisive
+        // date/time usually sits past the ~200-char snippet boundary.
+        const cls = classifyEmail(m.from, m.subject, m.snippet)
+        return cls === 'interview' || cls === 'assessment'
+      }
+      const bodies = new Map<string, { text: string; ics: string | null }>()
+      await mapLimit(
+        metas.filter(bodyWorthy),
+        FETCH_CONCURRENCY,
+        async (m) => {
+          try {
+            bodies.set(m.id, await getMessageFull(m.id))
+          } catch {
+            /* fall back to the snippet for classification */
+          }
+        }
+      )
+      if (gen !== this.generation) return { fetched: 0 }
+
+      // `fresh` = genuinely new messages only — notifications and calendar
+      // proposals must never fire from the re-list heal loop below. Oldest
+      // first: when an invite and its update/cancel land in one pass (first
+      // sync backfill, reschedule within a poll interval), the chronologically
+      // latest REQUEST/CANCEL for a UID must be the one applied last.
+      const fresh: EmailMessage[] = []
+      let calendarChanged = false
+      for (const meta of [...metas].sort((a, b) => Date.parse(a.date) - Date.parse(b.date))) {
+        const full = bodies.get(meta.id)
+        const msg = this.buildMessage(
+          meta,
+          jobIds.has(meta.id),
+          primaryIds.has(meta.id),
+          rows,
+          full?.text
+        )
+        const parsed = full?.ics ? parseIcsLogged(full.ics, meta.id) : null
+        msg.invite = parsed?.invite ?? null
+        if (this.proposeFromMessage(msg, parsed, full?.text ?? meta.snippet, rows)) {
+          calendarChanged = true
+        }
+        fresh.push(msg)
+        batch.push(msg)
       }
       // Re-listed known messages: refresh the job/primary flags (a message can
       // enter either set later; caches from before the primary flag existed
@@ -247,15 +330,34 @@ export class EmailSync {
       for (const id of wantedIds) {
         const known = cached.get(id)
         if (!known) continue
-        const jobRelated = known.jobRelated || jobIds.has(id)
         const inPrimary = known.primary === true || primaryIds.has(id)
+        // Classification was set at ingest from the full body; the body is not
+        // cached, so re-deriving here (snippet only) would DOWNGRADE a
+        // body-detected rejection back to "other". Keep the stored class; a
+        // stale one heals when the message is opened (reclassifyFromBody).
+        const classification = known.classification
+        const jobRelated = reviseJobRelated(
+          known.from,
+          known.subject,
+          known.snippet,
+          jobIds.has(id),
+          classification,
+          matchTrackerRow(known.from, known.subject, known.snippet, rows) !== null,
+          known.jobRelated
+        )
         let { suggestion, suggestionState } = known
         if (suggestionState === 'open' || suggestionState === null) {
           // Hidden = the user says the classifier got this one wrong, so never
           // hold a suggestion on it. Unhiding re-derives on the next sync.
-          suggestion = known.hidden
-            ? null
-            : suggestForMessage(known.classification, known.from, known.subject, rows)
+          if (known.hidden) {
+            suggestion = null
+          } else {
+            // Re-match against the current tracker (rows change over time). But
+            // don't drop an existing open suggestion just because the company
+            // lives in the body we no longer have — keep the ingest match.
+            const rematch = suggestForMessage(classification, known.from, known.subject, known.snippet, rows)
+            suggestion = rematch ?? (suggestionState === 'open' ? suggestion : null)
+          }
           suggestionState = suggestion ? 'open' : null
         }
         const changed =
@@ -263,7 +365,9 @@ export class EmailSync {
           inPrimary !== known.primary ||
           suggestionState !== known.suggestionState ||
           JSON.stringify(suggestion) !== JSON.stringify(known.suggestion)
-        if (changed) batch.push({ ...known, jobRelated, primary: inPrimary, suggestion, suggestionState })
+        if (changed) {
+          batch.push({ ...known, jobRelated, primary: inPrimary, suggestion, suggestionState })
+        }
       }
 
       if (autoApply) {
@@ -293,20 +397,116 @@ export class EmailSync {
       // Always upsert — an empty batch still stamps lastSyncAt.
       upsertMessages(batch)
       this.deps.send('push:emailChanged', { suggestions: openSuggestionCount() })
+      if (calendarChanged) this.deps.send('push:calendarChanged', { proposed: proposedCount() })
+      this.notifyNewMail(fresh)
+      this.repairDetectedYears()
+      await this.backfillCalendar(gen)
       return { fetched: metas.length }
     } finally {
       this.syncing = false
     }
   }
 
+  /** One-time repair for 'detected' events minted before the extraction clock
+   *  fix: missing years were resolved against the processing clock instead of
+   *  the message's own date, bumping already-past interview times a year
+   *  forward. A detected start whose year-earlier twin still sits at/after its
+   *  source message's own day can only be that spurious bump. Scoped to events
+   *  created no later than the backfill stamp; idempotent — a repaired start
+   *  fails the guard. */
+  private repairDetectedYears(): void {
+    const stamp = calendarBackfillAt()
+    if (!stamp) return
+    const byId = new Map(allCachedMessages().map((m) => [m.id, m]))
+    let changed = false
+    for (const e of listEvents()) {
+      if (e.source !== 'detected' || !e.sourceMessageId || e.createdAt > stamp) continue
+      const msg = byId.get(e.sourceMessageId)
+      if (!msg) continue
+      const start = new Date(e.start)
+      if (Number.isNaN(start.getTime())) continue
+      const shifted = new Date(start)
+      shifted.setUTCFullYear(shifted.getUTCFullYear() - 1)
+      const msgDay = new Date(msg.date)
+      msgDay.setUTCHours(0, 0, 0, 0)
+      if (shifted.getTime() < msgDay.getTime()) continue
+      let end = e.end
+      if (end) {
+        const endDate = new Date(end)
+        endDate.setUTCFullYear(endDate.getUTCFullYear() - 1)
+        end = endDate.toISOString()
+      }
+      // updateEvent re-arms both reminders — the moved start needs them.
+      updateEvent(e.id, { start: shifted.toISOString(), end })
+      changed = true
+    }
+    if (changed) this.deps.send('push:calendarChanged', { proposed: proposedCount() })
+  }
+
+  /** Versioned sweep: mail cached before calendar extraction existed (or under
+   *  a since-fixed extraction, per BACKFILL_VERSION) never proposed events.
+   *  Refetch full bodies for recent job mail, re-run classification + invite
+   *  parsing through reclassifyFromBody (which also proposes), then stamp the
+   *  cache with the current version so the sweep never repeats until the next
+   *  bump. Only a TRANSIENT failure (rate limit, 5xx, network) withholds the
+   *  stamp, so an interrupted sweep retries on the next sync. A message that is
+   *  permanently unfetchable — deleted server-side, malformed id — is recorded
+   *  and skipped forever: counting it would leave the sweep unstamped and
+   *  refetch every candidate body on every poll for the life of the cache. */
+  private async backfillCalendar(gen: number): Promise<void> {
+    if (calendarBackfillVersion() >= BACKFILL_VERSION) return
+    const cutoff = Date.now() - BACKFILL_WINDOW_MS
+    const candidates = allCachedMessages()
+      .filter(
+        (m) =>
+          !m.hidden &&
+          !this.backfillSkips.has(m.id) &&
+          (m.jobRelated || m.classification === 'interview' || m.classification === 'assessment') &&
+          Date.parse(m.date) >= cutoff
+      )
+      .slice(0, BACKFILL_MAX)
+    let transientFailures = 0
+    await mapLimit(candidates, FETCH_CONCURRENCY, async (m) => {
+      if (gen !== this.generation) return
+      try {
+        const { text, ics } = await getMessageFull(m.id)
+        const parsed = ics ? parseIcsLogged(ics, m.id) : null
+        if (gen !== this.generation) return
+        this.reclassifyFromBody(m.id, text, parsed ?? undefined)
+      } catch (err) {
+        // Unreadable message: keep its sync-time classification either way.
+        if (isPermanentFetchFailure(err)) {
+          console.error(`[email] calendar backfill skipping message ${m.id} for good:`, err)
+          this.backfillSkips.add(m.id)
+        } else {
+          transientFailures++
+        }
+      }
+    })
+    if (gen !== this.generation) return
+    if (transientFailures === 0) markCalendarBackfill(BACKFILL_VERSION)
+  }
+
   private buildMessage(
     meta: GmailMessageMeta,
-    jobRelated: boolean,
+    jobHit: boolean,
     primary: boolean,
-    rows: TrackerRow[]
+    rows: TrackerRow[],
+    body?: string
   ): EmailMessage {
-    const classification = classifyEmail(meta.from, meta.subject, meta.snippet)
-    const suggestion = suggestForMessage(classification, meta.from, meta.subject, rows)
+    // Classify against the body when we fetched it (job mail), else the snippet.
+    // meta.snippet is still stored for the list preview.
+    const scan = body ?? meta.snippet
+    const classification = classifyEmail(meta.from, meta.subject, scan)
+    const jobRelated = deriveJobRelated(
+      meta.from,
+      meta.subject,
+      scan,
+      jobHit,
+      classification,
+      matchTrackerRow(meta.from, meta.subject, scan, rows) !== null
+    )
+    const suggestion = suggestForMessage(classification, meta.from, meta.subject, scan, rows)
     return {
       ...meta,
       classification,
@@ -316,7 +516,167 @@ export class EmailSync {
       suggestionState: suggestion ? 'open' : null,
       favorite: false,
       hidden: false,
-      tags: []
+      tags: [],
+      invite: null
+    }
+  }
+
+  /** Calendar proposal for one NEW message. An ICS part wins over text
+   *  detection; a parsed invite proposes when the mail classified as interview
+   *  OR the ICS carries any METHOD (a real invite/cancel envelope), and it
+   *  must have a start to be schedulable. A CANCEL is terminal: it dismisses
+   *  the UID-matched event even when its own DTSTART failed to parse, and it
+   *  never falls through to text detection — the mail describes a removed
+   *  event, not a new one. Dedupe runs on icsDedupeKey, not the bare UID, so a
+   *  message scoped to one occurrence (RECURRENCE-ID) can only ever update or
+   *  cancel that occurrence — never the series it belongs to. Text detection
+   *  only runs for interview-class mail with no usable ICS event. Returns
+   *  whether the calendar store changed. */
+  private proposeFromMessage(
+    msg: EmailMessage,
+    parsed: { invite: EmailInvite; uid: string | null; recurrenceId?: string | null } | null,
+    bodyText: string,
+    rows: TrackerRow[]
+  ): boolean {
+    const match = matchTrackerRow(msg.from, msg.subject, bodyText, rows)
+    const invite = parsed?.invite ?? null
+    const dedupeKey = icsDedupeKey(parsed?.uid ?? null, parsed?.recurrenceId ?? null)
+    if (invite?.method === 'CANCEL') {
+      if (!dedupeKey) return false
+      return proposeEvent({
+        sourceMessageId: msg.id,
+        icsUid: dedupeKey,
+        title: invite.title ?? cleanSubject(msg.subject),
+        company: match?.company ?? null,
+        rowId: match?.id ?? null,
+        // The dismiss path never reads start; '' keeps the input total when
+        // the CANCEL's DTSTART is absent or unparseable.
+        start: invite.start ?? '',
+        end: invite.end,
+        location: invite.location,
+        meetLink: invite.meetLink,
+        notes: null,
+        source: 'ics',
+        cancelled: true
+      }).changed
+    }
+    if (invite?.start && (msg.classification === 'interview' || invite.method !== null)) {
+      return proposeEvent({
+        sourceMessageId: msg.id,
+        icsUid: dedupeKey,
+        title: invite.title ?? cleanSubject(msg.subject),
+        company: match?.company ?? null,
+        rowId: match?.id ?? null,
+        start: invite.start,
+        end: invite.end,
+        location: invite.location,
+        meetLink: invite.meetLink,
+        notes: null,
+        source: 'ics'
+      }).changed
+    }
+    if (msg.classification !== 'interview') return false
+    // The message's own date is the clock: a backfill processing days-old mail
+    // must not bump an already-past interview time into next year.
+    const detected = extractEvent(msg.subject, bodyText, new Date(msg.date))
+    if (!detected) return false
+    return proposeEvent({
+      sourceMessageId: msg.id,
+      icsUid: null,
+      title: detected.title,
+      company: match?.company ?? null,
+      rowId: match?.id ?? null,
+      start: detected.start,
+      end: detected.end,
+      location: null,
+      meetLink: null,
+      notes: null,
+      source: 'detected'
+    }).changed
+  }
+
+  /** OS toasts for new high-stakes mail: job mail only (the sweeps also pull
+   *  the whole recent inbox, and "let's schedule a call" from a friend
+   *  classifies as 'interview' — it must never raise an "Interview email"
+   *  toast), recent messages only (a backfill of old mail is not news), capped
+   *  per pass, overflow collapsed into one summary. A notification failure must
+   *  never fail the sync. */
+  private notifyNewMail(fresh: EmailMessage[]): void {
+    if (!this.deps.store.state.settings.emailNotifications) return
+    const now = Date.now()
+    const notable = fresh.filter(
+      (m) =>
+        m.jobRelated &&
+        NOTIFY_CLASSES.includes(m.classification) &&
+        Math.abs(now - Date.parse(m.date)) <= NOTIFY_WINDOW_MS
+    )
+    if (notable.length === 0) return
+    try {
+      if (!Notification.isSupported()) return
+      for (const m of notable.slice(0, NOTIFY_MAX_PER_SYNC)) {
+        this.showNotification(NOTIFY_TITLES[m.classification] ?? 'Job email', m.subject || m.snippet)
+      }
+      const rest = notable.length - NOTIFY_MAX_PER_SYNC
+      if (rest > 0) this.showNotification('Job email', `+${rest} more new messages`)
+    } catch (err) {
+      console.error('[email] notification failed:', err)
+    }
+  }
+
+  private showNotification(title: string, body: string): void {
+    const n = new Notification({ title, body })
+    n.on('click', () => {
+      // Mirror the reminder pattern: focus the window, then route to the view
+      // the notification is about.
+      focusMainWindow()
+      this.deps.send('push:emailFocus', {})
+    })
+    n.show()
+  }
+
+  /** Reclassify one cached message from its full body (fetched for display or
+   *  by the backfill sweep). Heals a snippet-based mis-classification,
+   *  refreshes its tracker suggestion, persists a freshly parsed invite, and
+   *  proposes a calendar event the message qualifies for — a message cached
+   *  before calendar extraction existed gets its event here. `parsed`
+   *  undefined = the caller saw no usable ICS part (a stored invite is kept
+   *  and still proposable). Applied/dismissed suggestions and hidden mail are
+   *  left alone. Pushes so lists + badges update live. */
+  reclassifyFromBody(
+    id: string,
+    body: string,
+    parsed?: { invite: EmailInvite; uid: string | null; recurrenceId?: string | null } | null
+  ): void {
+    const msg = getCachedMessage(id)
+    if (!msg || msg.hidden) return
+    const rows = this.deps.tracker.listRows()
+    const classification = classifyEmail(msg.from, msg.subject, body)
+    const jobRelated = deriveJobRelated(
+      msg.from,
+      msg.subject,
+      body,
+      msg.jobRelated,
+      classification,
+      matchTrackerRow(msg.from, msg.subject, body, rows) !== null
+    )
+    let suggestion = msg.suggestion
+    let suggestionState = msg.suggestionState
+    if (suggestionState === 'open' || suggestionState === null) {
+      suggestion = suggestForMessage(classification, msg.from, msg.subject, body, rows)
+      suggestionState = suggestion ? 'open' : null
+    }
+    const invite = parsed ? parsed.invite : undefined
+    if (applyReclassification(id, { classification, jobRelated, suggestion, suggestionState, invite })) {
+      this.deps.send('push:emailChanged', { suggestions: openSuggestionCount() })
+    }
+    const healed = getCachedMessage(id)
+    if (healed) {
+      // A stored invite without a fresh ICS part still proposes; uid null
+      // means dedupe falls back to sourceMessageId, which is stable per mail.
+      const proposable = parsed ?? (healed.invite ? { invite: healed.invite, uid: null } : null)
+      if (this.proposeFromMessage(healed, proposable, body, rows)) {
+        this.deps.send('push:calendarChanged', { proposed: proposedCount() })
+      }
     }
   }
 

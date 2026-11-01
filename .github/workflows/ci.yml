@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      # The self-tests import .ts directly and rely on node's built-in type
+      # stripping, unflagged from 22.18 and 23.6 — the floor package.json
+      # declares. Pinned rather than '22' so the job cannot start passing or
+      # failing on whatever the runner's latest 22.x happens to be.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      # Bundling catches what tsc cannot: unresolved aliases, externalized
+      # deps, and renderer imports that only fail under vite.
+      - run: npm run build
+
+      - run: npm test
+
+  # The real app driven through first run, skipping setup, uploads, workspace
+  # switching and missing-folder recovery (scripts/e2e-smoke.mjs). Separate job
+  # so a display problem on the runner never hides a unit-test result.
+  e2e:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - run: npm ci
+
+      # Electron needs a display; xvfb-run provides a virtual one.
+      - run: xvfb-run -a npm run test:e2e

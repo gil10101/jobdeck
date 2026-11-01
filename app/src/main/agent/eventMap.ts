@@ -7,6 +7,7 @@ export type PartialRunEvent =
   | { kind: 'status'; status: RunStatus }
   | { kind: 'init'; model: string; sessionId?: string }
   | { kind: 'text'; text: string; complete: boolean }
+  | { kind: 'thinking'; text: string }
   | { kind: 'tool_start'; toolUseId: string; tool: string; summary: string }
   | { kind: 'tool_end'; toolUseId: string; ok: boolean; preview: string }
   | {
@@ -37,10 +38,19 @@ function toolSummary(tool: string, input: Record<string, unknown>): string {
     case 'PowerShell':
       return truncate(str('command') || str('description'), 120)
     case 'Read':
-    case 'Write':
-    case 'Edit':
-    case 'NotebookEdit':
       return truncate(str('file_path'), 120)
+    case 'Write': {
+      // Size tells overwrite-loops apart from real progress at a glance.
+      const chars = str('content').length
+      return truncate(`${str('file_path')} · writing ${(chars / 1000).toFixed(1)}k chars`, 140)
+    }
+    case 'Edit': {
+      const from = str('old_string').length
+      const to = str('new_string').length
+      return truncate(`${str('file_path')} · replacing ${from} chars with ${to}`, 140)
+    }
+    case 'NotebookEdit':
+      return truncate(str('notebook_path') || str('file_path'), 120)
     case 'Glob':
     case 'Grep':
       return truncate(str('pattern'), 120)
@@ -48,6 +58,11 @@ function toolSummary(tool: string, input: Record<string, unknown>): string {
       return truncate(str('url'), 120)
     case 'WebSearch':
       return truncate(str('query'), 120)
+    case 'Task':
+      return truncate(str('description') || str('prompt'), 120)
+    case 'TaskCreate':
+    case 'TaskUpdate':
+      return truncate(str('subject') || str('taskId'), 120)
     default:
       try {
         return truncate(JSON.stringify(input), 120)
@@ -103,6 +118,10 @@ export function mapMessage(raw: unknown): MappedMessage {
       const btype = block.type as string
       if (type === 'assistant' && btype === 'text' && typeof block.text === 'string') {
         if (block.text.trim()) out.events.push({ kind: 'text', text: block.text, complete: true })
+      } else if (type === 'assistant' && btype === 'thinking' && typeof block.thinking === 'string') {
+        if (block.thinking.trim()) {
+          out.events.push({ kind: 'thinking', text: truncate(block.thinking, 1200) })
+        }
       } else if (type === 'assistant' && btype === 'tool_use') {
         const tool = (block.name as string) ?? 'tool'
         out.events.push({

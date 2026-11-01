@@ -8,8 +8,10 @@ import { fileURLToPath } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(__dirname, '..', '..')
 
+// The probe answers only from the prompt itself: a reply proves the SDK round
+// trip works, and settingSources omission means no instructions file is read.
 const PROMPT =
-  'Without using any tools, reply with exactly one line: the candidate email address listed in the CLAUDE.md project instructions. Nothing else.'
+  'Without using any tools, reply with exactly one line: OK. Nothing else.'
 
 const messages = []
 let finalText = ''

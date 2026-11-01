@@ -1,3 +1,4 @@
+import { BrowserWindow, dialog } from 'electron'
 import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -168,14 +169,50 @@ export function assertScoutable(): void {
   }
 }
 
-/** Run the official bun installer (bun.sh). The command is a fixed string —
- *  no caller-controlled input reaches the shell — and the installer targets
- *  ~/.bun, the first location resolveBun() probes. */
+/** The bun release this app installs. Pinned, not "latest": an unpinned
+ *  installer means the bytes executed on the user's machine change without any
+ *  change here. Bump deliberately. */
+const BUN_VERSION = '1.3.14'
+const BUN_INSTALLER_URL = 'https://bun.sh/install'
+
+/** Exact command the installer runs, shown verbatim in the consent dialog so
+ *  the user approves what actually executes. */
+function bunInstallCommand(): [string, string[], string] {
+  if (process.platform === 'win32') {
+    const script = `iex "& {$(irm ${BUN_INSTALLER_URL}.ps1)} -Version ${BUN_VERSION}"`
+    const args = ['-NoProfile', '-Command', script]
+    return ['powershell', args, `powershell ${args.join(' ')}`]
+  }
+  const script = `curl -fsSL ${BUN_INSTALLER_URL} | bash -s "bun-v${BUN_VERSION}"`
+  return ['/bin/bash', ['-c', script], script]
+}
+
+/**
+ * Run the official bun installer (bun.sh) after explicit consent. Downloading a
+ * script and executing it is the kind of thing an app must never do silently:
+ * the dialog names the URL, the pinned version and the command, and declining
+ * is the default button. The command itself is a fixed string — no
+ * caller-controlled input reaches the shell — and the installer targets ~/.bun,
+ * the first location resolveBun() probes.
+ */
 export async function installBun(): Promise<{ ok: boolean; message: string; status: BoardsStatus }> {
-  const [cmd, args] =
-    process.platform === 'win32'
-      ? ['powershell', ['-NoProfile', '-Command', 'irm bun.sh/install.ps1 | iex']]
-      : ['/bin/bash', ['-c', 'curl -fsSL https://bun.sh/install | bash']]
+  const [cmd, args, shown] = bunInstallCommand()
+  const parent = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
+  const options = {
+    type: 'warning' as const,
+    title: 'Install the bun runtime?',
+    message: `Download and run the bun ${BUN_VERSION} installer from ${BUN_INSTALLER_URL}?`,
+    detail: `This downloads a script from bun.sh and executes it with your user account. It installs bun into ~/.bun.\n\nCommand:\n${shown}\n\nOnly the job-board scout needs bun. You can install it yourself from https://bun.sh instead.`,
+    buttons: ['Cancel', 'Download and run'],
+    defaultId: 0,
+    cancelId: 0
+  }
+  const choice = parent
+    ? await dialog.showMessageBox(parent, options)
+    : await dialog.showMessageBox(options)
+  if (choice.response !== 1) {
+    return { ok: false, message: 'bun install cancelled', status: getBoardsStatus() }
+  }
   try {
     await execFileAsync(cmd, args, {
       timeout: 180_000,

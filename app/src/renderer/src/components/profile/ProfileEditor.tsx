@@ -1,3 +1,5 @@
+import { useState } from 'react'
+import { Download, Upload } from 'lucide-react'
 import type {
   BehavioralProfile,
   EducationEntry,
@@ -6,10 +8,13 @@ import type {
   Identity,
   Narrative,
   ProfileFile,
+  ProfileModuleName,
   ProjectEntry,
   SearchConfig,
   Story
 } from '@shared/profile'
+import { call } from '../../api'
+import { useApp } from '../../store'
 import {
   CheckField,
   CommaList,
@@ -63,7 +68,7 @@ export function IdentityForm({ value: p, onChange }: SectionFormProps): JSX.Elem
         />
       </div>
       <div className="mt-2">
-        <TextField label="Current status" value={p.identity.status} onChange={(v) => identity({ status: v })} placeholder="e.g. M.S. candidate, actively looking" />
+        <TextField label="Current status" value={p.identity.status} onChange={(v) => identity({ status: v })} placeholder="e.g. employed and open to offers, or actively looking" />
       </div>
       <div className="mt-2">
         <EntryList
@@ -522,7 +527,7 @@ export function CustomRulesForm({ value: p, onChange }: SectionFormProps): JSX.E
 }
 
 export interface ProfileSection {
-  key: string
+  key: ProfileModuleName
   title: string
   summary: (p: ProfileFile) => string
   defaultOpen: (p: ProfileFile) => boolean
@@ -549,6 +554,53 @@ export const PROFILE_SECTIONS: ProfileSection[] = [
   { key: 'customRules', title: 'Custom agent rules', summary: (p) => `${p.customRules.length}`, defaultOpen: () => false, Form: CustomRulesForm }
 ]
 
+const sectionTitle = (m: ProfileModuleName): string =>
+  PROFILE_SECTIONS.find((s) => s.key === m)?.title ?? m
+
+/** Side-by-side review of an imported module before anything is written. */
+function ModuleReviewDialog(props: {
+  module: ProfileModuleName
+  current: unknown
+  incoming: unknown
+  busy: boolean
+  onApply: () => void
+  onCancel: () => void
+}): JSX.Element {
+  const block = (label: string, value: unknown): JSX.Element => (
+    <div className="min-w-0">
+      <div className="text-[10px] uppercase tracking-wide text-gray-500">{label}</div>
+      <pre className="mt-1 max-h-[50vh] overflow-auto rounded-md bg-panel2 p-2 text-[10px] leading-relaxed text-gray-300">
+        {JSON.stringify(value, null, 2)}
+      </pre>
+    </div>
+  )
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60">
+      <div className="panel w-[760px] max-w-[92vw] p-5">
+        <div className="text-sm font-semibold text-gray-100">
+          Import module — {sectionTitle(props.module)}
+        </div>
+        <div className="mt-1 text-xs text-gray-400">
+          Current is the saved profile. Apply writes this section to profile.json and
+          reloads the editor — unsaved edits are discarded.
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          {block('Current', props.current)}
+          {block('Incoming', props.incoming)}
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button className="btn" onClick={props.onCancel}>
+            Cancel
+          </button>
+          <button className="btn btn-primary" disabled={props.busy} onClick={props.onApply}>
+            Apply
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /**
  * Structured, human-readable editor for the whole ProfileFile. Deeply nested
  * config (role profiles, evaluation dimensions, boards, language mapping)
@@ -559,13 +611,97 @@ export default function ProfileEditor(props: {
   value: ProfileFile
   onChange: (p: ProfileFile) => void
 }): JSX.Element {
+  const toast = useApp((s) => s.toast)
+  const [review, setReview] = useState<{
+    module: ProfileModuleName
+    current: unknown
+    incoming: unknown
+  } | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const exportModule = async (module: ProfileModuleName): Promise<void> => {
+    try {
+      // Exports the SAVED section — unsaved edits are not in the file.
+      const res = await call('profile:exportModule', { module })
+      if (!res.canceled) toast(`Exported ${sectionTitle(module)} module to ${res.path}`, 'success')
+    } catch (err) {
+      toast(String(err), 'error')
+    }
+  }
+
+  const importModule = async (): Promise<void> => {
+    try {
+      const res = await call('profile:importModule', undefined)
+      if (res.canceled) return
+      if (res.error !== null || res.module === null) {
+        toast(res.error ?? 'module file unreadable', 'error')
+        return
+      }
+      setReview({ module: res.module, current: res.current, incoming: res.incoming })
+    } catch (err) {
+      toast(String(err), 'error')
+    }
+  }
+
+  const applyReview = async (): Promise<void> => {
+    if (!review) return
+    setBusy(true)
+    try {
+      await call('profile:applyModule', { module: review.module, data: review.incoming })
+      // The apply wrote profile.json; reload so the editor shows what was saved.
+      const saved = await call('profile:get', undefined)
+      if (saved) props.onChange(saved)
+      toast(`${sectionTitle(review.module)} module applied and saved`, 'success')
+      setReview(null)
+    } catch (err) {
+      toast(String(err), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div>
       {PROFILE_SECTIONS.map(({ key, title, summary, defaultOpen, Form }) => (
-        <Section key={key} title={title} summary={summary(props.value)} defaultOpen={defaultOpen(props.value)}>
+        <Section
+          key={key}
+          title={title}
+          summary={summary(props.value)}
+          defaultOpen={defaultOpen(props.value)}
+          actions={
+            <>
+              <button
+                type="button"
+                className="p-1 text-gray-500 hover:text-cyan-300"
+                title={`Export ${title} module…`}
+                onClick={() => void exportModule(key)}
+              >
+                <Download size={12} />
+              </button>
+              <button
+                type="button"
+                className="p-1 text-gray-500 hover:text-cyan-300"
+                title="Import a profile module…"
+                onClick={() => void importModule()}
+              >
+                <Upload size={12} />
+              </button>
+            </>
+          }
+        >
           <Form value={props.value} onChange={props.onChange} />
         </Section>
       ))}
+      {review && (
+        <ModuleReviewDialog
+          module={review.module}
+          current={review.current}
+          incoming={review.incoming}
+          busy={busy}
+          onApply={() => void applyReview()}
+          onCancel={() => setReview(null)}
+        />
+      )}
     </div>
   )
 }

@@ -1,5 +1,6 @@
 import { REPO_ROOT } from '../paths'
 import { mapMessage } from '../agent/eventMap'
+import { providerEnv, resolveAgentModel } from '../provider/providerRuntime'
 
 type GlassdoorResult = { rating: number | null; url: string | null; reviewCount: number | null }
 
@@ -99,6 +100,7 @@ function coerceReviewCount(v: unknown): number | null {
 /** Run the SDK query and return the concatenated complete assistant text. */
 async function runLookup(company: string, model?: string): Promise<string> {
   const { query } = await import('@anthropic-ai/claude-agent-sdk')
+  const resolvedModel = resolveAgentModel(model)
   const q = query({
     prompt: buildPrompt(company),
     options: {
@@ -113,8 +115,8 @@ async function runLookup(company: string, model?: string): Promise<string> {
       allowedTools: ['WebSearch', 'WebFetch'],
       permissionMode: 'bypassPermissions',
       maxTurns: 6,
-      env: { ...process.env } as Record<string, string>,
-      ...(model ? { model } : {})
+      env: await providerEnv(),
+      ...(resolvedModel ? { model: resolvedModel } : {})
     }
   })
 

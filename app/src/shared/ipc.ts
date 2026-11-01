@@ -1,5 +1,6 @@
 // IPC contract — single source of truth for channel names + payload types.
 import type {
+  FolderEntry,
   ApplicationDetail,
   AppSettings,
   AssistantApproval,
@@ -9,23 +10,29 @@ import type {
   AssistantUsage,
   BoardId,
   BoardsStatus,
+  CalendarEvent,
   CandidateJob,
   CompanyInfo,
   ConversationMeta,
   CustomBoardTest,
   EmailFilter,
+  EmailInvite,
   EmailMessage,
   EmailStatus,
+  EnvCheck,
+  EnvPreflight,
   IntakeFolder,
   IntakeItem,
   LibraryCategory,
+  ProviderId,
   RunEvent,
   RunMeta,
   ScanResult,
   ScoutHistoryEntry,
+  ToolName,
   TrackerRow
 } from './types'
-import type { CustomBoard, ProfileFile } from './profile'
+import type { CustomBoard, ProfileFile, ProfileModuleName } from './profile'
 
 /** invoke/handle channels: request → response (response is wrapped in IpcResult by the registry). */
 export interface IpcInvokeContract {
@@ -54,6 +61,13 @@ export interface IpcInvokeContract {
   // Fetches a public job-posting page and builds an intake item from its
   // schema.org JobPosting JSON-LD — URL in, structured posting out.
   'intake:fromUrl': { req: { url: string }; res: IntakeItem }
+  /** Build straight from the page open in the Browser tab: the rendered DOM
+   *  (what a logged-in user sees) is parsed for a JobPosting, an intake item
+   *  is created, and a build run starts — one click, no copy-paste. */
+  'browser:buildFromPage': {
+    req: { url: string; html: string; title: string; bodyText: string }
+    res: { item: IntakeItem; run: RunMeta }
+  }
   'intake:dismiss': { req: { id: string }; res: void }
   'intake:listFolders': { req: void; res: IntakeFolder[] }
   'intake:createFolder': { req: { name: string; icon: string }; res: IntakeFolder }
@@ -71,12 +85,29 @@ export interface IpcInvokeContract {
   // <workspace>/master/knowledge/.
   'knowledge:get': {
     req: void
-    res: { notes: string; files: { name: string; sizeKb: number }[] }
+    res: { notes: string; files: FolderEntry[] }
   }
   'knowledge:setNotes': { req: { text: string }; res: void }
   /** Opens a file picker and copies the chosen files into the knowledge folder. */
   'knowledge:addFiles': { req: void; res: { added: number } }
-  'knowledge:removeFile': { req: { name: string }; res: void }
+  /** Confirms, then moves the file (or folder) to the OS trash. */
+  'knowledge:removeFile': { req: { name: string }; res: { removed: boolean } }
+  /** Whether a build can run now: 'profile' (full), 'minimal' (no profile;
+   *  builds read uploads/notes), 'blocked' (no candidate material at all). */
+  'build:readiness': {
+    req: void
+    res: { mode: 'profile' | 'minimal' | 'blocked'; message: string | null }
+  }
+  /** Files in <workspace>/uploads — the material extraction and builds read. */
+  'library:listUploads': { req: void; res: FolderEntry[] }
+  /** Confirms, then moves one upload to the OS trash. */
+  'library:removeUpload': { req: { name: string }; res: { removed: boolean } }
+  /** Workspace-relative path of the master résumé builds copy, or null. */
+  'master:getResume': { req: void; res: { relPath: string | null } }
+  /** Copy a library .tex in as the master résumé (asks before replacing one);
+   *  relPath null when the user declined. */
+  'master:setResume': { req: { relPath: string }; res: { relPath: string | null } }
+  'master:removeResume': { req: void; res: { removed: boolean } }
   'todo:rescan': { req: void; res: IntakeItem[] }
   'runs:start': {
     req: {
@@ -127,14 +158,94 @@ export interface IpcInvokeContract {
   'boards:removeCustom': { req: { id: string }; res: CustomBoard[] }
   'boards:setCustomEnabled': { req: { id: string; enabled: boolean }; res: CustomBoard[] }
   'boards:listCustom': { req: void; res: CustomBoard[] }
-  'app:info': { req: void; res: { repoRoot: string; appDataDir: string } }
-  'config:get': { req: void; res: { workspacePath: string | null; onboardedAt: string | null } }
-  'env:check': {
-    req: void
-    res: { pdflatex: { ok: boolean; path: string }; platform: string; appVersion: string }
+  /** The Glassdoor search URLs to harvest (pasted, else auto-derived). */
+  'glassdoor:searches': { req: void; res: { searches: string[]; autoDerived: boolean } }
+  /** Persist raw job JSON the browser harvested into the scout feed. */
+  'glassdoor:writeFeed': {
+    req: { searches: string[]; payloads: unknown[] }
+    res: { count: number; fetchedAt: string }
   }
+  /** Feed summary for the Settings card; null when never harvested. */
+  'glassdoor:feedStatus': { req: void; res: { count: number; fetchedAt: string; stale: boolean } | null }
+  // ---- BYO model providers (keys via safeStorage; Ollama local or cloud) ----
+  'provider:setGeminiKey': { req: { key: string }; res: { keySet: boolean } }
+  'provider:clearGeminiKey': { req: void; res: { keySet: boolean } }
+  /** ollama.com key — only needed for cloud models. */
+  'provider:setOllamaKey': { req: { key: string }; res: { keySet: boolean } }
+  'provider:clearOllamaKey': { req: void; res: { keySet: boolean } }
+  /** Key presence + live model catalogs (Gemini per-key, Ollama local/cloud). */
+  'provider:status': {
+    req: void
+    res: {
+      provider: ProviderId
+      geminiKeySet: boolean
+      geminiModels: string[]
+      ollamaKeySet: boolean
+      ollama: { reachable: boolean; models: string[]; message: string }
+    }
+  }
+  /** Metadata for one Ollama model: context ceiling + tool support. */
+  'provider:ollamaShow': {
+    req: { model: string }
+    res: { contextLength: number | null; tools: boolean | null }
+  }
+  /** Live round-trip against the active provider's backend. */
+  'provider:test': { req: void; res: { ok: boolean; message: string } }
+  'app:info': { req: void; res: { repoRoot: string; appDataDir: string } }
+  /** workspacePath is reported null when the configured workspace failed to
+   *  boot — no workspace IPC exists in that session, so the renderer must show
+   *  first-run recovery rather than an app wired to dead channels.
+   *  configError is set when config.json exists but could not be read: a null
+   *  workspacePath then means "unknown", not "first run". */
+  'config:get': {
+    req: void
+    res: {
+      workspacePath: string | null
+      onboardedAt: string | null
+      bootError: string | null
+      configError: string | null
+    }
+  }
+  /** External-tool detection (LaTeX engine + pdftotext) for the Settings rows,
+   *  plus the full host-prerequisite list the onboarding preflight renders. */
+  'env:check': { req: void; res: EnvPreflight }
+  /** Persist a manual tool path. Empty/null clears the override and falls back
+   *  to detection; a path the app cannot execute is rejected with an error. */
+  'env:setToolPath': { req: { tool: ToolName; path: string | null }; res: EnvCheck }
   'workspace:choose': { req: { title?: string }; res: { path: string | null } }
-  'workspace:create': { req: { dir: string }; res: { workspacePath: string } }
+  /** Adopt a folder as the workspace (scaffolding a fresh one). When another
+   *  workspace is already live, config is repointed and restartRequired asks
+   *  the renderer to offer app:relaunch — services never re-root in-process. */
+  'workspace:create': {
+    req: { dir: string }
+    res: { workspacePath: string; restartRequired: boolean }
+  }
+  /** Settings → Change workspace: pick, confirm, write config, restart.
+   *  switched=false when the user cancelled at any prompt. */
+  'workspace:switch': { req: void; res: { switched: boolean } }
+  /** Open the workspace folder in the OS file manager. */
+  'workspace:reveal': { req: void; res: void }
+  /** Restart the app (after an import or create that repointed config). */
+  'app:relaunch': { req: void; res: void }
+  /** Zip the whole workspace (denylist-scanned, hashed manifest) to a user-chosen
+   *  file. `skipped` counts credential files held back, so the export never
+   *  drops anything without saying so. */
+  'workspace:export': {
+    req: void
+    res: { canceled: boolean; path: string | null; files: number; skipped: number }
+  }
+  /** Restore an export into an empty folder and point config at it; live services
+   *  cannot re-root at runtime, so a successful import asks for a relaunch. */
+  'workspace:import': {
+    req: void
+    res: {
+      imported: boolean
+      error: string | null
+      restartRequired: boolean
+      /** The archive carried a profile, so setup has nothing left to ask for. */
+      hasProfile: boolean
+    }
+  }
   'app:pickFile': {
     req: { filters?: { name: string; extensions: string[] }[] }
     res: { path: string | null }
@@ -144,6 +255,28 @@ export interface IpcInvokeContract {
   'profile:draft': {
     req: { runId: string }
     res: { draft: ProfileFile | null; error: string | null }
+  }
+  /** One saved profile section as a standalone <module>.module.json envelope. */
+  'profile:exportModule': {
+    req: { module: ProfileModuleName }
+    res: { canceled: boolean; path: string | null }
+  }
+  /** Parse + validate a module file; NO write — both sides return for review. */
+  'profile:importModule': {
+    req: void
+    res: {
+      canceled: boolean
+      error: string | null
+      module: ProfileModuleName | null
+      current: unknown
+      incoming: unknown
+    }
+  }
+  /** Re-validate the reviewed section and write it through the one profile
+   *  write path (profile:save's logic), so profile.json is never written twice. */
+  'profile:applyModule': {
+    req: { module: ProfileModuleName; data: unknown }
+    res: void
   }
   'onboard:start': {
     req: {
@@ -158,6 +291,8 @@ export interface IpcInvokeContract {
   }
   'library:upload': { req: void; res: { added: number; names: string[] } }
   'onboarding:complete': { req: void; res: void }
+  /** Clear setup completion so the wizard reopens on the current workspace. */
+  'onboarding:reset': { req: void; res: void }
   'candidates:list': { req: void; res: CandidateJob[] }
   'candidates:accept': { req: { id: string }; res: { candidate: CandidateJob; run: RunMeta } }
   'candidates:reject': { req: { id: string }; res: void }
@@ -182,8 +317,17 @@ export interface IpcInvokeContract {
   'email:signIn': { req: void; res: EmailStatus }
   'email:signOut': { req: void; res: EmailStatus }
   'email:list': { req: { filter: EmailFilter }; res: EmailMessage[] }
-  /** Body text fetched live from Gmail (never cached on disk). */
-  'email:getBody': { req: { id: string }; res: { text: string } }
+  /** Body text fetched live from Gmail (never cached on disk). invite is the
+   *  parsed text/calendar metadata, null when the message carries none —
+   *  required so the handler cannot silently drop the invite-healing path. */
+  'email:getBody': { req: { id: string }; res: { text: string; invite: EmailInvite | null } }
+  /** AI-draft a reply to one message as the candidate. Read-only Gmail scope
+   *  means nothing is sent — the draft is returned for the user to copy or
+   *  open in a Gmail compose window. */
+  'email:draftReply': {
+    req: { id: string; instructions?: string }
+    res: { draft: string; to: string; subject: string }
+  }
   'email:refresh': { req: void; res: EmailStatus }
   'email:applySuggestion': { req: { emailId: string }; res: void }
   'email:dismissSuggestion': { req: { emailId: string }; res: void }
@@ -195,6 +339,38 @@ export interface IpcInvokeContract {
   /** Assignable tag names: presets plus every user-created tag. */
   'email:tags': { req: void; res: { tags: string[] } }
   'email:createTag': { req: { name: string }; res: { tags: string[]; created: string } }
+  // ---- calendar (events extracted from mail, plus manual entries) ----
+  'calendar:list': { req: void; res: CalendarEvent[] }
+  'calendar:approve': { req: { id: string }; res: CalendarEvent[] }
+  'calendar:dismiss': { req: { id: string }; res: CalendarEvent[] }
+  'calendar:remove': { req: { id: string }; res: CalendarEvent[] }
+  /** Manual entry — created directly in state 'approved'. */
+  'calendar:add': {
+    req: { title: string; start: string; end: string | null; location: string | null; notes: string | null }
+    res: CalendarEvent[]
+  }
+  'calendar:update': {
+    req: {
+      id: string
+      patch: { title?: string; start?: string; end?: string | null; location?: string | null; notes?: string | null }
+    }
+    res: CalendarEvent[]
+  }
+  /** Invite-card proposal — goes through the proposeEvent dedupe path so the
+   *  meet link and source message survive (a re-synced copy of the same mail
+   *  dedupes against them) and the event lands in state 'proposed' for review. */
+  'calendar:propose': {
+    req: {
+      sourceMessageId: string | null
+      title: string
+      start: string
+      end: string | null
+      location: string | null
+      meetLink: string | null
+      notes: string | null
+    }
+    res: CalendarEvent[]
+  }
   'assistant:send': {
     req: { conversationId: string | null; text: string; model: string | null }
     res: { conversationId: string }
@@ -221,7 +397,11 @@ export interface IpcPushContract {
   'push:runEvent': { runId: string; event: RunEvent }
   'push:runChanged': RunMeta
   'push:todoNew': IntakeItem
-  'push:storeChanged': { domains: ('rows' | 'intake' | 'settings' | 'candidates' | 'profile')[] }
+  /** 'material' = anything a build or extraction reads about the candidate
+   *  changed: uploads, knowledge base, master résumé or context. */
+  'push:storeChanged': {
+    domains: ('rows' | 'intake' | 'settings' | 'candidates' | 'profile' | 'material')[]
+  }
   'push:companiesChanged': Record<string, CompanyInfo>
   'push:assistantEvent': { conversationId: string; event: RunEvent }
   'push:assistantApproval': AssistantApproval
@@ -230,6 +410,12 @@ export interface IpcPushContract {
   'push:assistantMessage': { conversationId: string; message: AssistantMessage }
   /** After every email sync / suggestion action: open-suggestion count. */
   'push:emailChanged': { suggestions: number }
+  /** After any calendar mutation or sync proposal: proposed-event count. */
+  'push:calendarChanged': { proposed: number }
+  /** Reminder notification clicked — bring the calendar view forward. */
+  'push:calendarFocus': Record<string, never>
+  /** New-mail notification clicked — bring the email view forward. */
+  'push:emailFocus': Record<string, never>
 }
 
 export type IpcPushChannel = keyof IpcPushContract
@@ -245,6 +431,7 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'intake:list',
   'intake:addPasted',
   'intake:fromUrl',
+  'browser:buildFromPage',
   'intake:dismiss',
   'intake:listFolders',
   'intake:createFolder',
@@ -258,6 +445,12 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'knowledge:setNotes',
   'knowledge:addFiles',
   'knowledge:removeFile',
+  'build:readiness',
+  'library:listUploads',
+  'library:removeUpload',
+  'master:getResume',
+  'master:setResume',
+  'master:removeResume',
   'todo:rescan',
   'runs:start',
   'runs:cancel',
@@ -288,18 +481,38 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'boards:removeCustom',
   'boards:setCustomEnabled',
   'boards:listCustom',
+  'glassdoor:searches',
+  'glassdoor:writeFeed',
+  'glassdoor:feedStatus',
+  'provider:setGeminiKey',
+  'provider:clearGeminiKey',
+  'provider:setOllamaKey',
+  'provider:clearOllamaKey',
+  'provider:status',
+  'provider:ollamaShow',
+  'provider:test',
   'app:info',
   'config:get',
   'env:check',
+  'env:setToolPath',
   'workspace:choose',
   'workspace:create',
+  'workspace:switch',
+  'workspace:reveal',
+  'app:relaunch',
+  'workspace:export',
+  'workspace:import',
   'app:pickFile',
   'profile:get',
   'profile:save',
   'profile:draft',
+  'profile:exportModule',
+  'profile:importModule',
+  'profile:applyModule',
   'onboard:start',
   'library:upload',
   'onboarding:complete',
+  'onboarding:reset',
   'app:showItem',
   'app:openFolder',
   'app:openExternal',
@@ -318,12 +531,20 @@ export const INVOKE_CHANNELS: IpcChannel[] = [
   'email:signOut',
   'email:list',
   'email:getBody',
+  'email:draftReply',
   'email:refresh',
   'email:applySuggestion',
   'email:dismissSuggestion',
   'email:update',
   'email:tags',
   'email:createTag',
+  'calendar:list',
+  'calendar:approve',
+  'calendar:dismiss',
+  'calendar:remove',
+  'calendar:add',
+  'calendar:update',
+  'calendar:propose',
   'assistant:send',
   'assistant:stop',
   'assistant:approve',
@@ -345,7 +566,10 @@ export const PUSH_CHANNELS: IpcPushChannel[] = [
   'push:assistantUsage',
   'push:assistantState',
   'push:assistantMessage',
-  'push:emailChanged'
+  'push:emailChanged',
+  'push:calendarChanged',
+  'push:calendarFocus',
+  'push:emailFocus'
 ]
 
 /** Build a local-file:// URL for a repo-relative path (PDF preview etc.). */
